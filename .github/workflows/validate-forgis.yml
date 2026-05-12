@@ -79,11 +79,12 @@ jobs:
           python agent/collect_source.py \
             --source "$GITHUB_WORKSPACE" \
             --output "$GITHUB_WORKSPACE/tmp/source_bundle.md" \
-            --max-files 20 \
-            --max-chars-per-file 4000
+            --manifest-output "$GITHUB_WORKSPACE/tmp/source_manifest.md"
 
           test -f "$GITHUB_WORKSPACE/tmp/source_bundle.md"
+          test -f "$GITHUB_WORKSPACE/tmp/source_manifest.md"
           grep -q "Forgis Source Bundle" "$GITHUB_WORKSPACE/tmp/source_bundle.md"
+          grep -q "Forgis Source Manifest" "$GITHUB_WORKSPACE/tmp/source_manifest.md"
 
       - name: Build generated migration prompt smoke test
         run: |

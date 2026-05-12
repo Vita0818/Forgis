@@ -146,6 +146,18 @@ Source path: {source}
 
 ---
 
+# Source Freshness Requirement
+
+The source repository has been freshly checked out and scanned for this run.
+
+Use the current source repository tree, source manifest, and source bundle as the source of truth.
+
+Do not rely on stale target repository code as a substitute for the current source repository.
+
+If the target repository contains older generated code, update it according to the current source state.
+
+---
+
 # Target Repository Tree
 
 Target path: {target}
