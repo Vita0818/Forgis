@@ -105,6 +105,20 @@ jobs:
             --target-branch "$TARGET_BRANCH" \
             --dry-run "$DRY_RUN"
 
+      - name: Build Forgis migration prompt
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/forgis-runtime"
+
+          python forgis/agent/build_prompt.py \
+            --source "$GITHUB_WORKSPACE/source-apple" \
+            --target "$GITHUB_WORKSPACE/target-output" \
+            --rules "$GITHUB_WORKSPACE/forgis/rules" \
+            --prompts "$GITHUB_WORKSPACE/forgis/prompts" \
+            --platform "$TARGET_PLATFORM" \
+            --output "$GITHUB_WORKSPACE/forgis-runtime/forgis_prompt.md"
+
+          test -f "$GITHUB_WORKSPACE/forgis-runtime/forgis_prompt.md"
+
       - name: Check shell scaffolds
         run: |
           bash -n forgis/agent/run_aider.sh
@@ -116,3 +130,9 @@ jobs:
         with:
           name: forgis-migration-report
           path: target-output/MIGRATION_REPORT.md
+
+      - name: Upload generated Forgis prompt
+        uses: actions/upload-artifact@v4
+        with:
+          name: forgis-generated-prompt
+          path: forgis-runtime/forgis_prompt.md
