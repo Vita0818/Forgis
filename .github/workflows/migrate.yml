@@ -188,8 +188,18 @@ jobs:
         run: |
           bash forgis/agent/build_target.sh
 
+      - name: Show target repository diff
+        if: always()
+        run: |
+          cd "$GITHUB_WORKSPACE/target-output"
+          echo "Git status:"
+          git status --short || true
+          echo "Git diff stat:"
+          git diff --stat || true
+
+
       - name: Create pull request
-        if: ${{ (inputs.run_ai == true || inputs.run_ai == 'true') && inputs.dry_run == false }}
+        if: ${{ (inputs.run_ai == true || inputs.run_ai == 'true') && (inputs.dry_run == false || inputs.dry_run == 'false') }}
         env:
           GH_TOKEN: ${{ secrets.FORGIS_GITHUB_TOKEN || github.token }}
           TARGET_REPO_DIR: ${{ github.workspace }}/target-output
