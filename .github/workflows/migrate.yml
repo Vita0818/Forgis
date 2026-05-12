@@ -85,10 +85,15 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Python dependencies
+      - name: Install Python dependencies and Aider
         run: |
           python -m pip install --upgrade pip
           pip install -r forgis/requirements.txt
+          pip install aider-chat
+
+      - name: Check Aider installation
+        run: |
+          aider --version
 
       - name: Run Forgis controller
         run: |
@@ -99,6 +104,12 @@ jobs:
             --platform "$TARGET_PLATFORM" \
             --target-branch "$TARGET_BRANCH" \
             --dry-run "$DRY_RUN"
+
+      - name: Check shell scaffolds
+        run: |
+          bash -n forgis/agent/run_aider.sh
+          bash -n forgis/agent/build_target.sh
+          bash -n forgis/agent/create_pr.sh
 
       - name: Upload migration report
         uses: actions/upload-artifact@v4
