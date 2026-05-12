@@ -119,6 +119,15 @@ jobs:
 
           test -f "$GITHUB_WORKSPACE/forgis-runtime/forgis_prompt.md"
 
+      - name: Run Aider with DeepSeek
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          TARGET_REPO_DIR: ${{ github.workspace }}/target-output
+          FORGIS_PROMPT_FILE: ${{ github.workspace }}/forgis-runtime/forgis_prompt.md
+          AIDER_MODEL: deepseek/deepseek-chat
+        run: |
+          bash forgis/agent/run_aider.sh
+
       - name: Check shell scaffolds
         run: |
           bash -n forgis/agent/run_aider.sh
