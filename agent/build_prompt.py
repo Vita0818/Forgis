@@ -108,6 +108,12 @@ Do not modify the source repository.
 
 ---
 
+# Translation Strategy
+
+{read_text(rules / "TRANSLATION_STRATEGY.md")}
+
+---
+
 # Generic Migration Prompt
 
 {read_text(prompts / "migrate_generic.md")}
