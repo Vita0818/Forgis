@@ -1,0 +1,76 @@
+name: Test DeepSeek API
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-deepseek:
+    name: Test DeepSeek API key
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check DeepSeek secret exists
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          test -n "$DEEPSEEK_API_KEY"
+          echo "DeepSeek secret is present."
+
+      - name: Call DeepSeek API safely
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          api_key = os.environ.get("DEEPSEEK_API_KEY")
+
+          if not api_key:
+              raise SystemExit("DEEPSEEK_API_KEY is missing.")
+
+          payload = {
+              "model": "deepseek-v4-flash",
+              "messages": [
+                  {
+                      "role": "system",
+                      "content": "You are a concise API connectivity tester."
+                  },
+                  {
+                      "role": "user",
+                      "content": "Reply with exactly: OK"
+                  }
+              ],
+              "stream": False
+          }
+
+          request = urllib.request.Request(
+              "https://api.deepseek.com/chat/completions",
+              data=json.dumps(payload).encode("utf-8"),
+              headers={
+                  "Content-Type": "application/json",
+                  "Authorization": f"Bearer {api_key}"
+              },
+              method="POST"
+          )
+
+          try:
+              with urllib.request.urlopen(request, timeout=60) as response:
+                  data = json.loads(response.read().decode("utf-8"))
+          except urllib.error.HTTPError as error:
+              body = error.read().decode("utf-8", errors="replace")
+              print("DeepSeek API request failed.")
+              print("HTTP status:", error.code)
+              print(body[:1000])
+              raise
+
+          reply = data["choices"][0]["message"]["content"]
+
+          print("DeepSeek API call succeeded.")
+          print("Reply:", reply[:200])
+          PY
