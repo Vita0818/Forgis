@@ -24,6 +24,7 @@ jobs:
           test -f requirements.txt
           test -f rules/PROJECT_BOUNDARY.md
           test -f rules/AGENTS.md
+          test -f rules/TRANSLATION_STRATEGY.md
           test -f rules/profiles/default.md
           test -f rules/profiles/local-first-app.md
           test -f rules/stacks/kotlin-compose.md

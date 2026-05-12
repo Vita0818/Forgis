@@ -56,3 +56,14 @@ The report should include:
 - Features skipped
 - Build status if available
 - Uncertainties or manual follow-up items
+
+
+## Translation-first requirement
+
+Forgis must translate from the current source repository rather than redesigning the product.
+
+The agent should preserve source behavior, source data model semantics, and source feature boundaries whenever the target platform allows it.
+
+The target repository may contain older generated output, but older generated output is not authoritative.
+
+The current source repository state is authoritative.

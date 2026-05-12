@@ -49,3 +49,11 @@ Required secret for DeepSeek:
 Optional secret for cross-repository write access:
 
 - `FORGIS_GITHUB_TOKEN`
+
+## Default AI model
+
+Forgis uses DeepSeek Pro by default.
+
+Current default Aider model:
+
+- `deepseek/deepseek-v4-pro`

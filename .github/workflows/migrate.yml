@@ -63,9 +63,9 @@ on:
         type: boolean
 
       aider_model:
-        description: "Aider model name"
+        description: "Aider model name. Use DeepSeek Pro by default."
         required: true
-        default: "deepseek/deepseek-chat"
+        default: "deepseek/deepseek-v4-pro"
         type: string
 
 permissions:
