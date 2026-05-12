@@ -138,13 +138,14 @@ jobs:
             --dry-run "$DRY_RUN" \
             --run-ai "$RUN_AI"
 
-      - name: Collect source bundle
+      - name: Collect source bundle and manifest
         run: |
           mkdir -p "$GITHUB_WORKSPACE/forgis-runtime"
 
           python forgis/agent/collect_source.py \
             --source "$GITHUB_WORKSPACE/source-repo" \
-            --output "$GITHUB_WORKSPACE/forgis-runtime/source_bundle.md"
+            --output "$GITHUB_WORKSPACE/forgis-runtime/source_bundle.md" \
+            --manifest-output "$GITHUB_WORKSPACE/forgis-runtime/source_manifest.md"
 
       - name: Build Forgis migration prompt
         run: |
@@ -211,6 +212,12 @@ jobs:
         with:
           name: forgis-source-bundle
           path: forgis-runtime/source_bundle.md
+
+      - name: Upload source manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: forgis-source-manifest
+          path: forgis-runtime/source_manifest.md
 
       - name: Upload generated Forgis prompt
         uses: actions/upload-artifact@v4
