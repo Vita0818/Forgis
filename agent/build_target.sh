@@ -35,6 +35,19 @@ case "$TARGET_PLATFORM" in
     echo "Skipping Windows build."
     ;;
 
+  harmonyos)
+    echo "HarmonyOS build is not enabled in the Forgis MVP."
+    echo "Skipping HarmonyOS build."
+    ;;
+
+  web)
+    if [[ -f "package.json" ]]; then
+      echo "Web project detected. Build is not enabled by default in the Forgis MVP."
+    else
+      echo "No package.json found. Skipping web build."
+    fi
+    ;;
+
   *)
     echo "Unsupported target platform: $TARGET_PLATFORM" >&2
     exit 1

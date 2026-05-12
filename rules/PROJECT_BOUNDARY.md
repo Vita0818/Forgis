@@ -7,7 +7,7 @@ Forgis must follow these boundaries strictly.
 Forgis may read only:
 
 - The Forgis repository itself
-- The selected Apple source repository
+- The selected source repository
 - The selected target output repository
 - Files explicitly checked out by GitHub Actions during the current workflow run
 
@@ -33,11 +33,11 @@ Forgis may write only:
 
 Forgis must not write:
 
-- The Apple source repository
+- The source repository
 - The target repository main branch directly
 - Any unrelated repository
 - Any credential, token, certificate, or private key file
 
 ## Default rule
 
-If a task requires access outside the declared Forgis repository, Apple source repository, and target output repository, Forgis must stop instead of guessing.
+If a task requires access outside the declared Forgis repository, source repository, and target output repository, Forgis must stop instead of guessing.

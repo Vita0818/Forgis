@@ -59,8 +59,11 @@ def write_report(
     source: Path,
     rules: Path,
     platform: str,
+    target_stack: str,
+    migration_profile: str,
     target_branch: str,
     dry_run: bool,
+    run_ai: bool,
     source_files: list[str],
 ) -> Path:
     now = datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
@@ -80,22 +83,21 @@ Generated at: {now}
 - Target repository path: {target}
 - Rules path: {rules}
 - Target platform: {platform}
+- Target stack: {target_stack}
+- Migration profile: {migration_profile}
 - Target branch: {target_branch}
 - Dry run: {dry_run}
+- Run AI: {run_ai}
 
 ## Status
 
 Forgis scaffold check completed successfully.
 
-No AI migration has been performed in this initialization run.
+This report was generated before any optional AI migration step.
 
 ## Source repository sample
 
 {file_list}
-
-## Next step
-
-After the GitHub Actions workflow is added, Forgis will be able to run this controller in the cloud.
 """
 
     report_path.write_text(report, encoding="utf-8")
@@ -105,12 +107,15 @@ After the GitHub Actions workflow is added, Forgis will be able to run this cont
 def main() -> None:
     parser = argparse.ArgumentParser(description="Forgis migration controller")
 
-    parser.add_argument("--source", required=True, help="Path to the checked-out Apple source repository")
+    parser.add_argument("--source", required=True, help="Path to the checked-out source repository")
     parser.add_argument("--target", required=True, help="Path to the checked-out target output repository")
     parser.add_argument("--rules", required=True, help="Path to the Forgis rules directory")
-    parser.add_argument("--platform", required=True, choices=["android", "windows"], help="Target platform")
+    parser.add_argument("--platform", required=True, help="Target platform")
+    parser.add_argument("--target-stack", required=True, help="Target technical stack")
+    parser.add_argument("--migration-profile", required=True, help="Migration profile name")
     parser.add_argument("--target-branch", required=True, help="Target migration branch")
     parser.add_argument("--dry-run", required=True, type=parse_bool, help="Whether to avoid pushing changes")
+    parser.add_argument("--run-ai", required=True, type=parse_bool, help="Whether AI migration is enabled")
 
     args = parser.parse_args()
 
@@ -128,8 +133,11 @@ def main() -> None:
         source=source,
         rules=rules,
         platform=args.platform,
+        target_stack=args.target_stack,
+        migration_profile=args.migration_profile,
         target_branch=args.target_branch,
         dry_run=args.dry_run,
+        run_ai=args.run_ai,
         source_files=source_files,
     )
 

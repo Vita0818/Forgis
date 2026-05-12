@@ -7,7 +7,7 @@ if [[ -z "${TARGET_REPO_DIR:-}" ]]; then
 fi
 
 if [[ -z "${TARGET_REPO:-}" ]]; then
-  echo "TARGET_REPO is required, for example Vita0818/Kikaria-Android." >&2
+  echo "TARGET_REPO is required, for example owner/target-repo." >&2
   exit 1
 fi
 
@@ -18,6 +18,11 @@ fi
 
 if [[ -z "${TARGET_PLATFORM:-}" ]]; then
   echo "TARGET_PLATFORM is required." >&2
+  exit 1
+fi
+
+if [[ -z "${TARGET_STACK:-}" ]]; then
+  echo "TARGET_STACK is required." >&2
   exit 1
 fi
 
@@ -46,7 +51,7 @@ if git diff --quiet && git diff --cached --quiet; then
 fi
 
 git add .
-git commit -m "Forgis: sync Apple source to $TARGET_PLATFORM"
+git commit -m "Forgis: sync source to $TARGET_PLATFORM using $TARGET_STACK"
 
 if [[ "$DRY_RUN" == "true" ]]; then
   echo "Dry run enabled. Skipping push and pull request creation."
@@ -65,6 +70,6 @@ else
     --repo "$TARGET_REPO" \
     --base main \
     --head "$TARGET_BRANCH" \
-    --title "Forgis sync: Apple to $TARGET_PLATFORM" \
+    --title "Forgis sync: source to $TARGET_PLATFORM" \
     --body-file MIGRATION_REPORT.md
 fi

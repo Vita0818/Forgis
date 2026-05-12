@@ -47,11 +47,14 @@ def collect_tree(root: Path, max_files: int = 200) -> list[str]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build a Forgis migration prompt")
 
-    parser.add_argument("--source", required=True, help="Path to the checked-out Apple source repository")
+    parser.add_argument("--source", required=True, help="Path to the checked-out source repository")
     parser.add_argument("--target", required=True, help="Path to the checked-out target output repository")
     parser.add_argument("--rules", required=True, help="Path to Forgis rules directory")
     parser.add_argument("--prompts", required=True, help="Path to Forgis prompts directory")
-    parser.add_argument("--platform", required=True, choices=["android", "windows"], help="Target platform")
+    parser.add_argument("--platform", required=True, help="Target platform")
+    parser.add_argument("--target-stack", required=True, help="Target technical stack")
+    parser.add_argument("--migration-profile", required=True, help="Migration profile name")
+    parser.add_argument("--source-bundle", required=False, help="Optional source bundle markdown file")
     parser.add_argument("--output", required=True, help="Path to the generated prompt file")
 
     args = parser.parse_args()
@@ -62,8 +65,6 @@ def main() -> None:
     prompts = Path(args.prompts).resolve()
     output = Path(args.output).resolve()
 
-    platform_prompt_name = f"migrate_{args.platform}.md"
-
     source_tree = collect_tree(source)
     target_tree = collect_tree(target)
 
@@ -72,19 +73,26 @@ def main() -> None:
 
     now = datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
+    source_bundle_text = ""
+    if args.source_bundle:
+        source_bundle_path = Path(args.source_bundle).resolve()
+        source_bundle_text = read_text(source_bundle_path)
+
     content = f"""# Forgis Generated Migration Task
 
 Generated at: {now}
 
-You are running inside Forgis, a cloud-based migration system.
+You are running inside Forgis, a generic cloud-based migration system.
 
 ## Current task
 
 Target platform: {args.platform}
+Target stack: {args.target_stack}
+Migration profile: {args.migration_profile}
 
-Read the Apple source repository information below and update only the target repository.
+Read the source repository information below and update only the target repository.
 
-Do not modify the Apple source repository.
+Do not modify the source repository.
 
 ---
 
@@ -100,17 +108,41 @@ Do not modify the Apple source repository.
 
 ---
 
-# Platform Migration Prompt
+# Generic Migration Prompt
 
-{read_text(prompts / platform_prompt_name)}
+{read_text(prompts / "migrate_generic.md")}
 
 ---
 
-# Apple Source Repository Tree
+# Platform Prompt
+
+{read_text(prompts / "platforms" / f"{args.platform}.md")}
+
+---
+
+# Target Stack Rules
+
+{read_text(rules / "stacks" / f"{args.target_stack}.md")}
+
+---
+
+# Migration Profile
+
+{read_text(rules / "profiles" / f"{args.migration_profile}.md")}
+
+---
+
+# Source Repository Tree
 
 Source path: {source}
 
 {source_tree_text}
+
+---
+
+# Source Bundle
+
+{source_bundle_text if source_bundle_text else "[No source bundle provided.]"}
 
 ---
 
@@ -124,7 +156,7 @@ Target path: {target}
 
 # Required Output
 
-Update the target repository according to the platform migration prompt.
+Update the target repository according to the selected platform, stack, and migration profile.
 
 Always create or update MIGRATION_REPORT.md.
 

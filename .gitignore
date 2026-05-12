@@ -11,11 +11,10 @@ venv/
 # Logs
 *.log
 
-# Generated reports
+# Generated reports and runtime files
 reports/
 !reports/.gitkeep
-
-# Temporary files
+forgis-runtime/
 tmp/
 temp/
 

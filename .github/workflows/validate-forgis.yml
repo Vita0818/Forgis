@@ -24,9 +24,19 @@ jobs:
           test -f requirements.txt
           test -f rules/PROJECT_BOUNDARY.md
           test -f rules/AGENTS.md
-          test -f prompts/migrate_android.md
-          test -f prompts/migrate_windows.md
+          test -f rules/profiles/default.md
+          test -f rules/profiles/local-first-app.md
+          test -f rules/stacks/kotlin-compose.md
+          test -f rules/stacks/csharp-avalonia.md
+          test -f rules/stacks/arkts.md
+          test -f rules/stacks/web-react.md
+          test -f prompts/migrate_generic.md
+          test -f prompts/platforms/android.md
+          test -f prompts/platforms/windows.md
+          test -f prompts/platforms/harmonyos.md
+          test -f prompts/platforms/web.md
           test -f agent/forge.py
+          test -f agent/collect_source.py
           test -f agent/build_prompt.py
           test -f agent/run_aider.sh
           test -f agent/build_target.sh
@@ -41,6 +51,7 @@ jobs:
       - name: Check Python syntax
         run: |
           python -m py_compile agent/forge.py
+          python -m py_compile agent/collect_source.py
           python -m py_compile agent/build_prompt.py
 
       - name: Check shell script syntax
@@ -56,8 +67,23 @@ jobs:
             --target "$GITHUB_WORKSPACE" \
             --rules "$GITHUB_WORKSPACE/rules" \
             --platform android \
-            --target-branch forgis/android-from-apple \
-            --dry-run true
+            --target-stack kotlin-compose \
+            --migration-profile default \
+            --target-branch forgis/android-from-source \
+            --dry-run true \
+            --run-ai false
+
+      - name: Collect source smoke test
+        run: |
+          mkdir -p tmp
+          python agent/collect_source.py \
+            --source "$GITHUB_WORKSPACE" \
+            --output "$GITHUB_WORKSPACE/tmp/source_bundle.md" \
+            --max-files 20 \
+            --max-chars-per-file 4000
+
+          test -f "$GITHUB_WORKSPACE/tmp/source_bundle.md"
+          grep -q "Forgis Source Bundle" "$GITHUB_WORKSPACE/tmp/source_bundle.md"
 
       - name: Build generated migration prompt smoke test
         run: |
@@ -68,9 +94,14 @@ jobs:
             --rules "$GITHUB_WORKSPACE/rules" \
             --prompts "$GITHUB_WORKSPACE/prompts" \
             --platform android \
+            --target-stack kotlin-compose \
+            --migration-profile default \
+            --source-bundle "$GITHUB_WORKSPACE/tmp/source_bundle.md" \
             --output "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
 
           test -f "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
           grep -q "Forgis Generated Migration Task" "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
           grep -q "Project Boundary" "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
-          grep -q "Apple Source Repository Tree" "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
+          grep -q "Target stack: kotlin-compose" "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
+          grep -q "Migration profile: default" "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
+          grep -q "Source Bundle" "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"

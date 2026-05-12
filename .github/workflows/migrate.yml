@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       source_repo:
-        description: "Apple source repository, for example Vita0818/Kikaria-Apple"
+        description: "Source repository, for example owner/apple-source-repo"
         required: true
         default: "Vita0818/Forgis"
         type: string
@@ -16,7 +16,7 @@ on:
         type: string
 
       target_repo:
-        description: "Target output repository, for example Vita0818/Kikaria-Android"
+        description: "Target output repository, for example owner/target-output-repo"
         required: true
         default: "Vita0818/Forgis"
         type: string
@@ -29,25 +29,51 @@ on:
         options:
           - android
           - windows
+          - harmonyos
+          - web
+
+      target_stack:
+        description: "Target technical stack, for example kotlin-compose, csharp-avalonia, arkts, web-react"
+        required: true
+        default: "kotlin-compose"
+        type: string
+
+      migration_profile:
+        description: "Migration profile, for example default or local-first-app"
+        required: true
+        default: "default"
+        type: string
 
       target_branch:
         description: "Target migration branch"
         required: true
-        default: "forgis/android-from-apple"
+        default: "forgis/android-from-source"
         type: string
 
       dry_run:
-        description: "Run without pushing changes"
+        description: "Run without pushing changes or creating pull requests"
         required: true
         default: true
         type: boolean
+
+      run_ai:
+        description: "Actually run Aider with the configured AI model"
+        required: true
+        default: false
+        type: boolean
+
+      aider_model:
+        description: "Aider model name"
+        required: true
+        default: "deepseek/deepseek-chat"
+        type: string
 
 permissions:
   contents: read
 
 jobs:
   scaffold:
-    name: Run Forgis scaffold check
+    name: Run Forgis migration scaffold
     runs-on: ubuntu-latest
 
     env:
@@ -55,8 +81,12 @@ jobs:
       SOURCE_REF: ${{ inputs.source_ref }}
       TARGET_REPO: ${{ inputs.target_repo }}
       TARGET_PLATFORM: ${{ inputs.target_platform }}
+      TARGET_STACK: ${{ inputs.target_stack }}
+      MIGRATION_PROFILE: ${{ inputs.migration_profile }}
       TARGET_BRANCH: ${{ inputs.target_branch }}
       DRY_RUN: ${{ inputs.dry_run }}
+      RUN_AI: ${{ inputs.run_ai }}
+      AIDER_MODEL: ${{ inputs.aider_model }}
 
     steps:
       - name: Checkout Forgis
@@ -70,7 +100,7 @@ jobs:
           repository: ${{ env.SOURCE_REPO }}
           ref: ${{ env.SOURCE_REF }}
           token: ${{ secrets.FORGIS_GITHUB_TOKEN || github.token }}
-          path: source-apple
+          path: source-repo
 
       - name: Checkout target repository
         uses: actions/checkout@v4
@@ -98,35 +128,40 @@ jobs:
       - name: Run Forgis controller
         run: |
           python forgis/agent/forge.py \
-            --source "$GITHUB_WORKSPACE/source-apple" \
+            --source "$GITHUB_WORKSPACE/source-repo" \
             --target "$GITHUB_WORKSPACE/target-output" \
             --rules "$GITHUB_WORKSPACE/forgis/rules" \
             --platform "$TARGET_PLATFORM" \
+            --target-stack "$TARGET_STACK" \
+            --migration-profile "$MIGRATION_PROFILE" \
             --target-branch "$TARGET_BRANCH" \
-            --dry-run "$DRY_RUN"
+            --dry-run "$DRY_RUN" \
+            --run-ai "$RUN_AI"
+
+      - name: Collect source bundle
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/forgis-runtime"
+
+          python forgis/agent/collect_source.py \
+            --source "$GITHUB_WORKSPACE/source-repo" \
+            --output "$GITHUB_WORKSPACE/forgis-runtime/source_bundle.md"
 
       - name: Build Forgis migration prompt
         run: |
           mkdir -p "$GITHUB_WORKSPACE/forgis-runtime"
 
           python forgis/agent/build_prompt.py \
-            --source "$GITHUB_WORKSPACE/source-apple" \
+            --source "$GITHUB_WORKSPACE/source-repo" \
             --target "$GITHUB_WORKSPACE/target-output" \
             --rules "$GITHUB_WORKSPACE/forgis/rules" \
             --prompts "$GITHUB_WORKSPACE/forgis/prompts" \
             --platform "$TARGET_PLATFORM" \
+            --target-stack "$TARGET_STACK" \
+            --migration-profile "$MIGRATION_PROFILE" \
+            --source-bundle "$GITHUB_WORKSPACE/forgis-runtime/source_bundle.md" \
             --output "$GITHUB_WORKSPACE/forgis-runtime/forgis_prompt.md"
 
           test -f "$GITHUB_WORKSPACE/forgis-runtime/forgis_prompt.md"
-
-      - name: Run Aider with DeepSeek
-        env:
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          TARGET_REPO_DIR: ${{ github.workspace }}/target-output
-          FORGIS_PROMPT_FILE: ${{ github.workspace }}/forgis-runtime/forgis_prompt.md
-          AIDER_MODEL: deepseek/deepseek-chat
-        run: |
-          bash forgis/agent/run_aider.sh
 
       - name: Check shell scaffolds
         run: |
@@ -134,11 +169,48 @@ jobs:
           bash -n forgis/agent/build_target.sh
           bash -n forgis/agent/create_pr.sh
 
+      - name: Run Aider with configured model
+        if: ${{ inputs.run_ai == true || inputs.run_ai == 'true' }}
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          TARGET_REPO_DIR: ${{ github.workspace }}/target-output
+          FORGIS_PROMPT_FILE: ${{ github.workspace }}/forgis-runtime/forgis_prompt.md
+          AIDER_MODEL: ${{ inputs.aider_model }}
+        run: |
+          bash forgis/agent/run_aider.sh
+
+      - name: Build target repository
+        if: ${{ inputs.run_ai == true || inputs.run_ai == 'true' }}
+        env:
+          TARGET_REPO_DIR: ${{ github.workspace }}/target-output
+          TARGET_PLATFORM: ${{ inputs.target_platform }}
+        run: |
+          bash forgis/agent/build_target.sh
+
+      - name: Create pull request
+        if: ${{ (inputs.run_ai == true || inputs.run_ai == 'true') && inputs.dry_run == false }}
+        env:
+          GH_TOKEN: ${{ secrets.FORGIS_GITHUB_TOKEN || github.token }}
+          TARGET_REPO_DIR: ${{ github.workspace }}/target-output
+          TARGET_REPO: ${{ inputs.target_repo }}
+          TARGET_BRANCH: ${{ inputs.target_branch }}
+          TARGET_PLATFORM: ${{ inputs.target_platform }}
+          TARGET_STACK: ${{ inputs.target_stack }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          bash forgis/agent/create_pr.sh
+
       - name: Upload migration report
         uses: actions/upload-artifact@v4
         with:
           name: forgis-migration-report
           path: target-output/MIGRATION_REPORT.md
+
+      - name: Upload source bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: forgis-source-bundle
+          path: forgis-runtime/source_bundle.md
 
       - name: Upload generated Forgis prompt
         uses: actions/upload-artifact@v4

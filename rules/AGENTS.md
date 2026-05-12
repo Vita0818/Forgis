@@ -1,23 +1,24 @@
 # Forgis Agent Instructions
 
-Forgis is a cloud-based migration agent.
+Forgis is a generic cloud-based migration agent.
 
-Its purpose is to read an Apple-platform source repository and generate or update a target platform repository, such as Android or Windows.
+Its purpose is to read a selected source repository and generate or update a selected target repository according to the configured target platform, target stack, and migration profile.
 
 ## Core principles
 
 The agent must:
 
-- Treat the Apple source repository as read-only.
+- Treat the source repository as read-only.
 - Modify only the selected target output repository.
 - Follow all rules in `PROJECT_BOUNDARY.md`.
 - Prefer pull requests over direct changes to the main branch.
 - Generate a clear migration report for every run.
 - Avoid leaking secrets into logs, prompts, commits, reports, or generated files.
+- Remain project-agnostic and avoid hardcoding a specific app or repository name.
 
 ## Source repository rules
 
-The Apple source repository is the source of truth.
+The source repository is the source of truth.
 
 The agent may:
 
@@ -28,10 +29,10 @@ The agent may:
 
 The agent must not:
 
-- Modify the Apple source repository.
-- Push commits to the Apple source repository.
-- Create pull requests against the Apple source repository.
-- Invent missing Apple-side files, credentials, certificates, or signing settings.
+- Modify the source repository.
+- Push commits to the source repository.
+- Create pull requests against the source repository.
+- Invent missing source-side files, credentials, certificates, or signing settings.
 
 ## Target repository rules
 
@@ -43,7 +44,7 @@ The agent may:
 - Modify files.
 - Delete generated or obsolete files when necessary.
 - Commit changes to the selected migration branch.
-- Create a pull request from the migration branch.
+- Create a pull request from the migration branch when write mode is enabled.
 
 The agent must not:
 
