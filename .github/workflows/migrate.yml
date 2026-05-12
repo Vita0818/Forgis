@@ -217,3 +217,9 @@ jobs:
         with:
           name: forgis-generated-prompt
           path: forgis-runtime/forgis_prompt.md
+
+      - name: Upload target output snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: forgis-target-output
+          path: target-output
