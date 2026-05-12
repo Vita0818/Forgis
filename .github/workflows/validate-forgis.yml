@@ -27,6 +27,7 @@ jobs:
           test -f prompts/migrate_android.md
           test -f prompts/migrate_windows.md
           test -f agent/forge.py
+          test -f agent/build_prompt.py
           test -f agent/run_aider.sh
           test -f agent/build_target.sh
           test -f agent/create_pr.sh
@@ -40,6 +41,7 @@ jobs:
       - name: Check Python syntax
         run: |
           python -m py_compile agent/forge.py
+          python -m py_compile agent/build_prompt.py
 
       - name: Check shell script syntax
         run: |
@@ -56,3 +58,19 @@ jobs:
             --platform android \
             --target-branch forgis/android-from-apple \
             --dry-run true
+
+      - name: Build generated migration prompt smoke test
+        run: |
+          mkdir -p tmp
+          python agent/build_prompt.py \
+            --source "$GITHUB_WORKSPACE" \
+            --target "$GITHUB_WORKSPACE" \
+            --rules "$GITHUB_WORKSPACE/rules" \
+            --prompts "$GITHUB_WORKSPACE/prompts" \
+            --platform android \
+            --output "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
+
+          test -f "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
+          grep -q "Forgis Generated Migration Task" "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
+          grep -q "Project Boundary" "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
+          grep -q "Apple Source Repository Tree" "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
