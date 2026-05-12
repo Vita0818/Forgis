@@ -1,0 +1,58 @@
+name: Validate Forgis
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate Forgis scripts
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Forgis
+        uses: actions/checkout@v4
+
+      - name: Check required files
+        run: |
+          test -f README.md
+          test -f requirements.txt
+          test -f rules/PROJECT_BOUNDARY.md
+          test -f rules/AGENTS.md
+          test -f prompts/migrate_android.md
+          test -f prompts/migrate_windows.md
+          test -f agent/forge.py
+          test -f agent/run_aider.sh
+          test -f agent/build_target.sh
+          test -f agent/create_pr.sh
+          test -f .github/workflows/migrate.yml
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check Python syntax
+        run: |
+          python -m py_compile agent/forge.py
+
+      - name: Check shell script syntax
+        run: |
+          bash -n agent/run_aider.sh
+          bash -n agent/build_target.sh
+          bash -n agent/create_pr.sh
+
+      - name: Run Forgis controller smoke test
+        run: |
+          python agent/forge.py \
+            --source "$GITHUB_WORKSPACE" \
+            --target "$GITHUB_WORKSPACE" \
+            --rules "$GITHUB_WORKSPACE/rules" \
+            --platform android \
+            --target-branch forgis/android-from-apple \
+            --dry-run true
