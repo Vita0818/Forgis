@@ -99,14 +99,14 @@ jobs:
         with:
           repository: ${{ env.SOURCE_REPO }}
           ref: ${{ env.SOURCE_REF }}
-          token: ${{ secrets.FORGIS_GITHUB_TOKEN || github.token }}
+          token: ${{ secrets.FORGIS_SOURCE_TOKEN }}
           path: source-repo
 
       - name: Checkout target repository
         uses: actions/checkout@v4
         with:
           repository: ${{ env.TARGET_REPO }}
-          token: ${{ secrets.FORGIS_GITHUB_TOKEN || github.token }}
+          token: ${{ secrets.FORGIS_TARGET_TOKEN }}
           path: target-output
           fetch-depth: 0
 
@@ -201,7 +201,7 @@ jobs:
       - name: Create pull request
         if: ${{ (inputs.run_ai == true || inputs.run_ai == 'true') && (inputs.dry_run == false || inputs.dry_run == 'false') }}
         env:
-          GH_TOKEN: ${{ secrets.FORGIS_GITHUB_TOKEN || github.token }}
+          GH_TOKEN: ${{ secrets.FORGIS_TARGET_TOKEN }}
           TARGET_REPO_DIR: ${{ github.workspace }}/target-output
           TARGET_REPO: ${{ inputs.target_repo }}
           TARGET_BRANCH: ${{ inputs.target_branch }}
