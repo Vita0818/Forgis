@@ -1,0 +1,29 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# Logs
+*.log
+
+# Generated reports
+reports/
+!reports/.gitkeep
+
+# Temporary files
+tmp/
+temp/
+
+# Secrets and credentials
+*.pem
+*.key
+*.p12
+*.mobileprovision
+*.cer
+*.crt
+secrets/
