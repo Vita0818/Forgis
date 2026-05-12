@@ -1,0 +1,107 @@
+name: Forgis Migration Scaffold
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_repo:
+        description: "Apple source repository, for example Vita0818/Kikaria-Apple"
+        required: true
+        default: "Vita0818/Forgis"
+        type: string
+
+      source_ref:
+        description: "Source branch, tag, or commit"
+        required: true
+        default: "main"
+        type: string
+
+      target_repo:
+        description: "Target output repository, for example Vita0818/Kikaria-Android"
+        required: true
+        default: "Vita0818/Forgis"
+        type: string
+
+      target_platform:
+        description: "Target platform"
+        required: true
+        default: "android"
+        type: choice
+        options:
+          - android
+          - windows
+
+      target_branch:
+        description: "Target migration branch"
+        required: true
+        default: "forgis/android-from-apple"
+        type: string
+
+      dry_run:
+        description: "Run without pushing changes"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  scaffold:
+    name: Run Forgis scaffold check
+    runs-on: ubuntu-latest
+
+    env:
+      SOURCE_REPO: ${{ inputs.source_repo }}
+      SOURCE_REF: ${{ inputs.source_ref }}
+      TARGET_REPO: ${{ inputs.target_repo }}
+      TARGET_PLATFORM: ${{ inputs.target_platform }}
+      TARGET_BRANCH: ${{ inputs.target_branch }}
+      DRY_RUN: ${{ inputs.dry_run }}
+
+    steps:
+      - name: Checkout Forgis
+        uses: actions/checkout@v4
+        with:
+          path: forgis
+
+      - name: Checkout source repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: ${{ env.SOURCE_REF }}
+          token: ${{ secrets.FORGIS_GITHUB_TOKEN || github.token }}
+          path: source-apple
+
+      - name: Checkout target repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.TARGET_REPO }}
+          token: ${{ secrets.FORGIS_GITHUB_TOKEN || github.token }}
+          path: target-output
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r forgis/requirements.txt
+
+      - name: Run Forgis controller
+        run: |
+          python forgis/agent/forge.py \
+            --source "$GITHUB_WORKSPACE/source-apple" \
+            --target "$GITHUB_WORKSPACE/target-output" \
+            --rules "$GITHUB_WORKSPACE/forgis/rules" \
+            --platform "$TARGET_PLATFORM" \
+            --target-branch "$TARGET_BRANCH" \
+            --dry-run "$DRY_RUN"
+
+      - name: Upload migration report
+        uses: actions/upload-artifact@v4
+        with:
+          name: forgis-migration-report
+          path: target-output/MIGRATION_REPORT.md
