@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import hashlib
 import sys
 from pathlib import Path
 
@@ -19,6 +20,10 @@ def read_text(path: Path) -> str:
     if not path.exists():
         return f"\n[Missing file: {path}]\n"
     return path.read_text(encoding="utf-8", errors="replace")
+
+
+def sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def resolve_inside_root(root: Path, relative_path: str, label: str, allow_root: bool = False) -> tuple[Path, str]:
@@ -276,6 +281,9 @@ def main() -> None:
     if GREETING_EXAMPLE in target_prompt_text.casefold():
         raise ValueError("Target repository task prompt contains the forbidden greeting example prompt.")
 
+    task_prompt_sha256 = sha256_text(target_prompt_text)
+    print(f"  task prompt sha256: {task_prompt_sha256}")
+
     content = f"""# Forgis Generated Migration Task
 
 Generated at: {now}
@@ -377,6 +385,8 @@ This section is loaded from the target repository root.
 Default file: FORGIS_TASK.md
 
 Loaded file: {target_prompt_relative}
+
+Task prompt sha256: {task_prompt_sha256}
 
 It is the human instruction for the current Forgis run.
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import subprocess
 import sys
 import tempfile
@@ -53,6 +54,19 @@ class ForgisConfigTests(unittest.TestCase):
         )
         (target / "FORGIS_TASK.md").write_text("Build the Android target project.", encoding="utf-8")
 
+    def prompt_with_task(self, task_text: str, extra_lines: list[str] | None = None) -> str:
+        task_hash = hashlib.sha256(task_text.encode("utf-8")).hexdigest()
+        lines = [
+            "# Forgis Generated Migration Task",
+            "Loaded file: FORGIS_TASK.md",
+            f"Task prompt sha256: {task_hash}",
+            "",
+            task_text,
+        ]
+        if extra_lines:
+            lines.extend(extra_lines)
+        return "\n".join(lines)
+
     def test_reads_target_repo_config_and_defaults_log_path(self) -> None:
         with self.make_temp_target() as dirname:
             target = Path(dirname)
@@ -92,6 +106,50 @@ class ForgisConfigTests(unittest.TestCase):
             self.assertTrue(resolved.run_aider_config)
             self.assertFalse(resolved.run_aider)
             self.assertFalse(resolved.real_run_allowed)
+
+    def test_config_parses_prompt_markers_and_exports_json(self) -> None:
+        with self.make_temp_target() as dirname:
+            target = Path(dirname)
+            self.write_default_config(target)
+            with (target / "FORGIS_CONFIG.yml").open("a", encoding="utf-8") as file:
+                file.write("required_prompt_markers:\n")
+                file.write("  - Kikaria Android Migration Task\n")
+                file.write("  - Kikaria-Android\n")
+                file.write("forbidden_prompt_markers:\n")
+                file.write("  - Deprecated fallback prompt\n")
+
+            resolved = resolve_config(
+                target_root=target,
+                target_repo="Vita0818/Outposts",
+                config_path="FORGIS_CONFIG.yml",
+                explicit_inputs={},
+            )
+
+            self.assertEqual(
+                resolved.required_prompt_markers,
+                ("Kikaria Android Migration Task", "Kikaria-Android"),
+            )
+            self.assertIn("make the greeting more casual", resolved.forbidden_prompt_markers)
+            self.assertIn("Deprecated fallback prompt", resolved.forbidden_prompt_markers)
+            self.assertIn(
+                '"Kikaria Android Migration Task"',
+                resolved.env()["REQUIRED_PROMPT_MARKERS_JSON"],
+            )
+
+    def test_prompt_marker_fields_must_be_lists(self) -> None:
+        with self.make_temp_target() as dirname:
+            target = Path(dirname)
+            self.write_default_config(target)
+            with (target / "FORGIS_CONFIG.yml").open("a", encoding="utf-8") as file:
+                file.write("required_prompt_markers: Kikaria Android Migration Task\n")
+
+            with self.assertRaisesRegex(ValueError, "required_prompt_markers must be a YAML list"):
+                resolve_config(
+                    target_root=target,
+                    target_repo="Vita0818/Outposts",
+                    config_path="FORGIS_CONFIG.yml",
+                    explicit_inputs={},
+                )
 
     def test_dry_run_false_requires_confirm_real_run(self) -> None:
         with self.make_temp_target() as dirname:
@@ -279,6 +337,7 @@ class ForgisConfigTests(unittest.TestCase):
 
             prompt = output.read_text(encoding="utf-8")
             self.assertIn("Build the Android target project.", prompt)
+            self.assertIn("Task prompt sha256:", prompt)
             self.assertIn("Source repository: Vita0818/Kikaria", prompt)
             self.assertIn("Target repository: Vita0818/Outposts", prompt)
             self.assertIn("Target output directory relative to target repository root: Kikaria-Android", prompt)
@@ -326,25 +385,14 @@ class ForgisConfigTests(unittest.TestCase):
             with self.assertRaises(subprocess.CalledProcessError):
                 subprocess.run(base_command, cwd=REPO_ROOT, check=True, text=True)
 
-    def test_prompt_diagnostics_requires_kikaria_task_and_blocks_stale_greeting(self) -> None:
+    def test_prompt_diagnostics_accepts_generic_prompt_without_required_markers(self) -> None:
         with self.make_temp_target() as dirname:
             target = Path(dirname)
             task = target / "FORGIS_TASK.md"
-            task.write_text("# Kikaria Android Migration Task\n\nBuild the target.", encoding="utf-8")
+            task_text = "# Forgis Validation Smoke Task\n\nBuild the target."
+            task.write_text(task_text, encoding="utf-8")
             prompt = target / "forgis_prompt.md"
-            prompt.write_text(
-                "\n".join(
-                    [
-                        "# Forgis Generated Migration Task",
-                        "Source repository: Vita0818/Kikaria",
-                        "Target repository: Vita0818/Outposts",
-                        "Loaded file: FORGIS_TASK.md",
-                        "Target output directory relative to target repository root: Kikaria-Android",
-                        "# Kikaria Android Migration Task",
-                    ]
-                ),
-                encoding="utf-8",
-            )
+            prompt.write_text(self.prompt_with_task(task_text), encoding="utf-8")
 
             subprocess.run(
                 [
@@ -358,12 +406,6 @@ class ForgisConfigTests(unittest.TestCase):
                     str(task),
                     "--task-prompt-path",
                     "FORGIS_TASK.md",
-                    "--source-repo",
-                    "Vita0818/Kikaria",
-                    "--target-repo",
-                    "Vita0818/Outposts",
-                    "--target-subdir",
-                    "Kikaria-Android",
                     "--expected-same-as",
                     str(prompt),
                 ],
@@ -372,7 +414,33 @@ class ForgisConfigTests(unittest.TestCase):
                 text=True,
             )
 
-            prompt.write_text(prompt.read_text(encoding="utf-8") + "\nmake the greeting more casual\n", encoding="utf-8")
+    def test_prompt_diagnostics_required_markers_are_configurable(self) -> None:
+        with self.make_temp_target() as dirname:
+            target = Path(dirname)
+            task = target / "FORGIS_TASK.md"
+            task_text = "# Forgis Validation Smoke Task\n\nBuild the target."
+            task.write_text(task_text, encoding="utf-8")
+            prompt = target / "forgis_prompt.md"
+            prompt.write_text(self.prompt_with_task(task_text), encoding="utf-8")
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(AGENT_DIR / "prompt_diagnostics.py"),
+                    "--file",
+                    str(prompt),
+                    "--task-prompt-file",
+                    str(task),
+                    "--task-prompt-path",
+                    "FORGIS_TASK.md",
+                    "--required-marker",
+                    "Forgis Validation Smoke Task",
+                ],
+                cwd=REPO_ROOT,
+                check=True,
+                text=True,
+            )
+
             with self.assertRaises(subprocess.CalledProcessError):
                 subprocess.run(
                     [
@@ -382,17 +450,112 @@ class ForgisConfigTests(unittest.TestCase):
                         str(prompt),
                         "--task-prompt-file",
                         str(task),
-                        "--source-repo",
-                        "Vita0818/Kikaria",
-                        "--target-repo",
-                        "Vita0818/Outposts",
-                        "--target-subdir",
-                        "Kikaria-Android",
+                        "--task-prompt-path",
+                        "FORGIS_TASK.md",
+                        "--required-marker",
+                        "Missing Marker",
                     ],
                     cwd=REPO_ROOT,
                     check=True,
                     text=True,
                 )
+
+    def test_prompt_diagnostics_blocks_default_forbidden_greeting_marker(self) -> None:
+        with self.make_temp_target() as dirname:
+            target = Path(dirname)
+            task = target / "FORGIS_TASK.md"
+            task_text = "# Forgis Validation Smoke Task\n\nBuild the target."
+            task.write_text(task_text, encoding="utf-8")
+            prompt = target / "forgis_prompt.md"
+            prompt.write_text(
+                self.prompt_with_task(
+                    task_text,
+                    ["make the greeting more casual"],
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(subprocess.CalledProcessError):
+                subprocess.run(
+                    [
+                        sys.executable,
+                        str(AGENT_DIR / "prompt_diagnostics.py"),
+                        "--file",
+                        str(prompt),
+                        "--task-prompt-file",
+                        str(task),
+                        "--task-prompt-path",
+                        "FORGIS_TASK.md",
+                    ],
+                    cwd=REPO_ROOT,
+                    check=True,
+                    text=True,
+                )
+
+    def test_prompt_diagnostics_requires_message_file_to_match_final_prompt_hash(self) -> None:
+        with self.make_temp_target() as dirname:
+            target = Path(dirname)
+            task = target / "FORGIS_TASK.md"
+            task_text = "# Forgis Validation Smoke Task\n\nBuild the target."
+            task.write_text(task_text, encoding="utf-8")
+            final_prompt = target / "forgis_prompt.md"
+            message_file = target / "aider_message.md"
+            final_prompt.write_text(self.prompt_with_task(task_text), encoding="utf-8")
+            message_file.write_text(self.prompt_with_task(task_text, ["Different message body."]), encoding="utf-8")
+
+            with self.assertRaises(subprocess.CalledProcessError):
+                subprocess.run(
+                    [
+                        sys.executable,
+                        str(AGENT_DIR / "prompt_diagnostics.py"),
+                        "--file",
+                        str(message_file),
+                        "--task-prompt-file",
+                        str(task),
+                        "--task-prompt-path",
+                        "FORGIS_TASK.md",
+                        "--expected-same-as",
+                        str(final_prompt),
+                    ],
+                    cwd=REPO_ROOT,
+                    check=True,
+                    text=True,
+                )
+
+    def test_prompt_diagnostics_requires_task_prompt_hash_marker(self) -> None:
+        with self.make_temp_target() as dirname:
+            target = Path(dirname)
+            task = target / "FORGIS_TASK.md"
+            task_text = "# Forgis Validation Smoke Task\n\nBuild the target."
+            task.write_text(task_text, encoding="utf-8")
+            prompt = target / "forgis_prompt.md"
+            prompt.write_text(
+                "# Forgis Generated Migration Task\nLoaded file: FORGIS_TASK.md\n# Forgis Validation Smoke Task\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(subprocess.CalledProcessError):
+                subprocess.run(
+                    [
+                        sys.executable,
+                        str(AGENT_DIR / "prompt_diagnostics.py"),
+                        "--file",
+                        str(prompt),
+                        "--task-prompt-file",
+                        str(task),
+                        "--task-prompt-path",
+                        "FORGIS_TASK.md",
+                    ],
+                    cwd=REPO_ROOT,
+                    check=True,
+                    text=True,
+                )
+
+    def test_validate_workflow_uses_generic_validation_marker_not_kikaria(self) -> None:
+        workflow_text = (REPO_ROOT / ".github/workflows/validate-forgis.yml").read_text(encoding="utf-8")
+
+        self.assertIn("Forgis Validation Smoke Task", workflow_text)
+        self.assertNotIn("Kikaria Android Migration Task", workflow_text)
 
     def test_root_gitignore_violation_and_safe_aider_cleanup(self) -> None:
         with self.make_temp_target() as dirname:

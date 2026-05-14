@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,11 @@ DEFAULT_TASK_PROMPT_PATH = "FORGIS_TASK.md"
 DEFAULT_TARGET_SUBDIR = "forgis-output"
 DEFAULT_MODEL = "deepseek/deepseek-v4-pro"
 DEFAULT_RUN_LOG_FILENAME = "FORGIS_LOG.md"
+DEFAULT_FORBIDDEN_PROMPT_MARKERS = (
+    "make the greeting more casual",
+    "Which file (or which phrase) should be changed?",
+    "casual greeting",
+)
 
 CONFIG_FIELDS = {
     "source_repo",
@@ -31,6 +37,8 @@ CONFIG_FIELDS = {
     "dry_run",
     "run_aider",
     "confirm_real_run",
+    "required_prompt_markers",
+    "forbidden_prompt_markers",
 }
 
 REQUIRED_FIELDS = {
@@ -64,6 +72,8 @@ class ResolvedConfig:
     confirm_real_run: bool
     real_run_allowed: bool
     run_aider: bool
+    required_prompt_markers: tuple[str, ...]
+    forbidden_prompt_markers: tuple[str, ...]
 
     def env(self) -> dict[str, str]:
         return {
@@ -90,6 +100,14 @@ class ResolvedConfig:
             "REAL_RUN_ALLOWED": "true" if self.real_run_allowed else "false",
             "RUN_AIDER": "true" if self.run_aider else "false",
             "RUN_AI": "true" if self.run_aider else "false",
+            "REQUIRED_PROMPT_MARKERS_JSON": json.dumps(
+                list(self.required_prompt_markers),
+                ensure_ascii=False,
+            ),
+            "FORBIDDEN_PROMPT_MARKERS_JSON": json.dumps(
+                list(self.forbidden_prompt_markers),
+                ensure_ascii=False,
+            ),
         }
 
     def outputs(self) -> dict[str, str]:
@@ -119,6 +137,36 @@ def clean_single_line(value: str, label: str) -> str:
     if "\n" in value or "\r" in value:
         raise ValueError(f"{label} must be a single-line value.")
     return value
+
+
+def dedupe_strings(values: list[str]) -> tuple[str, ...]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        key = value.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(value)
+    return tuple(result)
+
+
+def select_string_list(config: dict[str, Any], field: str) -> tuple[str, ...]:
+    if field not in config or config[field] is None:
+        return ()
+
+    value = config[field]
+    if not isinstance(value, list):
+        raise ValueError(f"{field} must be a YAML list of single-line strings.")
+
+    markers: list[str] = []
+    for index, item in enumerate(value):
+        text = non_empty(item)
+        if text is None:
+            raise ValueError(f"{field}[{index}] must be a non-empty string.")
+        markers.append(clean_single_line(text, f"{field}[{index}]"))
+
+    return dedupe_strings(markers)
 
 
 def resolve_inside_root(root: Path, relative_path: str, label: str) -> tuple[Path, str]:
@@ -307,6 +355,11 @@ def resolve_config(
     dry_run_value = select_config_bool(config, "dry_run", True)
     run_aider_config = select_config_bool(config, "run_aider", False)
     confirm_real_run = select_config_bool(config, "confirm_real_run", False)
+    required_prompt_markers = select_string_list(config, "required_prompt_markers")
+    configured_forbidden_prompt_markers = select_string_list(config, "forbidden_prompt_markers")
+    forbidden_prompt_markers = dedupe_strings(
+        list(DEFAULT_FORBIDDEN_PROMPT_MARKERS) + list(configured_forbidden_prompt_markers)
+    )
 
     if not dry_run_value and not confirm_real_run:
         raise ValueError("Real AI migration requires confirm_real_run: true in FORGIS_CONFIG.yml.")
@@ -335,6 +388,8 @@ def resolve_config(
         confirm_real_run=confirm_real_run,
         real_run_allowed=real_run_allowed,
         run_aider=run_aider_effective,
+        required_prompt_markers=required_prompt_markers,
+        forbidden_prompt_markers=forbidden_prompt_markers,
     )
 
 
@@ -343,6 +398,12 @@ def markdown_summary(resolved: ResolvedConfig) -> str:
     run_aider_note = ""
     if resolved.dry_run and resolved.run_aider_config:
         run_aider_note = " (dry_run=true, Aider execution is disabled.)"
+    required_markers = (
+        ", ".join(resolved.required_prompt_markers)
+        if resolved.required_prompt_markers
+        else "[none]"
+    )
+    forbidden_markers = ", ".join(resolved.forbidden_prompt_markers)
 
     return "\n".join(
         [
@@ -370,6 +431,8 @@ def markdown_summary(resolved: ResolvedConfig) -> str:
             f"| confirm_real_run config value | `{str(resolved.confirm_real_run).lower()}` |",
             f"| Effective dry_run | `{str(resolved.dry_run).lower()}` |",
             f"| Effective run_aider | `{str(resolved.run_aider).lower()}`{run_aider_note} |",
+            f"| Required prompt markers | `{required_markers}` |",
+            f"| Forbidden prompt markers | `{forbidden_markers}` |",
             f"| Writable scope | `{resolved.target_subdir}/` |",
             f"| Read-only files | `{resolved.config_path}`, `{resolved.task_prompt_path}`, source repository, target paths outside `{resolved.target_subdir}/` |",
             f"| Real migration allowed | `{str(resolved.real_run_allowed and resolved.run_aider).lower()}` |",
