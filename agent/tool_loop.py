@@ -61,6 +61,17 @@ def message_from_response(response: dict[str, Any]) -> dict[str, Any]:
     return message
 
 
+def assistant_tool_call_message(message: dict[str, Any], tool_calls: list[dict[str, Any]]) -> dict[str, Any]:
+    history_message: dict[str, Any] = {
+        "role": "assistant",
+        "content": message.get("content"),
+        "tool_calls": tool_calls,
+    }
+    if "reasoning_content" in message:
+        history_message["reasoning_content"] = message["reasoning_content"]
+    return history_message
+
+
 def extract_final_summary(content: str) -> str:
     text = content.strip()
     if not text:
@@ -149,10 +160,7 @@ def run_tool_loop(
                 operation_log=sandbox.operation_log(),
             )
 
-        assistant_message: dict[str, Any] = {"role": "assistant", "tool_calls": tool_calls}
-        if content:
-            assistant_message["content"] = content
-        messages.append(assistant_message)
+        messages.append(assistant_tool_call_message(message, tool_calls))
 
         for call in tool_calls:
             function = call.get("function") or {}

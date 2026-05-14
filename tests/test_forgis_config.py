@@ -21,7 +21,7 @@ from file_tools import FileToolSandbox, ToolError
 from forgis_config import resolve_config, require_path_inside_subdir
 from guardrails import changed_read_only_paths, scan_secret_leaks, snapshot_paths, target_scope_violations
 from model_env import describe_model_env, parse_model_env_json, require_model_env_values
-from tool_loop import run_tool_loop
+from tool_loop import run_tool_loop, write_status
 from validate_target_output import files_snapshot, meaningful_changes, validate
 
 
@@ -31,7 +31,7 @@ class FakeDeepSeekClient:
         self.calls: list[dict[str, Any]] = []
 
     def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> dict[str, Any]:
-        self.calls.append({"messages": messages, "tools": tools})
+        self.calls.append(json.loads(json.dumps({"messages": messages, "tools": tools})))
         if not self.responses:
             raise AssertionError("FakeDeepSeekClient ran out of responses")
         return self.responses.pop(0)
@@ -361,6 +361,85 @@ class ForgisConfigTests(unittest.TestCase):
             self.assertEqual(result.read_tool_count, 1)
             self.assertEqual(result.write_tool_count, 1)
             self.assertEqual((target / "target-output/result.txt").read_text(encoding="utf-8"), "done\n")
+
+    def test_deepseek_reasoning_content_round_trips_only_inside_tool_history(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target = self.make_source_target(root)
+            self.write_config(target, extra="dry_run: false\nrun_agent: true\nconfirm_real_run: true\n")
+            resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
+            hidden_reasoning = "hidden reasoning must stay internal"
+            final_hidden_reasoning = "final hidden reasoning must not leak"
+            tool_call_id = "call-reasoning"
+            fake = FakeDeepSeekClient(
+                [
+                    {
+                        "choices": [
+                            {
+                                "message": {
+                                    "content": "",
+                                    "reasoning_content": hidden_reasoning,
+                                    "tool_calls": [
+                                        {
+                                            "id": tool_call_id,
+                                            "type": "function",
+                                            "function": {
+                                                "name": "read_file",
+                                                "arguments": json.dumps({"path": "task"}),
+                                            },
+                                        }
+                                    ],
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        "choices": [
+                            {
+                                "message": {
+                                    "content": json.dumps({"final_summary": "visible summary"}),
+                                    "reasoning_content": final_hidden_reasoning,
+                                }
+                            }
+                        ]
+                    },
+                ]
+            )
+
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                result = run_tool_loop(
+                    config=resolved,
+                    source_root=source,
+                    target_root=target,
+                    environ={"DEEPSEEK_API_KEY": "mock-secret-value"},
+                    client_factory=lambda _config, _env: fake,
+                )
+
+            self.assertEqual(result.final_summary, "visible summary")
+            self.assertNotIn(hidden_reasoning, result.final_summary)
+            self.assertNotIn(final_hidden_reasoning, result.final_summary)
+            self.assertNotIn(hidden_reasoning, json.dumps(result.operation_log))
+            self.assertNotIn(hidden_reasoning, stdout.getvalue())
+
+            second_request_messages = fake.calls[1]["messages"]
+            assistant_messages = [
+                item for item in second_request_messages if item.get("role") == "assistant"
+            ]
+            self.assertEqual(assistant_messages[-1]["reasoning_content"], hidden_reasoning)
+            self.assertEqual(assistant_messages[-1]["content"], "")
+            self.assertEqual(assistant_messages[-1]["tool_calls"][0]["id"], tool_call_id)
+
+            tool_messages = [item for item in second_request_messages if item.get("role") == "tool"]
+            self.assertEqual(tool_messages[-1]["tool_call_id"], tool_call_id)
+            self.assertEqual(tool_messages[-1]["name"], "read_file")
+
+            status_path = root / "status.env"
+            write_status(str(status_path), result)
+            status_text = status_path.read_text(encoding="utf-8")
+            self.assertNotIn(hidden_reasoning, status_text)
+            self.assertNotIn(final_hidden_reasoning, status_text)
+            self.assertNotIn(hidden_reasoning, json.dumps(result.as_dict(), ensure_ascii=False))
 
     def test_list_dir_only_reads_allowed_paths(self) -> None:
         with tempfile.TemporaryDirectory() as dirname:
