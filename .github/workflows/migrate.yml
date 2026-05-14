@@ -50,6 +50,12 @@ on:
         default: "forgis/android-from-source"
         type: string
 
+      target_base_branch:
+        description: "Target repository base branch for pull requests"
+        required: true
+        default: "main"
+        type: string
+
       dry_run:
         description: "Run without pushing changes or creating pull requests"
         required: true
@@ -84,6 +90,7 @@ jobs:
       TARGET_STACK: ${{ inputs.target_stack }}
       MIGRATION_PROFILE: ${{ inputs.migration_profile }}
       TARGET_BRANCH: ${{ inputs.target_branch }}
+      TARGET_BASE_BRANCH: ${{ inputs.target_base_branch }}
       DRY_RUN: ${{ inputs.dry_run }}
       RUN_AI: ${{ inputs.run_ai }}
       AIDER_MODEL: ${{ inputs.aider_model }}
@@ -160,6 +167,7 @@ jobs:
             --target-stack "$TARGET_STACK" \
             --migration-profile "$MIGRATION_PROFILE" \
             --source-bundle "$GITHUB_WORKSPACE/forgis-runtime/source_bundle.md" \
+            --source-manifest "$GITHUB_WORKSPACE/forgis-runtime/source_manifest.md" \
             --output "$GITHUB_WORKSPACE/forgis-runtime/forgis_prompt.md"
 
           test -f "$GITHUB_WORKSPACE/forgis-runtime/forgis_prompt.md"
@@ -199,17 +207,25 @@ jobs:
 
 
       - name: Create pull request
-        if: ${{ (inputs.run_ai == true || inputs.run_ai == 'true') && (inputs.dry_run == false || inputs.dry_run == 'false') }}
+        if: ${{ (inputs.run_ai == true || inputs.run_ai == 'true') && (inputs.dry_run != true && inputs.dry_run != 'true') }}
         env:
           GH_TOKEN: ${{ secrets.FORGIS_TARGET_TOKEN }}
           TARGET_REPO_DIR: ${{ github.workspace }}/target-output
           TARGET_REPO: ${{ inputs.target_repo }}
           TARGET_BRANCH: ${{ inputs.target_branch }}
+          TARGET_BASE_BRANCH: ${{ inputs.target_base_branch }}
           TARGET_PLATFORM: ${{ inputs.target_platform }}
           TARGET_STACK: ${{ inputs.target_stack }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           bash forgis/agent/create_pr.sh
+
+      - name: Package target output snapshot
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/forgis-runtime"
+          tar -czf "$GITHUB_WORKSPACE/forgis-runtime/target-output-snapshot.tar.gz" \
+            -C "$GITHUB_WORKSPACE" \
+            target-output
 
       - name: Upload migration report
         uses: actions/upload-artifact@v4
@@ -239,4 +255,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: forgis-target-output
-          path: target-output
+          path: forgis-runtime/target-output-snapshot.tar.gz

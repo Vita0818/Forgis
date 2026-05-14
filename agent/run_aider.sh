@@ -35,4 +35,5 @@ aider \
   --model "$AIDER_MODEL" \
   --message-file "$FORGIS_PROMPT_FILE" \
   --yes-always \
+  --no-auto-commits \
   --no-show-release-notes

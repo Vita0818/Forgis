@@ -27,6 +27,7 @@ A Forgis run is configured by workflow inputs:
 - `target_stack`: concrete target technology stack, for example `kotlin-compose`, `csharp-avalonia`, `arkts`, or `web-react`
 - `migration_profile`: migration strategy profile, for example `default` or `local-first-app`
 - `target_branch`: target migration branch
+- `target_base_branch`: target repository base branch for pull requests
 - `dry_run`: whether to skip push and pull request creation
 - `run_ai`: whether to actually call the configured AI model
 
@@ -42,13 +43,19 @@ By default:
 
 API keys must be stored in GitHub Actions Secrets, not in repository files.
 
-Required secret for DeepSeek:
+Required GitHub Actions secrets:
 
 - `DEEPSEEK_API_KEY`
+  - Used only for DeepSeek API access.
+- `FORGIS_SOURCE_TOKEN`
+  - Used only to check out the source repository.
+  - Should have source repository Contents read and Metadata read permissions.
+  - Must not have write permissions to the source repository.
+- `FORGIS_TARGET_TOKEN`
+  - Used only to check out the target repository, push the migration branch, and create pull requests.
+  - Should have target repository Contents read/write, Pull requests read/write, and Metadata read permissions.
 
-Optional secret for cross-repository write access:
-
-- `FORGIS_GITHUB_TOKEN`
+Do not reuse the target token for source checkout.
 
 ## Default AI model
 

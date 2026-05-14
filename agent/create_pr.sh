@@ -16,6 +16,11 @@ if [[ -z "${TARGET_BRANCH:-}" ]]; then
   exit 1
 fi
 
+if [[ -z "${TARGET_BASE_BRANCH:-}" ]]; then
+  echo "TARGET_BASE_BRANCH is required." >&2
+  exit 1
+fi
+
 if [[ -z "${TARGET_PLATFORM:-}" ]]; then
   echo "TARGET_PLATFORM is required." >&2
   exit 1
@@ -36,6 +41,19 @@ if [[ ! -d "$TARGET_REPO_DIR" ]]; then
   exit 1
 fi
 
+case "${DRY_RUN,,}" in
+  true|1|yes|y|on)
+    DRY_RUN_NORMALIZED="true"
+    ;;
+  false|0|no|n|off)
+    DRY_RUN_NORMALIZED="false"
+    ;;
+  *)
+    echo "DRY_RUN must be a boolean-like value, got: $DRY_RUN" >&2
+    exit 1
+    ;;
+esac
+
 cd "$TARGET_REPO_DIR"
 
 git config user.name "forgis-bot"
@@ -43,17 +61,29 @@ git config user.email "forgis-bot@users.noreply.github.com"
 
 echo "Preparing target branch: $TARGET_BRANCH"
 
+git fetch origin "$TARGET_BASE_BRANCH:refs/remotes/origin/$TARGET_BASE_BRANCH"
+BASE_REF="origin/$TARGET_BASE_BRANCH"
+
 git checkout -B "$TARGET_BRANCH"
 
-if git diff --quiet && git diff --cached --quiet; then
-  echo "No changes detected. Nothing to commit."
+if [[ -n "$(git status --porcelain)" ]]; then
+  git add .
+
+  if git diff --cached --quiet; then
+    echo "No staged changes detected after git add."
+  else
+    git commit -m "Forgis: sync source to $TARGET_PLATFORM using $TARGET_STACK"
+  fi
+else
+  echo "No uncommitted working tree changes detected."
+fi
+
+if git diff --quiet "$BASE_REF...HEAD"; then
+  echo "No changes detected relative to $TARGET_BASE_BRANCH. Nothing to push."
   exit 0
 fi
 
-git add .
-git commit -m "Forgis: sync source to $TARGET_PLATFORM using $TARGET_STACK"
-
-if [[ "$DRY_RUN" == "true" ]]; then
+if [[ "$DRY_RUN_NORMALIZED" == "true" ]]; then
   echo "Dry run enabled. Skipping push and pull request creation."
   exit 0
 fi
@@ -68,7 +98,7 @@ if gh pr view "$TARGET_BRANCH" --repo "$TARGET_REPO" >/dev/null 2>&1; then
 else
   gh pr create \
     --repo "$TARGET_REPO" \
-    --base main \
+    --base "$TARGET_BASE_BRANCH" \
     --head "$TARGET_BRANCH" \
     --title "Forgis sync: source to $TARGET_PLATFORM" \
     --body-file MIGRATION_REPORT.md

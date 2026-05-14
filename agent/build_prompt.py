@@ -7,10 +7,28 @@ import datetime
 from pathlib import Path
 
 
+DEFAULT_MAX_SOURCE_BUNDLE_CHARS = 900_000
+
+
 def read_text(path: Path) -> str:
     if not path.exists():
         return f"\n[Missing file: {path}]\n"
     return path.read_text(encoding="utf-8", errors="replace")
+
+
+def read_text_limited(path: Path, max_chars: int) -> str:
+    text = read_text(path)
+
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+
+    return (
+        text[:max_chars]
+        + "\n\n"
+        + f"[Forgis note: source bundle truncated after {max_chars} characters "
+        + "to keep the model prompt bounded. The complete file list, sizes, "
+        + "and hashes are preserved in the full source manifest below.]\n"
+    )
 
 
 def collect_tree(root: Path, max_files: int = 200) -> list[str]:
@@ -55,6 +73,14 @@ def main() -> None:
     parser.add_argument("--target-stack", required=True, help="Target technical stack")
     parser.add_argument("--migration-profile", required=True, help="Migration profile name")
     parser.add_argument("--source-bundle", required=False, help="Optional source bundle markdown file")
+    parser.add_argument("--source-manifest", required=False, help="Optional source manifest markdown file")
+    parser.add_argument(
+        "--max-source-bundle-chars",
+        required=False,
+        type=int,
+        default=DEFAULT_MAX_SOURCE_BUNDLE_CHARS,
+        help="Maximum source bundle characters to embed in the prompt. Use 0 for no limit.",
+    )
     parser.add_argument("--output", required=True, help="Path to the generated prompt file")
 
     args = parser.parse_args()
@@ -76,7 +102,12 @@ def main() -> None:
     source_bundle_text = ""
     if args.source_bundle:
         source_bundle_path = Path(args.source_bundle).resolve()
-        source_bundle_text = read_text(source_bundle_path)
+        source_bundle_text = read_text_limited(source_bundle_path, args.max_source_bundle_chars)
+
+    source_manifest_text = ""
+    if args.source_manifest:
+        source_manifest_path = Path(args.source_manifest).resolve()
+        source_manifest_text = read_text(source_manifest_path)
 
     content = f"""# Forgis Generated Migration Task
 
@@ -149,6 +180,12 @@ Source path: {source}
 # Source Bundle
 
 {source_bundle_text if source_bundle_text else "[No source bundle provided.]"}
+
+---
+
+# Source Manifest
+
+{source_manifest_text if source_manifest_text else "[No source manifest provided.]"}
 
 ---
 
