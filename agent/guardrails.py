@@ -180,6 +180,12 @@ def root_gitignore_snapshot(target: Path) -> dict[str, Any]:
     }
 
 
+def root_gitignore_state_text(snapshot: dict[str, Any]) -> str:
+    exists = bool(snapshot.get("exists"))
+    digest = snapshot.get("sha256")
+    return f"exists={'true' if exists else 'false'} sha256={digest if digest else 'null'}"
+
+
 def cleanup_aider_root_gitignore(target: Path, snapshot: dict[str, Any]) -> bool:
     path = target / ".gitignore"
     existed_before = bool(snapshot.get("exists"))
@@ -295,14 +301,18 @@ def command_snapshot_root_gitignore(args: argparse.Namespace) -> None:
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(snapshot, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    state = snapshot["sha256"] if snapshot["exists"] else "missing"
-    print(f"Root .gitignore snapshot recorded: {state}")
+    print(f"Root .gitignore snapshot recorded: {root_gitignore_state_text(snapshot)}")
 
 
 def command_cleanup_aider_root_gitignore(args: argparse.Namespace) -> None:
     target = Path(args.target).resolve()
     snapshot = json.loads(Path(args.snapshot).read_text(encoding="utf-8"))
+    before_state = root_gitignore_state_text(snapshot)
     cleaned = cleanup_aider_root_gitignore(target, snapshot)
+    after = root_gitignore_snapshot(target)
+    after_state = root_gitignore_state_text(after)
+    print(f"Root .gitignore before cleanup: {before_state}")
+    print(f"Root .gitignore after cleanup: {after_state}")
     print(f"Root .gitignore cleanup performed: {'yes' if cleaned else 'no'}")
 
 
