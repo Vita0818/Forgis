@@ -1,10 +1,10 @@
-name: Forgis Aider Interface
+name: Forgis DeepSeek Interface
 
 on:
   workflow_dispatch:
     inputs:
       target_repo:
-        description: "Target repository containing FORGIS_CONFIG.yml and FORGIS_TASK.md, for example owner/target-repo"
+        description: "Target repository containing FORGIS_CONFIG.yml and the task file, for example owner/target-repo"
         required: true
         type: string
 
@@ -68,7 +68,7 @@ jobs:
             --github-output "$GITHUB_OUTPUT" \
             --summary-output "$GITHUB_WORKSPACE/forgis-runtime/resolved_config.md"
 
-      - name: Checkout source repository
+      - name: Checkout source repository read-only
         uses: actions/checkout@v4
         with:
           repository: ${{ steps.resolve_base.outputs.source_repo }}
@@ -77,103 +77,36 @@ jobs:
           path: source-repo
           persist-credentials: false
 
+      - name: Snapshot read-only target inputs
+        run: |
+          python forgis/agent/guardrails.py snapshot-readonly \
+            --target "$GITHUB_WORKSPACE/target-repo" \
+            --config-path "$CONFIG_PATH" \
+            --task-prompt-path "$TASK_PROMPT_PATH" \
+            --output "$GITHUB_WORKSPACE/forgis-runtime/read_only_snapshot.json"
+
+      - name: Snapshot target output before agent
+        run: |
+          python forgis/agent/validate_target_output.py snapshot \
+            --target "$GITHUB_WORKSPACE/target-repo" \
+            --target-subdir "$TARGET_SUBDIR" \
+            --output "$GITHUB_WORKSPACE/forgis-runtime/target_output_before.json"
+
       - name: Run Forgis controller
         run: |
           python forgis/agent/forge.py \
             --source "$GITHUB_WORKSPACE/source-repo" \
             --target "$GITHUB_WORKSPACE/target-repo" \
-            --source-repo "$SOURCE_REPO" \
-            --source-ref "$SOURCE_REF" \
             --target-repo "$TARGET_REPO" \
-            --target-branch "$TARGET_BRANCH" \
-            --target-base-branch "$TARGET_BASE_BRANCH" \
-            --config-path "$CONFIG_PATH" \
-            --task-prompt-path "$TASK_PROMPT_PATH" \
-            --target-subdir "$TARGET_SUBDIR" \
-            --run-log-path "$RUN_LOG_PATH" \
-            --agent-backend "$AGENT_BACKEND" \
-            --model "$AIDER_MODEL" \
-            --dry-run "$DRY_RUN" \
-            --run-agent "$RUN_AGENT" \
-            --confirm-real-run "$CONFIRM_REAL_RUN" \
             --summary-output "$GITHUB_WORKSPACE/forgis-runtime/run_summary.md"
-
-      - name: Build optional source context
-        run: |
-          if [[ "$SOURCE_CONTEXT_MODE" == "none" ]]; then
-            echo "source_context.mode is none. Skipping source context collection."
-            exit 0
-          fi
-
-          python forgis/agent/collect_source.py \
-            --source "$GITHUB_WORKSPACE/source-repo" \
-            --mode "$SOURCE_CONTEXT_MODE" \
-            --max-chars "$SOURCE_CONTEXT_MAX_CHARS" \
-            --include-json "$SOURCE_CONTEXT_INCLUDE_JSON" \
-            --exclude-json "$SOURCE_CONTEXT_EXCLUDE_JSON" \
-            --output "$GITHUB_WORKSPACE/forgis-runtime/source_context.md"
-
-      - name: Build Forgis Aider message
-        run: |
-          SOURCE_CONTEXT_ARGS=()
-          if [[ -f "$GITHUB_WORKSPACE/forgis-runtime/source_context.md" ]]; then
-            SOURCE_CONTEXT_ARGS+=(--source-context-file "$GITHUB_WORKSPACE/forgis-runtime/source_context.md")
-          fi
-
-          python forgis/agent/build_prompt.py \
-            --source "$GITHUB_WORKSPACE/source-repo" \
-            --target "$GITHUB_WORKSPACE/target-repo" \
-            --source-repo "$SOURCE_REPO" \
-            --source-ref "$SOURCE_REF" \
-            --target-repo "$TARGET_REPO" \
-            --config-path "$CONFIG_PATH" \
-            --task-prompt-path "$TASK_PROMPT_PATH" \
-            --require-task-prompt \
-            --target-subdir "$TARGET_SUBDIR" \
-            --run-log-path "$RUN_LOG_PATH" \
-            "${SOURCE_CONTEXT_ARGS[@]}" \
-            --output "$GITHUB_WORKSPACE/forgis-runtime/forgis_message.md"
-
-          test -f "$GITHUB_WORKSPACE/forgis-runtime/forgis_message.md"
-
-      - name: Diagnose Aider message
-        run: |
-          python forgis/agent/prompt_diagnostics.py \
-            --file "$GITHUB_WORKSPACE/forgis-runtime/forgis_message.md" \
-            --label "Forgis Aider Message" \
-            --task-prompt-file "$GITHUB_WORKSPACE/target-repo/$TASK_PROMPT_PATH" \
-            --task-prompt-path "$TASK_PROMPT_PATH" \
-            --source-path "$GITHUB_WORKSPACE/source-repo" \
-            --target-path "$GITHUB_WORKSPACE/target-repo" \
-            --target-subdir "$TARGET_SUBDIR" \
-            --expected-same-as "$GITHUB_WORKSPACE/forgis-runtime/forgis_message.md" \
-            --artifact-output "$GITHUB_WORKSPACE/forgis-runtime/message_diagnostics.md"
 
       - name: Check shell scripts
         run: |
-          bash -n forgis/agent/run_aider.sh
           bash -n forgis/agent/build_target.sh
           bash -n forgis/agent/create_pr.sh
 
-      - name: Install and check Aider if enabled
-        run: |
-          if [[ "$RUN_AGENT" != "true" ]]; then
-            echo "RUN_AGENT is false. Skipping Aider installation."
-            exit 0
-          fi
-
-          pip install aider-chat
-          aider --version
-
-      - name: Run Aider with configured model
+      - name: Run DeepSeek tool loop
         env:
-          SOURCE_REPO_DIR: ${{ github.workspace }}/source-repo
-          TARGET_REPO_DIR: ${{ github.workspace }}/target-repo
-          FORGIS_PROMPT_FILE: ${{ github.workspace }}/forgis-runtime/forgis_message.md
-          SOURCE_CONTEXT_FILE: ${{ github.workspace }}/forgis-runtime/source_context.md
-          FORGIS_AIDER_DIAGNOSTICS_FILE: ${{ github.workspace }}/forgis-runtime/aider_message_diagnostics.md
-          FORGIS_AIDER_COMMAND_SUMMARY_FILE: ${{ github.workspace }}/forgis-runtime/aider_command_summary.md
-          FORGIS_AIDER_STATUS_FILE: ${{ github.workspace }}/forgis-runtime/aider_status.env
           FORGIS_MODEL_API_KEY: ${{ secrets.FORGIS_MODEL_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -183,17 +116,43 @@ jobs:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
         run: |
           if [[ "$RUN_AGENT" != "true" ]]; then
-            echo "RUN_AGENT is false. Skipping Aider execution."
+            echo "RUN_AGENT is false. Skipping DeepSeek execution."
+            python forgis/agent/tool_loop.py \
+              --source "$GITHUB_WORKSPACE/source-repo" \
+              --target "$GITHUB_WORKSPACE/target-repo" \
+              --target-repo "$TARGET_REPO" \
+              --status-output "$GITHUB_WORKSPACE/forgis-runtime/deepseek_status.env" \
+              --operation-log-output "$GITHUB_WORKSPACE/forgis-runtime/tool_operations.json" \
+              --summary-output "$GITHUB_WORKSPACE/forgis-runtime/tool_loop_summary.json"
             exit 0
           fi
 
-          if [[ ! -f "$SOURCE_CONTEXT_FILE" ]]; then
-            SOURCE_CONTEXT_FILE=""
+          python forgis/agent/tool_loop.py \
+            --source "$GITHUB_WORKSPACE/source-repo" \
+            --target "$GITHUB_WORKSPACE/target-repo" \
+            --target-repo "$TARGET_REPO" \
+            --status-output "$GITHUB_WORKSPACE/forgis-runtime/deepseek_status.env" \
+            --operation-log-output "$GITHUB_WORKSPACE/forgis-runtime/tool_operations.json" \
+            --summary-output "$GITHUB_WORKSPACE/forgis-runtime/tool_loop_summary.json"
+
+      - name: Validate DeepSeek target changes
+        if: ${{ always() && steps.resolve_base.outcome == 'success' }}
+        run: |
+          if [[ "$RUN_AGENT" != "true" ]]; then
+            echo "RUN_AGENT is false. Skipping target output validation."
+            exit 0
           fi
 
-          bash forgis/agent/run_aider.sh
+          python forgis/agent/validate_target_output.py validate \
+            --target "$GITHUB_WORKSPACE/target-repo" \
+            --target-subdir "$TARGET_SUBDIR" \
+            --run-log-path "$RUN_LOG_PATH" \
+            --snapshot "$GITHUB_WORKSPACE/forgis-runtime/target_output_before.json" \
+            --require-meaningful-change \
+            --success-checks-json "$SUCCESS_CHECKS_JSON"
 
       - name: Run configured validation commands
+        if: ${{ always() && steps.resolve_base.outcome == 'success' }}
         env:
           TARGET_REPO_DIR: ${{ github.workspace }}/target-repo
         run: |
@@ -209,12 +168,20 @@ jobs:
         env:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          AIDER_EXECUTED="false"
-          AIDER_EXIT_STATUS="not-run"
-          if [[ -f "$GITHUB_WORKSPACE/forgis-runtime/aider_status.env" ]]; then
-            source "$GITHUB_WORKSPACE/forgis-runtime/aider_status.env"
-            AIDER_EXECUTED="${aider_executed:-false}"
-            AIDER_EXIT_STATUS="${aider_exit_status:-not-run}"
+          DEEPSEEK_EXECUTED="false"
+          DEEPSEEK_STATUS="not-run"
+          TOOL_CALL_COUNT="0"
+          READ_TOOL_COUNT="0"
+          WRITE_TOOL_COUNT="0"
+          FINAL_SUMMARY="DeepSeek was not run."
+          if [[ -f "$GITHUB_WORKSPACE/forgis-runtime/deepseek_status.env" ]]; then
+            source "$GITHUB_WORKSPACE/forgis-runtime/deepseek_status.env"
+            DEEPSEEK_EXECUTED="${deepseek_executed:-false}"
+            DEEPSEEK_STATUS="${deepseek_status:-not-run}"
+            TOOL_CALL_COUNT="${tool_call_count:-0}"
+            READ_TOOL_COUNT="${read_tool_count:-0}"
+            WRITE_TOOL_COUNT="${write_tool_count:-0}"
+            FINAL_SUMMARY="${final_summary:-DeepSeek was not run.}"
           fi
 
           python forgis/agent/write_run_log.py \
@@ -228,14 +195,17 @@ jobs:
             --task-prompt-path "$TASK_PROMPT_PATH" \
             --config-path "$CONFIG_PATH" \
             --agent-backend "$AGENT_BACKEND" \
-            --model "$AIDER_MODEL" \
+            --model "$MODEL" \
             --run-log-path "$RUN_LOG_PATH" \
             --dry-run "$DRY_RUN" \
             --run-agent "$RUN_AGENT" \
             --run-agent-config "$RUN_AGENT_CONFIG" \
             --confirm-real-run "$CONFIRM_REAL_RUN" \
-            --aider-executed "$AIDER_EXECUTED" \
-            --aider-exit-status "$AIDER_EXIT_STATUS" \
+            --deepseek-executed "$DEEPSEEK_EXECUTED" \
+            --deepseek-status "$DEEPSEEK_STATUS" \
+            --tool-call-count "$TOOL_CALL_COUNT" \
+            --read-tool-count "$READ_TOOL_COUNT" \
+            --write-tool-count "$WRITE_TOOL_COUNT" \
             --guardrail-result "See workflow logs." \
             --validation-commands-json "$VALIDATION_COMMANDS_JSON" \
             --success-checks-json "$SUCCESS_CHECKS_JSON" \
@@ -243,8 +213,7 @@ jobs:
             --run-id "${{ github.run_id }}" \
             --run-url "$RUN_URL" \
             --validation-result "See workflow logs." \
-            --summary "Forgis resolved config, built a thin Aider message, and ran the enabled generic steps." \
-            --next-steps "Review changed files inside $TARGET_SUBDIR/." \
+            --final-summary "$FINAL_SUMMARY" \
             --preview-output "$GITHUB_WORKSPACE/forgis-runtime/forgis_log_entry.md"
 
       - name: Verify source repository stayed read-only
@@ -252,6 +221,13 @@ jobs:
         run: |
           python forgis/agent/guardrails.py check-source-clean \
             --source "$GITHUB_WORKSPACE/source-repo"
+
+      - name: Verify read-only target inputs
+        if: ${{ always() && steps.resolve_base.outcome == 'success' }}
+        run: |
+          python forgis/agent/guardrails.py check-readonly \
+            --target "$GITHUB_WORKSPACE/target-repo" \
+            --snapshot "$GITHUB_WORKSPACE/forgis-runtime/read_only_snapshot.json"
 
       - name: Verify target writable scope
         if: ${{ always() && steps.resolve_base.outcome == 'success' }}
@@ -261,6 +237,32 @@ jobs:
             --target-subdir "$TARGET_SUBDIR" \
             --read-only-path "$CONFIG_PATH" \
             --read-only-path "$TASK_PROMPT_PATH"
+
+      - name: Verify dry run did not write target
+        if: ${{ always() && steps.resolve_base.outcome == 'success' }}
+        run: |
+          if [[ "$DRY_RUN" == "true" ]]; then
+            python forgis/agent/guardrails.py check-dry-run-clean \
+              --target "$GITHUB_WORKSPACE/target-repo"
+          else
+            echo "DRY_RUN is false. Skipping dry-run clean check."
+          fi
+
+      - name: Verify model secrets were not written
+        if: ${{ always() && steps.resolve_base.outcome == 'success' }}
+        env:
+          FORGIS_MODEL_API_KEY: ${{ secrets.FORGIS_MODEL_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: |
+          python forgis/agent/guardrails.py check-secret-leaks \
+            --target "$GITHUB_WORKSPACE/target-repo" \
+            --target-subdir "$TARGET_SUBDIR" \
+            --model-env-json "$MODEL_ENV_JSON"
 
       - name: Show target repository diff
         if: always()
@@ -315,23 +317,15 @@ jobs:
           name: forgis-run-summary
           path: forgis-runtime/run_summary.md
 
-      - name: Upload source context
+      - name: Upload DeepSeek tool loop summary
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: forgis-source-context
-          path: forgis-runtime/source_context.md
-
-      - name: Upload Aider message diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: forgis-message-diagnostics
+          name: forgis-tool-loop
           path: |
-            forgis-runtime/forgis_message.md
-            forgis-runtime/message_diagnostics.md
-            forgis-runtime/aider_message_diagnostics.md
-            forgis-runtime/aider_command_summary.md
+            forgis-runtime/tool_loop_summary.json
+            forgis-runtime/tool_operations.json
+            forgis-runtime/deepseek_status.env
 
       - name: Upload generated long log preview
         if: always()

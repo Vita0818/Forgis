@@ -8,7 +8,6 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
 
 from forgis_config import DEFAULT_RUN_LOG_FILENAME, parse_bool, require_path_inside_subdir
 
@@ -56,7 +55,6 @@ def append_run_log(
     )
     if append_target_log:
         log_path.parent.mkdir(parents=True, exist_ok=True)
-
         existing = log_path.read_text(encoding="utf-8", errors="replace") if log_path.exists() else ""
         separator = "\n\n" if existing and not existing.endswith("\n\n") else ""
         log_path.write_text(existing + separator + entry, encoding="utf-8")
@@ -69,25 +67,24 @@ def append_run_log(
     return log_path
 
 
+def trim_summary(text: str, limit: int = 4000) -> str:
+    value = text.strip() or "[none]"
+    if len(value) <= limit:
+        return value
+    return value[:limit] + f"\n\n[Forgis log note: final_summary truncated after {limit} characters.]"
+
+
 def markdown_entry(args: argparse.Namespace, run_log_relative: str, changed_paths: list[str]) -> str:
     now = datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
     dry_run = parse_bool(args.dry_run, "dry_run")
     run_agent = parse_bool(args.run_agent, "run_agent")
     run_agent_config = parse_bool(args.run_agent_config, "run_agent_config")
     confirm_real_run = parse_bool(args.confirm_real_run, "confirm_real_run")
-    aider_executed = parse_bool(args.aider_executed, "aider_executed")
-    run_mode = "dry-run" if dry_run else "live"
-
-    if dry_run:
-        pr_result = "Skipped because dry_run is true."
-    elif not run_agent:
-        pr_result = "Skipped because run_agent is false."
-    else:
-        pr_result = args.pr_result
+    deepseek_executed = parse_bool(args.deepseek_executed, "deepseek_executed")
 
     warnings: list[str] = []
     if dry_run and run_agent_config:
-        warnings.append("dry_run=true, agent execution is disabled.")
+        warnings.append("dry_run=true, DeepSeek execution is disabled.")
     if not dry_run and not confirm_real_run:
         warnings.append("Real Forgis runs require confirm_real_run: true in FORGIS_CONFIG.yml.")
     if args.warning:
@@ -105,7 +102,6 @@ def markdown_entry(args: argparse.Namespace, run_log_relative: str, changed_path
 | Run id | `{args.run_id or '[not provided]'}` |
 | Run time | `{now}` |
 | Run URL | `{args.run_url or '[not provided]'}` |
-| Run mode | `{run_mode}` |
 | Target repo | `{args.target_repo}` |
 | Source repo | `{args.source_repo}` |
 | Source ref | `{args.source_ref}` |
@@ -116,18 +112,20 @@ def markdown_entry(args: argparse.Namespace, run_log_relative: str, changed_path
 | Config path | `{args.config_path}` |
 | Agent backend | `{args.agent_backend}` |
 | Model | `{args.model}` |
-| dry_run config value | `{str(dry_run).lower()}` |
+| dry_run | `{str(dry_run).lower()}` |
 | run_agent config value | `{str(run_agent_config).lower()}` |
-| confirm_real_run config value | `{str(confirm_real_run).lower()}` |
 | Effective run_agent | `{str(run_agent).lower()}` |
-| Aider executed | `{str(aider_executed).lower()}` |
-| Aider exit status | `{args.aider_exit_status}` |
+| confirm_real_run | `{str(confirm_real_run).lower()}` |
+| DeepSeek executed | `{str(deepseek_executed).lower()}` |
+| DeepSeek status | `{args.deepseek_status}` |
+| Tool call count | `{args.tool_call_count}` |
+| Read tool count | `{args.read_tool_count}` |
+| Write tool count | `{args.write_tool_count}` |
 | Guardrail result | `{args.guardrail_result}` |
 | validation_commands | `{json_count(args.validation_commands_json)} configured` |
 | success_checks | `{json_count(args.success_checks_json)} configured` |
 | Run log path | `{run_log_relative}` |
 | Validation result | `{args.validation_result}` |
-| PR result | `{pr_result}` |
 
 ### Changed Paths
 
@@ -140,17 +138,13 @@ def markdown_entry(args: argparse.Namespace, run_log_relative: str, changed_path
 - Config file: `{args.config_path}`
 - Task file: `{args.task_prompt_path}`
 
-### Summary
+### Final Summary
 
-{args.summary}
+{trim_summary(args.final_summary)}
 
 ### Warnings
 
 {warnings_text}
-
-### Next Steps
-
-{args.next_steps}
 """
 
 
@@ -172,8 +166,11 @@ def main() -> None:
     parser.add_argument("--run-agent", required=True)
     parser.add_argument("--run-agent-config", required=True)
     parser.add_argument("--confirm-real-run", required=True)
-    parser.add_argument("--aider-executed", default="false")
-    parser.add_argument("--aider-exit-status", default="not-run")
+    parser.add_argument("--deepseek-executed", default="false")
+    parser.add_argument("--deepseek-status", default="not-run")
+    parser.add_argument("--tool-call-count", default="0")
+    parser.add_argument("--read-tool-count", default="0")
+    parser.add_argument("--write-tool-count", default="0")
     parser.add_argument("--guardrail-result", default="See workflow logs.")
     parser.add_argument("--validation-commands-json", default="[]")
     parser.add_argument("--success-checks-json", default="[]")
@@ -181,10 +178,8 @@ def main() -> None:
     parser.add_argument("--run-id", default="")
     parser.add_argument("--run-url", default="")
     parser.add_argument("--validation-result", default="See workflow logs.")
-    parser.add_argument("--pr-result", default="Pending push and pull request step.")
-    parser.add_argument("--summary", default="Forgis resolved config, built the Aider message, and ran the enabled steps.")
+    parser.add_argument("--final-summary", default="Forgis resolved config and ran the enabled generic DeepSeek file-tool steps.")
     parser.add_argument("--warning", default="")
-    parser.add_argument("--next-steps", default="- Review workflow logs and changes inside target_subdir.")
     parser.add_argument("--preview-output", default="")
 
     args = parser.parse_args()

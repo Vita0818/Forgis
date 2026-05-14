@@ -25,7 +25,6 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Resolve Forgis workflow inputs and target repository config")
     parser.add_argument("--target", required=True, help="Path to the checked-out target repository")
     parser.add_argument("--target-repo", required=True, help="Target repository, for example owner/repo")
-    parser.add_argument("--config-path", default="FORGIS_CONFIG.yml", help="Config path relative to target root")
 
     parser.add_argument("--github-env", default="", help="Optional $GITHUB_ENV path to append resolved env vars")
     parser.add_argument("--github-output", default="", help="Optional $GITHUB_OUTPUT path to append resolved outputs")
@@ -36,7 +35,6 @@ def main() -> None:
     resolved = resolve_config(
         target_root=Path(args.target),
         target_repo=args.target_repo,
-        config_path=args.config_path,
     )
 
     summary = markdown_summary(resolved)

@@ -23,17 +23,15 @@ jobs:
           test -f README.md
           test -f requirements.txt
           test -f agent/forge.py
-          test -f agent/aider_compat.py
           test -f agent/model_env.py
           test -f agent/forgis_config.py
           test -f agent/resolve_config.py
           test -f agent/guardrails.py
           test -f agent/write_run_log.py
-          test -f agent/prompt_diagnostics.py
-          test -f agent/collect_source.py
-          test -f agent/build_prompt.py
+          test -f agent/deepseek_agent.py
+          test -f agent/file_tools.py
+          test -f agent/tool_loop.py
           test -f agent/validate_target_output.py
-          test -f agent/run_aider.sh
           test -f agent/build_target.sh
           test -f agent/create_pr.sh
           test -f .github/workflows/migrate.yml
@@ -51,17 +49,7 @@ jobs:
 
       - name: Check Python syntax
         run: |
-          python -m py_compile agent/forge.py
-          python -m py_compile agent/aider_compat.py
-          python -m py_compile agent/model_env.py
-          python -m py_compile agent/forgis_config.py
-          python -m py_compile agent/resolve_config.py
-          python -m py_compile agent/guardrails.py
-          python -m py_compile agent/write_run_log.py
-          python -m py_compile agent/prompt_diagnostics.py
-          python -m py_compile agent/collect_source.py
-          python -m py_compile agent/build_prompt.py
-          python -m py_compile agent/validate_target_output.py
+          python -m py_compile agent/forge.py agent/forgis_config.py agent/resolve_config.py agent/guardrails.py agent/write_run_log.py agent/model_env.py agent/deepseek_agent.py agent/file_tools.py agent/tool_loop.py
 
       - name: Run Forgis tests
         run: |
@@ -69,59 +57,33 @@ jobs:
 
       - name: Check shell script syntax
         run: |
-          bash -n agent/run_aider.sh
           bash -n agent/build_target.sh
           bash -n agent/create_pr.sh
 
       - name: Run controller smoke test
         run: |
-          mkdir -p tmp/source tmp/target/target-output
+          mkdir -p tmp/source tmp/target
+          printf '%s\n' \
+            'source_repo: owner/source-repo' \
+            'source_ref: main' \
+            'target_subdir: target-output' \
+            'task_prompt_path: FORGIS_TASK.md' \
+            'agent_backend: deepseek' \
+            'model: deepseek/deepseek-v4-pro' \
+            'target_branch: forgis/output' \
+            'target_base_branch: main' \
+            'run_log_path: target-output/FORGIS_LOG.md' \
+            'dry_run: true' \
+            'run_agent: false' \
+            'confirm_real_run: false' \
+            > tmp/target/FORGIS_CONFIG.yml
+          printf '%s\n' '# Task' '' 'Use mock files only.' > tmp/target/FORGIS_TASK.md
+
           python agent/forge.py \
             --source "$GITHUB_WORKSPACE/tmp/source" \
             --target "$GITHUB_WORKSPACE/tmp/target" \
-            --source-repo "owner/source-repo" \
-            --source-ref "main" \
             --target-repo "owner/target-repo" \
-            --target-branch "forgis/output" \
-            --target-base-branch "main" \
-            --config-path "FORGIS_CONFIG.yml" \
-            --task-prompt-path "FORGIS_TASK.md" \
-            --target-subdir "target-output" \
-            --run-log-path "target-output/FORGIS_LOG.md" \
-            --agent-backend "aider" \
-            --model "provider/model-name" \
-            --dry-run true \
-            --run-agent false \
-            --confirm-real-run false \
             --summary-output "$GITHUB_WORKSPACE/tmp/run_summary.md"
-
-      - name: Build thin message smoke test
-        run: |
-          mkdir -p tmp/source tmp/target
-          printf '%s\n' "source file" > tmp/source/example.txt
-          printf '%s\n' "source_repo: owner/source-repo" "target_branch: forgis/output" > tmp/target/FORGIS_CONFIG.yml
-          printf '%s\n' "# Task" "" "Create files according to this task." > tmp/target/FORGIS_TASK.md
-
-          python agent/build_prompt.py \
-            --source "$GITHUB_WORKSPACE/tmp/source" \
-            --target "$GITHUB_WORKSPACE/tmp/target" \
-            --source-repo "owner/source-repo" \
-            --source-ref "main" \
-            --target-repo "owner/target-repo" \
-            --config-path "FORGIS_CONFIG.yml" \
-            --task-prompt-path "FORGIS_TASK.md" \
-            --require-task-prompt \
-            --target-subdir "target-output" \
-            --run-log-path "target-output/FORGIS_LOG.md" \
-            --output "$GITHUB_WORKSPACE/tmp/forgis_message.md"
-
-          test -f "$GITHUB_WORKSPACE/tmp/forgis_message.md"
-          grep -qF "You are running through Forgis." "$GITHUB_WORKSPACE/tmp/forgis_message.md"
-          grep -qF "Task file path:" "$GITHUB_WORKSPACE/tmp/forgis_message.md"
-          if grep -qF "Create files according to this task." "$GITHUB_WORKSPACE/tmp/forgis_message.md"; then
-            echo "Task file content leaked into the thin message." >&2
-            exit 1
-          fi
 
       - name: Check diff whitespace
         run: |
