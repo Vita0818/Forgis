@@ -142,6 +142,8 @@ def main() -> None:
     parser.add_argument("--target", required=True, help="Path to the checked-out target output repository")
     parser.add_argument("--rules", required=True, help="Path to Forgis rules directory")
     parser.add_argument("--prompts", required=True, help="Path to Forgis prompts directory")
+    parser.add_argument("--source-repo", required=False, default="[not provided]", help="Resolved source repository")
+    parser.add_argument("--target-repo", required=False, default="[not provided]", help="Resolved target repository")
     parser.add_argument("--platform", required=True, help="Target platform")
     parser.add_argument("--target-stack", required=True, help="Target technical stack")
     parser.add_argument("--migration-profile", required=True, help="Migration profile name")
@@ -285,6 +287,8 @@ You are running inside Forgis, a generic cloud-based migration system.
 Target platform: {args.platform}
 Target stack: {args.target_stack}
 Migration profile: {args.migration_profile}
+Source repository: {args.source_repo}
+Target repository: {args.target_repo}
 
 Read the source repository information below and update only the target repository.
 

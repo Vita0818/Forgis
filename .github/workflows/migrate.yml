@@ -123,6 +123,8 @@ jobs:
             --target "$GITHUB_WORKSPACE/target-output" \
             --rules "$GITHUB_WORKSPACE/forgis/rules" \
             --prompts "$GITHUB_WORKSPACE/forgis/prompts" \
+            --source-repo "$SOURCE_REPO" \
+            --target-repo "$TARGET_REPO" \
             --platform "$TARGET_PLATFORM" \
             --target-stack "$TARGET_STACK" \
             --migration-profile "$MIGRATION_PROFILE" \
@@ -136,6 +138,18 @@ jobs:
             --output "$GITHUB_WORKSPACE/forgis-runtime/forgis_prompt.md"
 
           test -f "$GITHUB_WORKSPACE/forgis-runtime/forgis_prompt.md"
+
+      - name: Diagnose generated final prompt
+        run: |
+          python forgis/agent/prompt_diagnostics.py \
+            --file "$GITHUB_WORKSPACE/forgis-runtime/forgis_prompt.md" \
+            --label "Final Prompt" \
+            --task-prompt-file "$GITHUB_WORKSPACE/target-output/$TASK_PROMPT_PATH" \
+            --task-prompt-path "$TASK_PROMPT_PATH" \
+            --source-repo "$SOURCE_REPO" \
+            --target-repo "$TARGET_REPO" \
+            --target-subdir "$TARGET_SUBDIR" \
+            --artifact-output "$GITHUB_WORKSPACE/forgis-runtime/final_prompt_diagnostics.md"
 
       - name: Check shell scaffolds
         run: |
@@ -158,6 +172,8 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           TARGET_REPO_DIR: ${{ github.workspace }}/target-output
           FORGIS_PROMPT_FILE: ${{ github.workspace }}/forgis-runtime/forgis_prompt.md
+          FORGIS_AIDER_DIAGNOSTICS_FILE: ${{ github.workspace }}/forgis-runtime/aider_message_diagnostics.md
+          FORGIS_AIDER_COMMAND_SUMMARY_FILE: ${{ github.workspace }}/forgis-runtime/aider_command_summary.md
         run: |
           if [[ "$RUN_AIDER" != "true" ]]; then
             echo "RUN_AIDER is false. Skipping Aider execution."
@@ -296,6 +312,16 @@ jobs:
         with:
           name: forgis-generated-prompt
           path: forgis-runtime/forgis_prompt.md
+
+      - name: Upload prompt diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: forgis-prompt-diagnostics
+          path: |
+            forgis-runtime/final_prompt_diagnostics.md
+            forgis-runtime/aider_message_diagnostics.md
+            forgis-runtime/aider_command_summary.md
 
       - name: Upload generated long log preview
         if: always()

@@ -146,6 +146,24 @@ Before Aider runs, Forgis records hashes for the configured config and task prom
 
 Forgis also checks target git status and fails if any changed file is outside `target_subdir`.
 
+Forgis asks Aider not to modify the target repository root `.gitignore`. If an older Aider still creates a new root `.gitignore` containing only Aider ignore patterns, Forgis removes that new auto file before guardrail checks. Existing user `.gitignore` files are never removed or restored; any modification to them remains a guardrail failure.
+
+## Prompt Diagnostics
+
+Before Aider runs, Forgis logs and uploads diagnostics for both the generated final prompt and the exact Aider `--message-file`.
+
+Diagnostics include:
+
+- prompt path
+- character count
+- SHA256
+- first 20 lines
+- task prompt marker checks
+- forbidden stale greeting prompt checks
+- Aider command summary without secrets
+
+For Kikaria Android runs, the message file must contain `Kikaria Android Migration Task`, `Vita0818/Kikaria`, `Vita0818/Outposts`, `Kikaria-Android`, and `FORGIS_TASK.md`. If stale greeting example text appears, Forgis fails before calling Aider.
+
 ## Long-Term Log
 
 Real migration runs append a Markdown entry to the long-term log file:

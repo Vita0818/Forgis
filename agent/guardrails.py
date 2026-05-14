@@ -13,6 +13,12 @@ from typing import Any
 from forgis_config import resolve_inside_root, resolve_target_subdir
 
 
+AIDER_GITIGNORE_MARKERS = (
+    ".aider",
+    "aider",
+)
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as file:
@@ -57,6 +63,35 @@ def git_status_lines(repo: Path) -> list[str]:
     return result.stdout.splitlines()
 
 
+def git_path_exists_in_head(repo: Path, path: str) -> bool:
+    result = subprocess.run(
+        ["git", "cat-file", "-e", f"HEAD:{path}"],
+        cwd=repo,
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return result.returncode == 0
+
+
+def classify_status(status: str) -> str:
+    if status == "??":
+        return "new"
+    if "R" in status:
+        return "renamed"
+    if "D" in status:
+        return "deleted"
+    if "A" in status:
+        return "added"
+    if "M" in status:
+        return "modified"
+    if "C" in status:
+        return "copied"
+    if "U" in status:
+        return "unmerged"
+    return "changed"
+
+
 def paths_from_status_line(line: str) -> list[str]:
     if len(line) < 4:
         return []
@@ -75,6 +110,23 @@ def changed_paths_from_status(status_lines: list[str]) -> list[str]:
     for line in status_lines:
         paths.extend(paths_from_status_line(line))
     return paths
+
+
+def status_entries(status_lines: list[str]) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    for line in status_lines:
+        if len(line) < 4:
+            continue
+        status = line[:2]
+        for path in paths_from_status_line(line):
+            entries.append(
+                {
+                    "status": status,
+                    "kind": classify_status(status),
+                    "path": path,
+                }
+            )
+    return entries
 
 
 def is_path_inside(path: str, directory: str) -> bool:
@@ -100,6 +152,55 @@ def target_scope_violations(
             violations.append(normalized)
 
     return sorted(set(violations))
+
+
+def looks_like_aider_gitignore(path: Path) -> bool:
+    if not path.is_file():
+        return False
+
+    text = path.read_text(encoding="utf-8", errors="replace")
+    meaningful_lines = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    if not meaningful_lines:
+        return False
+
+    return all(any(marker in line.casefold() for marker in AIDER_GITIGNORE_MARKERS) for line in meaningful_lines)
+
+
+def root_gitignore_snapshot(target: Path) -> dict[str, Any]:
+    path = target / ".gitignore"
+    exists = path.is_file()
+    return {
+        "path": ".gitignore",
+        "exists": exists,
+        "sha256": sha256_file(path) if exists else None,
+    }
+
+
+def cleanup_aider_root_gitignore(target: Path, snapshot: dict[str, Any]) -> bool:
+    path = target / ".gitignore"
+    existed_before = bool(snapshot.get("exists"))
+    if existed_before:
+        if path.is_file():
+            before_hash = snapshot.get("sha256")
+            after_hash = sha256_file(path)
+            if before_hash != after_hash:
+                print("Root .gitignore existed before this run and was changed; leaving it for guardrail failure.")
+        return False
+
+    if not path.exists():
+        return False
+
+    if looks_like_aider_gitignore(path):
+        path.unlink()
+        print("Removed root .gitignore because it was newly created and only contained Aider ignore patterns.")
+        return True
+
+    print("Root .gitignore was newly created but did not look like an Aider-only file; leaving it for guardrail failure.")
+    return False
 
 
 def command_snapshot_readonly(args: argparse.Namespace) -> None:
@@ -141,18 +242,33 @@ def command_check_target_scope(args: argparse.Namespace) -> None:
             _, relative = resolve_inside_root(target, value, "read-only path")
             read_only_paths.append(relative)
 
-    changed_paths = changed_paths_from_status(git_status_lines(target))
+    status = git_status_lines(target)
+    entries = status_entries(status)
+    changed_paths = [entry["path"] for entry in entries]
     violations = target_scope_violations(changed_paths, target_subdir, read_only_paths)
 
     if violations:
+        entry_by_path = {entry["path"]: entry for entry in entries}
         print("ERROR: target repository has changes outside the allowed writable scope:", file=sys.stderr)
         for path in violations:
-            print(f"  {path}", file=sys.stderr)
+            entry = entry_by_path.get(path, {"kind": "changed", "status": "??"})
+            abs_path = target / path
+            existed_in_head = git_path_exists_in_head(target, path)
+            aider_generated = "unknown"
+            if path == ".gitignore":
+                aider_generated = "yes" if looks_like_aider_gitignore(abs_path) else "no"
+            print(
+                f"  {path} ({entry['kind']}, status={entry['status']}, "
+                f"existed_before={'yes' if existed_in_head else 'no'}, "
+                f"aider_auto_generated={aider_generated})",
+                file=sys.stderr,
+            )
         print(f"Allowed writable scope: {target_subdir}/", file=sys.stderr)
         if read_only_paths:
             print("Explicit read-only target inputs:", file=sys.stderr)
             for path in sorted(set(read_only_paths)):
                 print(f"  {path}", file=sys.stderr)
+        print("Fix suggestion: keep generated files, reports, Aider history, and ignore files inside the writable scope.", file=sys.stderr)
         sys.exit(1)
 
     print("Target writable scope verification passed.")
@@ -171,6 +287,23 @@ def command_check_source_clean(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     print("Source repository read-only verification passed.")
+
+
+def command_snapshot_root_gitignore(args: argparse.Namespace) -> None:
+    target = Path(args.target).resolve()
+    snapshot = root_gitignore_snapshot(target)
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(snapshot, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    state = snapshot["sha256"] if snapshot["exists"] else "missing"
+    print(f"Root .gitignore snapshot recorded: {state}")
+
+
+def command_cleanup_aider_root_gitignore(args: argparse.Namespace) -> None:
+    target = Path(args.target).resolve()
+    snapshot = json.loads(Path(args.snapshot).read_text(encoding="utf-8"))
+    cleaned = cleanup_aider_root_gitignore(target, snapshot)
+    print(f"Root .gitignore cleanup performed: {'yes' if cleaned else 'no'}")
 
 
 def main() -> None:
@@ -198,6 +331,16 @@ def main() -> None:
     source_clean = subparsers.add_parser("check-source-clean")
     source_clean.add_argument("--source", required=True)
     source_clean.set_defaults(func=command_check_source_clean)
+
+    snapshot_gitignore = subparsers.add_parser("snapshot-root-gitignore")
+    snapshot_gitignore.add_argument("--target", required=True)
+    snapshot_gitignore.add_argument("--output", required=True)
+    snapshot_gitignore.set_defaults(func=command_snapshot_root_gitignore)
+
+    cleanup_gitignore = subparsers.add_parser("cleanup-aider-root-gitignore")
+    cleanup_gitignore.add_argument("--target", required=True)
+    cleanup_gitignore.add_argument("--snapshot", required=True)
+    cleanup_gitignore.set_defaults(func=command_cleanup_aider_root_gitignore)
 
     args = parser.parse_args()
     args.func(args)

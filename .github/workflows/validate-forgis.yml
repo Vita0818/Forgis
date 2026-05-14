@@ -41,6 +41,7 @@ jobs:
           test -f agent/resolve_config.py
           test -f agent/guardrails.py
           test -f agent/write_run_log.py
+          test -f agent/prompt_diagnostics.py
           test -f agent/collect_source.py
           test -f agent/build_prompt.py
           test -f agent/run_aider.sh
@@ -66,6 +67,7 @@ jobs:
           python -m py_compile agent/resolve_config.py
           python -m py_compile agent/guardrails.py
           python -m py_compile agent/write_run_log.py
+          python -m py_compile agent/prompt_diagnostics.py
           python -m py_compile agent/collect_source.py
           python -m py_compile agent/build_prompt.py
 
