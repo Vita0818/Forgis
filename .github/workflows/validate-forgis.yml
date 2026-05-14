@@ -96,7 +96,7 @@ jobs:
             --task-prompt-path tmp/FORGIS_TASK.md \
             --target-subdir tmp/validation-output \
             --run-log-path tmp/validation-output/FORGIS_LOG.md \
-            --model deepseek/deepseek-v4-pro \
+            --model provider/model-name \
             --dry-run true \
             --run-ai false \
             --summary-output "$GITHUB_WORKSPACE/tmp/run_summary.md"

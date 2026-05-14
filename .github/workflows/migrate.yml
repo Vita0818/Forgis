@@ -8,12 +8,6 @@ on:
         required: true
         type: string
 
-      source_repo:
-        description: "Optional override: source repository, for example owner/source-repo"
-        required: false
-        default: ""
-        type: string
-
 permissions:
   contents: read
 
@@ -54,7 +48,6 @@ jobs:
           python forgis/agent/resolve_config.py \
             --target "$GITHUB_WORKSPACE/target-output" \
             --target-repo "${{ inputs.target_repo }}" \
-            --source-repo "${{ inputs.source_repo }}" \
             --github-env "$GITHUB_ENV" \
             --github-output "$GITHUB_OUTPUT" \
             --summary-output "$GITHUB_WORKSPACE/forgis-runtime/resolved_config.md"
@@ -71,7 +64,6 @@ jobs:
           python forgis/agent/resolve_config.py \
             --target "$GITHUB_WORKSPACE/target-output" \
             --target-repo "${{ inputs.target_repo }}" \
-            --source-repo "${{ inputs.source_repo }}" \
             --github-env "$GITHUB_ENV" \
             --github-output "$GITHUB_OUTPUT" \
             --summary-output "$GITHUB_WORKSPACE/forgis-runtime/resolved_config.md"
@@ -171,7 +163,6 @@ jobs:
 
       - name: Run Aider with configured model
         env:
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           TARGET_REPO_DIR: ${{ github.workspace }}/target-output
           FORGIS_PROMPT_FILE: ${{ github.workspace }}/forgis-runtime/forgis_prompt.md
           FORGIS_AIDER_DIAGNOSTICS_FILE: ${{ github.workspace }}/forgis-runtime/aider_message_diagnostics.md

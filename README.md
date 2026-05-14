@@ -16,16 +16,10 @@ Put these two files in the target repository root:
 Then run the main GitHub Action with only:
 
 ```text
-target_repo: Vita0818/Outposts
+target_repo: owner/target-repo
 ```
 
-Optionally override only the source repository:
-
-```text
-source_repo: Vita0818/Kikaria
-```
-
-All other migration parameters come from the target repository root file:
+All migration parameters other than `target_repo` come from the target repository root file:
 
 ```text
 FORGIS_CONFIG.yml
@@ -36,34 +30,31 @@ The main workflow fixes the config path to `FORGIS_CONFIG.yml`. It does not expo
 ## Example Config
 
 ```yaml
-source_repo: Vita0818/Kikaria
+source_repo: owner/source-repo
 source_ref: main
 
 target_platform: android
 target_stack: kotlin-compose
 migration_profile: pixel-clone-app
 
-target_subdir: Kikaria-Android
+target_subdir: sample-output
 task_prompt_path: FORGIS_TASK.md
 
-model: deepseek/deepseek-v4-pro
-target_branch: forgis/kikaria-android-pixel-2
+model: provider/model-name
+target_branch: forgis/migration-output
 target_base_branch: main
 
-run_log_path: Kikaria-Android/FORGIS_LOG.md
+run_log_path: sample-output/FORGIS_LOG.md
 
 dry_run: true
 run_aider: false
 confirm_real_run: false
 
-required_prompt_markers:
-  - Kikaria Android Migration Task
-  - Vita0818/Kikaria
-  - Vita0818/Outposts
-  - Kikaria-Android
+required_prompt_markers: []
+forbidden_prompt_markers: []
 ```
 
-The `required_prompt_markers` block is project-specific. Omit it or replace it for other migration projects.
+`required_prompt_markers` is project-specific. Leave it empty unless the target repository wants explicit marker checks for its own migration prompt.
 
 If `run_log_path` is omitted, Forgis uses:
 
@@ -74,7 +65,7 @@ If `run_log_path` is omitted, Forgis uses:
 For example:
 
 ```text
-Kikaria-Android/FORGIS_LOG.md
+sample-output/FORGIS_LOG.md
 ```
 
 ## Run Switches
@@ -107,15 +98,15 @@ Rules:
 
 Forgis resolves values in this order:
 
-1. Non-empty `source_repo` workflow input, only for `source_repo`
-2. `FORGIS_CONFIG.yml`
+1. `target_repo` from the GitHub Actions input
+2. `FORGIS_CONFIG.yml` for every migration parameter
 3. Safe default, where one exists
 
-`target_repo` always comes from the workflow input. Every other migration parameter comes from `FORGIS_CONFIG.yml`.
+`FORGIS_CONFIG.yml` must exist in the target repository root. The main workflow does not expose overrides for `source_repo`, branches, model, prompt, log, target directory, dry-run mode, or Aider execution.
 
 Required config fields are:
 
-- `source_repo`, unless provided as the workflow override
+- `source_repo`
 - `target_platform`
 - `target_stack`
 - `target_branch`
@@ -171,16 +162,16 @@ Diagnostics include:
 - forbidden stale greeting prompt checks
 - Aider command summary without secrets
 
-Forgis is a generic migration tool and does not globally require Kikaria-specific text. The generated prompt includes a `Task prompt sha256: ...` marker derived from the target repository task file, and the Aider message file must contain the same marker. The Aider message file must also match the generated final prompt hash.
+Forgis is a generic migration tool and does not globally require project-specific text. The generated prompt includes a `Task prompt sha256: ...` marker derived from the target repository task file, and the Aider message file must contain the same marker. The Aider message file must also match the generated final prompt hash.
 
 Project-specific checks are configured with optional markers:
 
 ```yaml
 required_prompt_markers:
-  - Kikaria Android Migration Task
-  - Vita0818/Kikaria
-  - Vita0818/Outposts
-  - Kikaria-Android
+  - Sample App Migration Task
+  - owner/source-repo
+  - owner/target-repo
+  - sample-output
 ```
 
 If `required_prompt_markers` is omitted, Forgis only checks the generic prompt integrity rules. `forbidden_prompt_markers` can extend the default stale prompt blocklist:
@@ -209,7 +200,6 @@ In dry run mode, Forgis prints the proposed log entry to the workflow log and up
 The main workflow exposes only:
 
 - `target_repo`: required target repository containing `FORGIS_CONFIG.yml` and `FORGIS_TASK.md`
-- `source_repo`: optional source repository override
 
 No deprecated alias or advanced override inputs are shown in the main manual run UI.
 
@@ -217,10 +207,8 @@ No deprecated alias or advanced override inputs are shown in the main manual run
 
 API keys must be stored in GitHub Actions Secrets, not in repository files.
 
-Required GitHub Actions secrets:
+Common GitHub Actions secrets:
 
-- `DEEPSEEK_API_KEY`
-  - Used only for DeepSeek API access when effective `run_aider` is true.
 - `FORGIS_SOURCE_TOKEN`
   - Used only to check out the source repository.
   - Should have source repository Contents read and Metadata read permissions.
@@ -231,10 +219,12 @@ Required GitHub Actions secrets:
 
 Do not reuse the target token for source checkout.
 
+Provider-specific model API keys should be stored as GitHub Actions secrets and made available to the workflow according to the chosen model provider. Do not store model API keys in `FORGIS_CONFIG.yml`, `FORGIS_TASK.md`, or generated prompt artifacts.
+
 ## Default AI Model
 
-Forgis uses DeepSeek Pro by default.
+The default model placeholder is:
 
-Current default Aider model:
+- `provider/model-name`
 
-- `deepseek/deepseek-v4-pro`
+Set `model` in `FORGIS_CONFIG.yml` before enabling a real Aider run.
