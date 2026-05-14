@@ -22,20 +22,6 @@ jobs:
         run: |
           test -f README.md
           test -f requirements.txt
-          test -f rules/PROJECT_BOUNDARY.md
-          test -f rules/AGENTS.md
-          test -f rules/TRANSLATION_STRATEGY.md
-          test -f rules/profiles/default.md
-          test -f rules/profiles/local-first-app.md
-          test -f rules/stacks/kotlin-compose.md
-          test -f rules/stacks/csharp-avalonia.md
-          test -f rules/stacks/arkts.md
-          test -f rules/stacks/web-react.md
-          test -f prompts/migrate_generic.md
-          test -f prompts/platforms/android.md
-          test -f prompts/platforms/windows.md
-          test -f prompts/platforms/harmonyos.md
-          test -f prompts/platforms/web.md
           test -f agent/forge.py
           test -f agent/aider_compat.py
           test -f agent/model_env.py
@@ -46,6 +32,7 @@ jobs:
           test -f agent/prompt_diagnostics.py
           test -f agent/collect_source.py
           test -f agent/build_prompt.py
+          test -f agent/validate_target_output.py
           test -f agent/run_aider.sh
           test -f agent/build_target.sh
           test -f agent/create_pr.sh
@@ -74,8 +61,9 @@ jobs:
           python -m py_compile agent/prompt_diagnostics.py
           python -m py_compile agent/collect_source.py
           python -m py_compile agent/build_prompt.py
+          python -m py_compile agent/validate_target_output.py
 
-      - name: Run Forgis config and guardrail tests
+      - name: Run Forgis tests
         run: |
           python -m unittest tests/test_forgis_config.py
 
@@ -85,130 +73,56 @@ jobs:
           bash -n agent/build_target.sh
           bash -n agent/create_pr.sh
 
-      - name: Run Forgis controller smoke test
+      - name: Run controller smoke test
         run: |
+          mkdir -p tmp/source tmp/target/target-output
           python agent/forge.py \
-            --source "$GITHUB_WORKSPACE" \
-            --target "$GITHUB_WORKSPACE" \
-            --rules "$GITHUB_WORKSPACE/rules" \
-            --platform android \
-            --target-stack kotlin-compose \
-            --migration-profile default \
-            --target-branch forgis/android-from-source \
-            --target-base-branch main \
-            --config-path tmp/FORGIS_CONFIG.yml \
-            --task-prompt-path tmp/FORGIS_TASK.md \
-            --target-subdir tmp/validation-output \
-            --run-log-path tmp/validation-output/FORGIS_LOG.md \
-            --model provider/model-name \
+            --source "$GITHUB_WORKSPACE/tmp/source" \
+            --target "$GITHUB_WORKSPACE/tmp/target" \
+            --source-repo "owner/source-repo" \
+            --source-ref "main" \
+            --target-repo "owner/target-repo" \
+            --target-branch "forgis/output" \
+            --target-base-branch "main" \
+            --config-path "FORGIS_CONFIG.yml" \
+            --task-prompt-path "FORGIS_TASK.md" \
+            --target-subdir "target-output" \
+            --run-log-path "target-output/FORGIS_LOG.md" \
+            --agent-backend "aider" \
+            --model "provider/model-name" \
             --dry-run true \
-            --run-ai false \
+            --run-agent false \
+            --confirm-real-run false \
             --summary-output "$GITHUB_WORKSPACE/tmp/run_summary.md"
 
-      - name: Collect source smoke test
+      - name: Build thin message smoke test
         run: |
-          mkdir -p tmp
-          python agent/collect_source.py \
-            --source "$GITHUB_WORKSPACE" \
-            --output "$GITHUB_WORKSPACE/tmp/source_bundle.md" \
-            --manifest-output "$GITHUB_WORKSPACE/tmp/source_manifest.md"
+          mkdir -p tmp/source tmp/target
+          printf '%s\n' "source file" > tmp/source/example.txt
+          printf '%s\n' "source_repo: owner/source-repo" "target_branch: forgis/output" > tmp/target/FORGIS_CONFIG.yml
+          printf '%s\n' "# Task" "" "Create files according to this task." > tmp/target/FORGIS_TASK.md
 
-          test -f "$GITHUB_WORKSPACE/tmp/source_bundle.md"
-          test -f "$GITHUB_WORKSPACE/tmp/source_manifest.md"
-          grep -q "Forgis Source Bundle" "$GITHUB_WORKSPACE/tmp/source_bundle.md"
-          grep -q "Forgis Source Manifest" "$GITHUB_WORKSPACE/tmp/source_manifest.md"
-
-      - name: Build generated migration prompt smoke test
-        run: |
-          fail() {
-            echo "FAIL: $1" >&2
-            exit 1
-          }
-
-          check_file() {
-            echo "CHECK: $2"
-            test -f "$1" || fail "$2 missing: $1"
-          }
-
-          check_nonempty() {
-            echo "CHECK: $2"
-            test -s "$1" || fail "$2 empty: $1"
-          }
-
-          check_contains() {
-            echo "CHECK: $3"
-            grep -qF "$2" "$1" || fail "$3 not found: $2"
-          }
-
-          check_not_contains() {
-            echo "CHECK: $3"
-            if grep -qF "$2" "$1"; then
-              echo "Matched forbidden content:" >&2
-              grep -nF "$2" "$1" | head -20 >&2
-              fail "$3 found forbidden content: $2"
-            fi
-          }
-
-          mkdir -p tmp
-          mkdir -p "$GITHUB_WORKSPACE/tmp/validation-source"
-          {
-            printf '%s\n' "# Validation Source"
-            printf '%s\n' ""
-            printf '%s\n' "This is a mock source project used only by the Forgis validation workflow."
-          } > "$GITHUB_WORKSPACE/tmp/validation-source/README.md"
-
-          {
-            printf '%s\n' "# Forgis Validation Smoke Task"
-            printf '%s\n' ""
-            printf '%s\n' "Create a minimal target project skeleton for this validation run."
-          } > "$GITHUB_WORKSPACE/tmp/FORGIS_TASK.md"
-
-          echo "CHECK: Collect mock source bundle for prompt smoke test"
-          python agent/collect_source.py \
-            --source "$GITHUB_WORKSPACE/tmp/validation-source" \
-            --output "$GITHUB_WORKSPACE/tmp/validation_source_bundle.md" \
-            --manifest-output "$GITHUB_WORKSPACE/tmp/validation_source_manifest.md" \
-            || fail "collect_source.py failed for prompt smoke test mock source"
-
-          check_file "$GITHUB_WORKSPACE/tmp/validation_source_bundle.md" "mock source bundle"
-          check_file "$GITHUB_WORKSPACE/tmp/validation_source_manifest.md" "mock source manifest"
-
-          echo "CHECK: Build generated migration prompt"
           python agent/build_prompt.py \
-            --source "$GITHUB_WORKSPACE/tmp/validation-source" \
-            --target "$GITHUB_WORKSPACE" \
-            --rules "$GITHUB_WORKSPACE/rules" \
-            --prompts "$GITHUB_WORKSPACE/prompts" \
-            --source-repo "forgis/validation-source" \
-            --target-repo "forgis/validation-target" \
-            --platform android \
-            --target-stack kotlin-compose \
-            --migration-profile default \
-            --source-bundle "$GITHUB_WORKSPACE/tmp/validation_source_bundle.md" \
-            --source-manifest "$GITHUB_WORKSPACE/tmp/validation_source_manifest.md" \
-            --task-prompt-path "tmp/FORGIS_TASK.md" \
+            --source "$GITHUB_WORKSPACE/tmp/source" \
+            --target "$GITHUB_WORKSPACE/tmp/target" \
+            --source-repo "owner/source-repo" \
+            --source-ref "main" \
+            --target-repo "owner/target-repo" \
+            --config-path "FORGIS_CONFIG.yml" \
+            --task-prompt-path "FORGIS_TASK.md" \
             --require-task-prompt \
-            --target-subdir "tmp/validation-output" \
-            --run-log-path "tmp/validation-output/FORGIS_LOG.md" \
-            --output "$GITHUB_WORKSPACE/tmp/forgis_prompt.md" \
-            || fail "build_prompt.py failed to generate the validation prompt"
+            --target-subdir "target-output" \
+            --run-log-path "target-output/FORGIS_LOG.md" \
+            --output "$GITHUB_WORKSPACE/tmp/forgis_message.md"
 
-          check_file "$GITHUB_WORKSPACE/tmp/forgis_prompt.md" "generated prompt file"
-          check_nonempty "$GITHUB_WORKSPACE/tmp/forgis_prompt.md" "generated prompt file"
-          check_contains "$GITHUB_WORKSPACE/tmp/forgis_prompt.md" "Forgis Generated Migration Task" "generated prompt header"
-          check_contains "$GITHUB_WORKSPACE/tmp/forgis_prompt.md" "Forgis Validation Smoke Task" "task prompt first effective line"
-          check_contains "$GITHUB_WORKSPACE/tmp/forgis_prompt.md" "Task prompt sha256:" "task prompt sha256 marker"
-          check_contains "$GITHUB_WORKSPACE/tmp/forgis_prompt.md" "tmp/validation-output" "target writable scope"
-          check_not_contains "$GITHUB_WORKSPACE/tmp/forgis_prompt.md" "make the greeting more casual" "stale greeting prompt marker"
-          check_not_contains "$GITHUB_WORKSPACE/tmp/forgis_prompt.md" "Which file (or which phrase) should be changed?" "stale greeting prompt question"
-          check_not_contains "$GITHUB_WORKSPACE/tmp/forgis_prompt.md" "casual greeting" "stale casual greeting marker"
+          test -f "$GITHUB_WORKSPACE/tmp/forgis_message.md"
+          grep -qF "You are running through Forgis." "$GITHUB_WORKSPACE/tmp/forgis_message.md"
+          grep -qF "Task file path:" "$GITHUB_WORKSPACE/tmp/forgis_message.md"
+          if grep -qF "Create files according to this task." "$GITHUB_WORKSPACE/tmp/forgis_message.md"; then
+            echo "Task file content leaked into the thin message." >&2
+            exit 1
+          fi
 
-          echo "CHECK: Run prompt diagnostics on generated validation prompt"
-          python agent/prompt_diagnostics.py \
-            --file "$GITHUB_WORKSPACE/tmp/forgis_prompt.md" \
-            --label "Validation Final Prompt" \
-            --task-prompt-file "$GITHUB_WORKSPACE/tmp/FORGIS_TASK.md" \
-            --task-prompt-path "tmp/FORGIS_TASK.md" \
-            --required-marker "Forgis Validation Smoke Task" \
-            --expected-same-as "$GITHUB_WORKSPACE/tmp/forgis_prompt.md" \
-            || fail "prompt_diagnostics.py failed for the generated validation prompt"
+      - name: Check diff whitespace
+        run: |
+          git diff --check

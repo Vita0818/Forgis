@@ -21,22 +21,12 @@ if [[ -z "${TARGET_BASE_BRANCH:-}" ]]; then
   exit 1
 fi
 
-if [[ -z "${TARGET_PLATFORM:-}" ]]; then
-  echo "TARGET_PLATFORM is required." >&2
-  exit 1
-fi
-
-if [[ -z "${TARGET_STACK:-}" ]]; then
-  echo "TARGET_STACK is required." >&2
-  exit 1
-fi
-
 if [[ -z "${DRY_RUN:-}" ]]; then
   echo "DRY_RUN is required." >&2
   exit 1
 fi
 
-TARGET_SUBDIR="${TARGET_SUBDIR:-forgis-output}"
+TARGET_SUBDIR="${TARGET_SUBDIR:-target-output}"
 RUN_LOG_PATH="${RUN_LOG_PATH:-$TARGET_SUBDIR/FORGIS_LOG.md}"
 CONFIG_PATH="${CONFIG_PATH:-FORGIS_CONFIG.yml}"
 TASK_PROMPT_PATH="${TASK_PROMPT_PATH:-FORGIS_TASK.md}"
@@ -85,7 +75,7 @@ if [[ -n "$(git status --porcelain)" ]]; then
   if git diff --cached --quiet; then
     echo "No staged changes detected after git add."
   else
-    git commit -m "Forgis: sync source to $TARGET_PLATFORM using $TARGET_STACK"
+    git commit -m "Forgis: apply task output"
   fi
 else
   echo "No uncommitted working tree changes detected."
@@ -102,7 +92,7 @@ if [[ "$DRY_RUN_NORMALIZED" == "true" ]]; then
 fi
 
 if [[ "${CONFIRM_REAL_RUN,,}" != "true" ]]; then
-  echo "Real AI migration requires confirm_real_run: true in FORGIS_CONFIG.yml." >&2
+  echo "Real Forgis runs require confirm_real_run: true in FORGIS_CONFIG.yml." >&2
   exit 1
 fi
 
@@ -118,6 +108,6 @@ else
     --repo "$TARGET_REPO" \
     --base "$TARGET_BASE_BRANCH" \
     --head "$TARGET_BRANCH" \
-    --title "Forgis sync: source to $TARGET_PLATFORM" \
+    --title "Forgis task output" \
     --body-file "$RUN_LOG_PATH"
 fi

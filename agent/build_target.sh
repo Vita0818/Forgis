@@ -6,19 +6,13 @@ if [[ -z "${TARGET_REPO_DIR:-}" ]]; then
   exit 1
 fi
 
-if [[ -z "${TARGET_PLATFORM:-}" ]]; then
-  echo "TARGET_PLATFORM is required." >&2
-  exit 1
-fi
+TARGET_SUBDIR="${TARGET_SUBDIR:-target-output}"
+VALIDATION_COMMANDS_JSON="${VALIDATION_COMMANDS_JSON:-[]}"
 
 if [[ ! -d "$TARGET_REPO_DIR" ]]; then
   echo "Target repository directory does not exist: $TARGET_REPO_DIR" >&2
   exit 1
 fi
-
-TARGET_SUBDIR="${TARGET_SUBDIR:-forgis-output}"
-RUN_AIDER="${RUN_AIDER:-false}"
-DRY_RUN="${DRY_RUN:-true}"
 
 PATH_INFO="$(
   python3 - "$TARGET_REPO_DIR" "$TARGET_SUBDIR" <<'PY'
@@ -47,55 +41,48 @@ PY
 )"
 
 eval "$PATH_INFO"
+mkdir -p "$TARGET_BUILD_DIR"
 
-cd "$TARGET_BUILD_DIR"
-
-echo "Build target scope:"
+echo "Forgis validation command scope:"
 echo "  target repository: $TARGET_REPO_DIR"
 echo "  target output directory: $TARGET_SUBDIR_REL"
-echo "  run_aider: $RUN_AIDER"
-echo "  dry_run: $DRY_RUN"
 
-case "$TARGET_PLATFORM" in
-  android)
-    if [[ -f "./gradlew" ]]; then
-      echo "Running Android Gradle build..."
-      chmod +x ./gradlew
-      ./gradlew assembleDebug
-    else
-      echo "No Gradle wrapper found. Skipping Android build."
-      echo "Expected file: $TARGET_SUBDIR_REL/gradlew"
+python3 - "$TARGET_BUILD_DIR" "$VALIDATION_COMMANDS_JSON" <<'PY'
+import json
+import subprocess
+import sys
+from pathlib import Path
 
-      if [[ "${RUN_AIDER,,}" =~ ^(true|1|yes|y|on)$ && "${DRY_RUN,,}" =~ ^(false|0|no|n|off)$ ]]; then
-        if [[ ! -f "settings.gradle" && ! -f "settings.gradle.kts" && ! -f "app/build.gradle" && ! -f "app/build.gradle.kts" ]]; then
-          echo "Android project structure was not generated in $TARGET_SUBDIR_REL." >&2
-          echo "Expected at least one of: settings.gradle, settings.gradle.kts, app/build.gradle, app/build.gradle.kts." >&2
-          exit 1
-        fi
-      fi
-    fi
-    ;;
+cwd = Path(sys.argv[1]).resolve()
+raw = sys.argv[2]
+try:
+    commands = json.loads(raw or "[]")
+except json.JSONDecodeError as exc:
+    raise SystemExit(f"VALIDATION_COMMANDS_JSON is invalid JSON: {exc}")
 
-  windows)
-    echo "Windows build is not enabled in the Forgis MVP."
-    echo "Skipping Windows build."
-    ;;
+if not isinstance(commands, list):
+    raise SystemExit("VALIDATION_COMMANDS_JSON must be a JSON list.")
 
-  harmonyos)
-    echo "HarmonyOS build is not enabled in the Forgis MVP."
-    echo "Skipping HarmonyOS build."
-    ;;
+if not commands:
+    print("No validation_commands configured. Skipping generic target validation commands.")
+    raise SystemExit(0)
 
-  web)
-    if [[ -f "package.json" ]]; then
-      echo "Web project detected. Build is not enabled by default in the Forgis MVP."
-    else
-      echo "No package.json found. Skipping web build."
-    fi
-    ;;
+for index, command in enumerate(commands):
+    if not isinstance(command, str) or not command.strip():
+        raise SystemExit(f"validation_commands[{index}] must be a non-empty string.")
+    print(f"Running validation_commands[{index}]: {command}")
+    result = subprocess.run(
+        ["bash", "-lc", command],
+        cwd=cwd,
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    if result.stdout:
+        print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
+    if result.returncode != 0:
+        raise SystemExit(f"validation_commands[{index}] failed with exit {result.returncode}.")
 
-  *)
-    echo "Unsupported target platform: $TARGET_PLATFORM" >&2
-    exit 1
-    ;;
-esac
+print("Configured validation_commands completed successfully.")
+PY

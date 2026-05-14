@@ -17,63 +17,24 @@ def ensure_directory(path: Path, label: str) -> None:
         raise NotADirectoryError(f"{label} is not a directory: {path}")
 
 
-def collect_basic_tree(root: Path, max_files: int = 120) -> list[str]:
-    ignored_dirs = {
-        ".git",
-        ".github",
-        ".build",
-        "build",
-        "DerivedData",
-        "node_modules",
-        ".gradle",
-        ".idea",
-        ".vscode",
-        "__pycache__",
-    }
-
-    results: list[str] = []
-
-    for path in sorted(root.rglob("*")):
-        relative = path.relative_to(root)
-
-        if any(part in ignored_dirs for part in relative.parts):
-            continue
-
-        if path.is_file():
-            results.append(str(relative))
-
-        if len(results) >= max_files:
-            break
-
-    return results
-
-
-def format_list(items: list[str]) -> str:
-    return "\n".join(f"- {item}" for item in items) if items else "- No source files were collected."
-
-
 def build_summary(
     *,
     source: Path,
     target: Path,
-    rules: Path,
     source_repo: str,
     source_ref: str,
     target_repo: str,
-    platform: str,
-    target_stack: str,
-    migration_profile: str,
     target_branch: str,
     target_base_branch: str,
     task_prompt_path: str,
     target_subdir: str,
     config_path: str,
     run_log_path: str,
+    agent_backend: str,
     model: str,
     dry_run: bool,
-    run_aider: bool,
+    run_agent: bool,
     confirm_real_run: bool,
-    source_files: list[str],
 ) -> str:
     now = datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
@@ -90,17 +51,14 @@ Generated at: {now}
 - Target repository path: {target}
 - Target base branch: {target_base_branch}
 - Target branch: {target_branch}
-- Rules path: {rules}
-- Target platform: {platform}
-- Target stack: {target_stack}
-- Migration profile: {migration_profile}
 - Config path: {config_path}
 - Task prompt path: {task_prompt_path}
-- Target output directory: {target_subdir}
+- Target writable directory: {target_subdir}
 - Run log path: {run_log_path}
-- Aider model: {model}
+- Agent backend: {agent_backend}
+- Model: {model}
 - Dry run: {dry_run}
-- Run Aider: {run_aider}
+- Run agent: {run_agent}
 - Confirm real run: {confirm_real_run}
 
 ## Safety Boundaries
@@ -108,58 +66,55 @@ Generated at: {now}
 - Source repository: read-only.
 - Target repository writable scope: `{target_subdir}/`.
 - Target repository outside `{target_subdir}/`: read-only.
-- Config and task prompt files: read-only input context.
+- Config and task files: read-only.
 - Long-term run log: `{run_log_path}`.
 
 ## Status
 
 Forgis controller checks completed successfully.
 
-This summary was generated before any optional AI migration step.
-
-## Source repository sample
-
-{format_list(source_files)}
+This summary was generated before any optional agent step.
 """
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Forgis migration controller")
+    parser = argparse.ArgumentParser(description="Forgis controller")
 
     parser.add_argument("--source", required=True, help="Path to the checked-out source repository")
-    parser.add_argument("--target", required=True, help="Path to the checked-out target output repository")
-    parser.add_argument("--rules", required=True, help="Path to the Forgis rules directory")
+    parser.add_argument("--target", required=True, help="Path to the checked-out target repository")
     parser.add_argument("--source-repo", required=False, default="")
     parser.add_argument("--source-ref", required=False, default="")
     parser.add_argument("--target-repo", required=False, default="")
-    parser.add_argument("--platform", required=True, help="Target platform")
-    parser.add_argument("--target-stack", required=True, help="Target technical stack")
-    parser.add_argument("--migration-profile", required=True, help="Migration profile name")
-    parser.add_argument("--target-branch", required=True, help="Target migration branch")
+    parser.add_argument("--target-branch", required=True, help="Target output branch")
     parser.add_argument("--target-base-branch", required=False, default="main")
     parser.add_argument("--config-path", required=False, default="FORGIS_CONFIG.yml")
     parser.add_argument("--task-prompt-path", required=False, default="FORGIS_TASK.md")
-    parser.add_argument("--target-subdir", required=False, default="forgis-output")
+    parser.add_argument("--target-subdir", required=False, default="target-output")
     parser.add_argument("--run-log-path", required=False, default="")
+    parser.add_argument("--agent-backend", required=False, default="aider")
     parser.add_argument("--model", required=False, default="provider/model-name")
-    parser.add_argument("--dry-run", required=True, help="Whether to avoid pushing changes")
-    parser.add_argument("--run-ai", required=True, help="Whether Aider migration is enabled")
+    parser.add_argument("--dry-run", required=True)
+    parser.add_argument("--run-agent", required=True)
     parser.add_argument("--confirm-real-run", required=False, default="false")
-    parser.add_argument("--summary-output", required=False, default="", help="Optional run summary artifact path")
+    parser.add_argument("--summary-output", required=False, default="")
 
     args = parser.parse_args()
 
     source = Path(args.source).resolve()
     target = Path(args.target).resolve()
-    rules = Path(args.rules).resolve()
 
     ensure_directory(source, "Source repository")
     ensure_directory(target, "Target repository")
-    ensure_directory(rules, "Rules directory")
 
     dry_run = parse_bool(args.dry_run, "dry_run")
-    run_ai = parse_bool(args.run_ai, "run_ai")
+    run_agent = parse_bool(args.run_agent, "run_agent")
     confirm_real_run = parse_bool(args.confirm_real_run, "confirm_real_run")
+
+    if args.agent_backend != "aider":
+        raise ValueError("Only agent_backend=aider is currently supported.")
+
+    if not dry_run and not confirm_real_run:
+        raise ValueError("Real Forgis runs require confirm_real_run: true.")
 
     run_log_path = args.run_log_path.strip() or f"{args.target_subdir.rstrip('/')}/{DEFAULT_RUN_LOG_FILENAME}"
     _, run_log_relative = require_path_inside_subdir(
@@ -169,28 +124,23 @@ def main() -> None:
         "run_log_path",
     )
 
-    source_files = collect_basic_tree(source)
     summary = build_summary(
         source=source,
         target=target,
-        rules=rules,
         source_repo=args.source_repo or "[not provided]",
         source_ref=args.source_ref or "[not provided]",
         target_repo=args.target_repo or "[not provided]",
-        platform=args.platform,
-        target_stack=args.target_stack,
-        migration_profile=args.migration_profile,
         target_branch=args.target_branch,
         target_base_branch=args.target_base_branch,
         task_prompt_path=args.task_prompt_path,
         target_subdir=args.target_subdir,
         config_path=args.config_path,
         run_log_path=run_log_relative,
+        agent_backend=args.agent_backend,
         model=args.model,
         dry_run=dry_run,
-        run_aider=run_ai,
+        run_agent=run_agent,
         confirm_real_run=confirm_real_run,
-        source_files=source_files,
     )
 
     if args.summary_output:

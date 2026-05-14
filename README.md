@@ -1,267 +1,221 @@
 # Forgis
 
-Forgis is a generic cloud-based migration forge.
+Forgis is a generic Agent entrypoint for running Aider against a target repository.
 
-It reads a selected source repository, applies a selected migration profile and target platform configuration, and generates or updates a selected target repository.
+Forgis does not understand a migration task, analyze product logic, generate platform scaffolds, or decide what the target project should become. Those rules belong in the target repository task file and are executed by Aider.
 
-Forgis is not tied to any single project.
+## What Forgis Does
 
-## Recommended Mode
+Forgis:
 
-Put these two files in the target repository root:
+- reads `FORGIS_CONFIG.yml` from the target repository root
+- reads the configured task file, usually `FORGIS_TASK.md`
+- prepares absolute source and target repository paths
+- creates the configured writable target directory when needed
+- calls Aider when the run switches allow it
+- gives Aider the source path, target path, writable path, and task file path
+- enforces generic read/write guardrails
+- records a run log at the configured `run_log_path`
 
-- `FORGIS_CONFIG.yml`: machine-readable migration parameters and run switches
-- `FORGIS_TASK.md`: long-form human task prompt for the current run
+Forgis does not include Android, Web, iOS, HarmonyOS, Rust, Python, or any other platform logic. If the task is to migrate or generate one of those outputs, the target repository task file must say so and Aider must perform it.
 
-Then run the main GitHub Action with only:
+## Workflow Input
+
+The main workflow exposes only one manual input:
 
 ```text
 target_repo: owner/target-repo
 ```
 
-All migration parameters other than `target_repo` come from the target repository root file:
+Every other setting comes from `FORGIS_CONFIG.yml` in that target repository.
 
-```text
-FORGIS_CONFIG.yml
-```
+## Minimal Config
 
-The main workflow fixes the config path to `FORGIS_CONFIG.yml`. It does not expose `config_path`, `dry_run`, `run_aider`, model, branch, prompt, log, or target directory fields in the manual UI.
-
-## Example Config
+`FORGIS_CONFIG.yml` is fixed at the target repository root. It must exist, must be non-empty YAML, and must contain the required fields.
 
 ```yaml
 source_repo: owner/source-repo
 source_ref: main
-
-target_platform: android
-target_stack: kotlin-compose
-migration_profile: pixel-clone-app
-
-target_subdir: sample-output
+target_subdir: target-output
 task_prompt_path: FORGIS_TASK.md
-
+agent_backend: aider
 model: provider/model-name
-target_branch: forgis/migration-output
+target_branch: forgis/output
 target_base_branch: main
-
-model_env:
-  PROVIDER_API_KEY: FORGIS_MODEL_API_KEY
-
-run_log_path: sample-output/FORGIS_LOG.md
-
+run_log_path: target-output/FORGIS_LOG.md
 dry_run: true
-run_aider: false
+run_agent: false
 confirm_real_run: false
-
-required_prompt_markers: []
-forbidden_prompt_markers: []
+model_env:
+  PROVIDER_API_KEY: PROVIDER_API_KEY
 ```
 
-`required_prompt_markers` is project-specific. Leave it empty unless the target repository wants explicit marker checks for its own migration prompt.
+Required values:
 
-If `run_log_path` is omitted, Forgis uses:
+- `source_repo`
+- `target_branch`
+- workflow input `target_repo`
 
-```text
-{target_subdir}/FORGIS_LOG.md
-```
+Defaults:
 
-For example:
+- `source_ref: main`
+- `target_subdir: target-output`
+- `task_prompt_path: FORGIS_TASK.md`
+- `agent_backend: aider`
+- `model: provider/model-name`
+- `target_base_branch: main`
+- `run_log_path: {target_subdir}/FORGIS_LOG.md`
+- `dry_run: true`
+- `run_agent: false`
+- `confirm_real_run: false`
 
-```text
-sample-output/FORGIS_LOG.md
-```
+`run_aider` is accepted as a legacy alias for `run_agent`; internally Forgis resolves both to `run_agent`.
 
 ## Run Switches
 
-Safe dry run configuration:
+Safe dry run:
 
 ```yaml
 dry_run: true
-run_aider: false
+run_agent: false
 confirm_real_run: false
 ```
 
-Formal AI migration configuration:
+Real Aider run:
 
 ```yaml
 dry_run: false
-run_aider: true
+run_agent: true
 confirm_real_run: true
 ```
 
 Rules:
 
-- Missing fields default to `dry_run: true`, `run_aider: false`, and `confirm_real_run: false`.
-- When `dry_run: true`, Forgis does not call AI, push, create a PR, or modify the target repository.
-- When `dry_run: true` and `run_aider: true`, Forgis forces effective Aider execution to false and logs `dry_run=true, Aider execution is disabled.`
-- When `dry_run: false`, `confirm_real_run: true` is required.
-- Real AI migration only happens when `dry_run: false`, `run_aider: true`, and `confirm_real_run: true`.
+- `dry_run: true` never calls Aider, pushes, or opens a pull request.
+- `dry_run: false` requires `confirm_real_run: true`.
+- Aider runs only when effective `run_agent` is true.
+- Push and pull request creation are skipped unless the run is confirmed and not dry.
 
-## Configuration Priority
+## Task File
 
-Forgis resolves values in this order:
+The task file is the source of execution rules for Aider.
 
-1. `target_repo` from the GitHub Actions input
-2. `FORGIS_CONFIG.yml` for every migration parameter
-3. Safe default, where one exists
+Forgis does not rewrite the task into a larger migration prompt. It passes the task file as read-only context when the Aider backend supports that mode, and the thin message tells Aider to read it.
 
-`FORGIS_CONFIG.yml` must exist in the target repository root. The main workflow does not expose overrides for `source_repo`, branches, model, prompt, log, target directory, dry-run mode, or Aider execution.
+A task file should contain the product rules, migration rules, technical constraints, files to read, files to create, validation strategy, and any platform details needed for that run.
 
-Required config fields are:
+Do not put API keys, tokens, certificates, signing material, or private information in the task file or config file.
 
-- `source_repo`
-- `target_platform`
-- `target_stack`
-- `target_branch`
+## Aider Message
 
-## Target Task Prompt
+The generated Aider message is intentionally thin. It contains only:
 
-`task_prompt_path` is resolved relative to the target repository root. The recommended file is:
+- that Aider is running through Forgis
+- absolute source repository path
+- absolute target repository path
+- absolute writable target path
+- absolute task file path
+- optional source context file path when configured
+- read-only boundaries for source, config, task file, target root, and run log
+- instructions to read the task file and work only under the writable target path
 
-```text
-FORGIS_TASK.md
-```
+It does not contain platform templates, scaffold instructions, source summaries, target stack logic, or migration strategy.
 
-Forgis reads this file after checking out the target repository and embeds it into the generated final prompt. When the installed Aider supports read-only context flags, Forgis also passes the task and config files as read-only inputs. If that Aider version does not support those flags, Forgis falls back to message-file-only mode and relies on the generated prompt plus post-run hash and scope guardrails.
+## Optional Source Context
 
-If the task prompt file is missing or empty, the migration workflow fails instead of falling back to an example task.
+By default, Forgis gives Aider the source repository path and does not copy source content into the message.
 
-Do not put API keys, tokens, certificates, signing material, or private information in `FORGIS_TASK.md` or any other task prompt file.
-
-## Safety Boundaries
-
-Forgis enforces these runtime boundaries:
-
-- `source_repo` is fully read-only.
-- The target repository root is read-only.
-- Only `target_subdir` inside the target repository is writable.
-- Everything outside `target_subdir` is read-only, including other project directories.
-- `FORGIS_CONFIG.yml` and `FORGIS_TASK.md` are read-only input files.
-- `run_log_path` must be inside `target_subdir`.
-- Aider writable scope is `target_subdir`, not the config file or task prompt file.
-- The target repository root must not be polluted with generated project files.
-- Sibling project directories must not be modified.
-- Dry runs do not call AI, push, create PRs, or modify the target repository.
-- Real migration must explicitly set `confirm_real_run: true`.
-
-Before Aider runs, Forgis records hashes for the configured config and task prompt files. After Aider returns, Forgis checks the hashes again and fails the workflow if either read-only file changed.
-
-Forgis also checks target git status and fails if any changed file is outside `target_subdir`.
-
-Forgis asks Aider not to modify the target repository root `.gitignore`. If an older Aider still creates a new root `.gitignore` containing only Aider ignore patterns, Forgis removes that new auto file before guardrail checks. Existing user `.gitignore` files are never removed or restored; any modification to them remains a guardrail failure.
-
-Forgis also snapshots root `.aider.tags.cache.v*` paths before Aider runs. If Aider creates a new tags cache directory at the target repository root, and it contains only the expected Aider cache files, Forgis removes that auto-generated directory before guardrail checks. Pre-existing tags cache directories are not deleted; changes to them remain outside the writable scope and fail the run.
-
-## Prompt Diagnostics
-
-Before Aider runs, Forgis logs and uploads diagnostics for both the generated final prompt and the exact Aider `--message-file`.
-
-Diagnostics include:
-
-- prompt path
-- character count
-- SHA256
-- first 20 lines
-- task prompt SHA256 marker checks
-- required prompt marker checks
-- forbidden stale greeting prompt checks
-- Aider command summary without secrets
-
-Forgis is a generic migration tool and does not globally require project-specific text. The generated prompt includes a `Task prompt sha256: ...` marker derived from the target repository task file, and the Aider message file must contain the same marker. The Aider message file must also match the generated final prompt hash.
-
-Project-specific checks are configured with optional markers:
+`source_context` may be configured for generic file transfer:
 
 ```yaml
-required_prompt_markers:
-  - Sample App Migration Task
-  - owner/source-repo
-  - owner/target-repo
-  - sample-output
+source_context:
+  mode: none
+  max_chars: 100000
+  include:
+    - "**/*"
+  exclude:
+    - ".git/**"
+    - "build/**"
 ```
 
-If `required_prompt_markers` is omitted, Forgis only checks the generic prompt integrity rules. `forbidden_prompt_markers` can extend the default stale prompt blocklist:
+Supported modes:
+
+- `none`: no source files are copied
+- `tree`: write a generic source file tree artifact
+- `selected_files`: copy only files matched by configured include/exclude patterns
+
+Forgis does not choose files by platform or infer business importance.
+
+## Guardrails
+
+Forgis keeps only generic safety logic:
+
+- source repository must remain read-only
+- target repository root is read-only
+- only `target_subdir` is writable
+- `FORGIS_CONFIG.yml` is read-only
+- the configured task file is read-only
+- `run_log_path` must be inside `target_subdir`
+- Aider history, cache, and tags cache must not pollute the target repository root
+- any change outside `target_subdir` fails the run
+- config/task hashes changing during Aider execution fails the run
+- model secret values are never written into the message, log, or artifacts
+- dry runs do not call Aider, push, or open pull requests
+- real runs require `confirm_real_run: true`
+
+## Generic Result Checks
+
+After Aider runs, Forgis checks:
+
+- source repository was not modified
+- target repository changes stayed inside `target_subdir`
+- config and task file hashes did not change
+- `run_log_path` is inside `target_subdir`
+- Aider produced at least one non-log, non-cache change inside `target_subdir`
+- configured `validation_commands` ran successfully
+- configured `success_checks` passed
+
+If `validation_commands` and `success_checks` are not configured, Forgis does not assume any project type or platform success marker.
+
+Example:
 
 ```yaml
-forbidden_prompt_markers:
-  - Deprecated migration fallback prompt
+validation_commands:
+  - "some validation command"
+
+success_checks:
+  - path_exists: "some/output/file"
+  - command: "some validation command"
 ```
 
-The default forbidden markers block old greeting example prompts such as `make the greeting more casual`, `Which file (or which phrase) should be changed?`, and `casual greeting`. The Validate workflow uses its own `Forgis Validation Smoke Task` marker for smoke testing; that marker does not represent a real migration requirement.
+## Run Log
 
-## Long-Term Log
+Forgis writes or previews a Markdown run log at `run_log_path`, which must be inside `target_subdir`.
 
-Real migration runs append a Markdown entry to the long-term log file:
+The log records:
 
-```text
-{target_subdir}/FORGIS_LOG.md
-```
+- run id and run URL
+- target and source repository identifiers
+- source ref
+- target subdir
+- task file path
+- agent backend and model name
+- `dry_run`, `run_agent`, and `confirm_real_run`
+- whether Aider executed
+- Aider exit status when available
+- guardrail and validation summaries
+- changed paths summary
+- `validation_commands` and `success_checks` counts
 
-This file is intentionally inside the writable target output directory, so it can be committed with the migration branch.
+The log must not contain secrets or business rules.
 
-In dry run mode, Forgis prints the proposed log entry to the workflow log and uploads it as an artifact, but does not write it into the target repository. In live mode, the log file is part of the target repository changes that are pushed and included in the pull request.
+## Model Environment
 
-## Workflow Inputs
-
-The main workflow exposes only:
-
-- `target_repo`: required target repository containing `FORGIS_CONFIG.yml` and `FORGIS_TASK.md`
-
-No deprecated alias or advanced override inputs are shown in the main manual run UI.
-
-## Required Secrets
-
-API keys must be stored in GitHub Actions Secrets, not in repository files.
-
-Common GitHub Actions secrets:
-
-- `FORGIS_SOURCE_TOKEN`
-  - Used only to check out the source repository.
-  - Should have source repository Contents read and Metadata read permissions.
-  - Must not have write permissions to the source repository.
-- `FORGIS_TARGET_TOKEN`
-  - Used only to check out the target repository, push the migration branch, and create pull requests.
-  - Should have target repository Contents read/write, Pull requests read/write, and Metadata read permissions.
-
-Do not reuse the target token for source checkout.
-
-Model provider API keys are also stored in the Forgis repository Actions secrets, because the workflow runs from the Forgis repository. The target repository config declares which secret env names should be exposed to Aider:
+`model_env` maps runtime environment variable names to environment variable names made available by the workflow:
 
 ```yaml
-model: provider/model-name
-
 model_env:
-  PROVIDER_API_KEY: FORGIS_MODEL_API_KEY
+  PROVIDER_API_KEY: PROVIDER_API_KEY
 ```
 
-The left side is the environment variable Aider or LiteLLM should receive. The right side is the secret-backed environment variable made available by the Forgis workflow. Forgis prints only env names and `present` or `missing`; it never prints secret values or writes them into prompts, artifacts, or the long-term log.
-
-The main workflow currently provides these candidate secret names to the Aider step:
-
-- `FORGIS_MODEL_API_KEY`
-- `DEEPSEEK_API_KEY`
-- `OPENAI_API_KEY`
-- `ANTHROPIC_API_KEY`
-- `OPENROUTER_API_KEY`
-- `GEMINI_API_KEY`
-- `GOOGLE_API_KEY`
-
-For a LiteLLM provider that expects a provider-specific env name, map that exact runtime env name. For example:
-
-```yaml
-model: deepseek/deepseek-v4-pro
-
-model_env:
-  DEEPSEEK_API_KEY: DEEPSEEK_API_KEY
-```
-
-Then add a `DEEPSEEK_API_KEY` Actions secret in the Forgis repository.
-
-Provider-specific model API keys should be stored as GitHub Actions secrets and made available to the workflow according to the chosen model provider. Do not store model API keys in `FORGIS_CONFIG.yml`, `FORGIS_TASK.md`, or generated prompt artifacts.
-
-## Default AI Model
-
-The default model placeholder is:
-
-- `provider/model-name`
-
-Set `model` in `FORGIS_CONFIG.yml` before enabling a real Aider run.
+Forgis prints only the env variable names and whether the source variable is present. It never prints secret values.
