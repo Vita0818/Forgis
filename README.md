@@ -44,6 +44,9 @@ model: provider/model-name
 target_branch: forgis/migration-output
 target_base_branch: main
 
+model_env:
+  PROVIDER_API_KEY: FORGIS_MODEL_API_KEY
+
 run_log_path: sample-output/FORGIS_LOG.md
 
 dry_run: true
@@ -147,6 +150,8 @@ Forgis also checks target git status and fails if any changed file is outside `t
 
 Forgis asks Aider not to modify the target repository root `.gitignore`. If an older Aider still creates a new root `.gitignore` containing only Aider ignore patterns, Forgis removes that new auto file before guardrail checks. Existing user `.gitignore` files are never removed or restored; any modification to them remains a guardrail failure.
 
+Forgis also snapshots root `.aider.tags.cache.v*` paths before Aider runs. If Aider creates a new tags cache directory at the target repository root, and it contains only the expected Aider cache files, Forgis removes that auto-generated directory before guardrail checks. Pre-existing tags cache directories are not deleted; changes to them remain outside the writable scope and fail the run.
+
 ## Prompt Diagnostics
 
 Before Aider runs, Forgis logs and uploads diagnostics for both the generated final prompt and the exact Aider `--message-file`.
@@ -218,6 +223,38 @@ Common GitHub Actions secrets:
   - Should have target repository Contents read/write, Pull requests read/write, and Metadata read permissions.
 
 Do not reuse the target token for source checkout.
+
+Model provider API keys are also stored in the Forgis repository Actions secrets, because the workflow runs from the Forgis repository. The target repository config declares which secret env names should be exposed to Aider:
+
+```yaml
+model: provider/model-name
+
+model_env:
+  PROVIDER_API_KEY: FORGIS_MODEL_API_KEY
+```
+
+The left side is the environment variable Aider or LiteLLM should receive. The right side is the secret-backed environment variable made available by the Forgis workflow. Forgis prints only env names and `present` or `missing`; it never prints secret values or writes them into prompts, artifacts, or the long-term log.
+
+The main workflow currently provides these candidate secret names to the Aider step:
+
+- `FORGIS_MODEL_API_KEY`
+- `DEEPSEEK_API_KEY`
+- `OPENAI_API_KEY`
+- `ANTHROPIC_API_KEY`
+- `OPENROUTER_API_KEY`
+- `GEMINI_API_KEY`
+- `GOOGLE_API_KEY`
+
+For a LiteLLM provider that expects a provider-specific env name, map that exact runtime env name. For example:
+
+```yaml
+model: deepseek/deepseek-v4-pro
+
+model_env:
+  DEEPSEEK_API_KEY: DEEPSEEK_API_KEY
+```
+
+Then add a `DEEPSEEK_API_KEY` Actions secret in the Forgis repository.
 
 Provider-specific model API keys should be stored as GitHub Actions secrets and made available to the workflow according to the chosen model provider. Do not store model API keys in `FORGIS_CONFIG.yml`, `FORGIS_TASK.md`, or generated prompt artifacts.
 

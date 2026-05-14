@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -17,6 +18,12 @@ AIDER_GITIGNORE_MARKERS = (
     ".aider",
     "aider",
 )
+AIDER_TAGS_CACHE_PREFIX = ".aider.tags.cache.v"
+AIDER_TAGS_CACHE_ALLOWED_FILES = {
+    "cache.db",
+    "cache.db-shm",
+    "cache.db-wal",
+}
 
 
 def sha256_file(path: Path) -> str:
@@ -170,6 +177,69 @@ def looks_like_aider_gitignore(path: Path) -> bool:
     return all(any(marker in line.casefold() for marker in AIDER_GITIGNORE_MARKERS) for line in meaningful_lines)
 
 
+def is_aider_tags_cache_path(path: str) -> bool:
+    return path == AIDER_TAGS_CACHE_PREFIX.rstrip(".") or path.startswith(AIDER_TAGS_CACHE_PREFIX)
+
+
+def root_tags_cache_paths(target: Path) -> list[Path]:
+    return sorted(target.glob(f"{AIDER_TAGS_CACHE_PREFIX}*"))
+
+
+def root_tags_cache_snapshot(target: Path) -> dict[str, Any]:
+    paths: dict[str, dict[str, Any]] = {}
+    for path in root_tags_cache_paths(target):
+        relative = path.relative_to(target).as_posix()
+        paths[relative] = {
+            "exists": path.exists(),
+            "kind": "dir" if path.is_dir() else "file" if path.is_file() else "other",
+        }
+    return {"paths": paths}
+
+
+def root_tags_cache_state_text(snapshot: dict[str, Any]) -> str:
+    paths = sorted((snapshot.get("paths") or {}).keys())
+    if not paths:
+        return "none"
+    return ", ".join(paths)
+
+
+def looks_like_new_aider_tags_cache(path: Path) -> bool:
+    if not path.is_dir():
+        return False
+
+    files = [item for item in path.rglob("*") if item.is_file()]
+    if not files:
+        return True
+
+    for file_path in files:
+        relative = file_path.relative_to(path)
+        if len(relative.parts) != 1:
+            return False
+        if relative.name not in AIDER_TAGS_CACHE_ALLOWED_FILES:
+            return False
+
+    return True
+
+
+def cleanup_aider_tags_cache(target: Path, snapshot: dict[str, Any]) -> list[str]:
+    existing = set((snapshot.get("paths") or {}).keys())
+    removed: list[str] = []
+
+    for path in root_tags_cache_paths(target):
+        relative = path.relative_to(target).as_posix()
+        if relative in existing:
+            print(f"Root Aider tags cache existed before this run; leaving for guardrail checks: {relative}")
+            continue
+        if looks_like_new_aider_tags_cache(path):
+            shutil.rmtree(path)
+            removed.append(relative)
+            print(f"Removed root Aider tags cache created during this run: {relative}")
+            continue
+        print(f"Root Aider tags cache was newly created but did not look safe to remove; leaving it for guardrail failure: {relative}")
+
+    return removed
+
+
 def root_gitignore_snapshot(target: Path) -> dict[str, Any]:
     path = target / ".gitignore"
     exists = path.is_file()
@@ -263,6 +333,8 @@ def command_check_target_scope(args: argparse.Namespace) -> None:
             aider_generated = "unknown"
             if path == ".gitignore":
                 aider_generated = "yes" if looks_like_aider_gitignore(abs_path) else "no"
+            elif is_aider_tags_cache_path(path):
+                aider_generated = "yes"
             print(
                 f"  {path} ({entry['kind']}, status={entry['status']}, "
                 f"existed_before={'yes' if existed_in_head else 'no'}, "
@@ -316,6 +388,27 @@ def command_cleanup_aider_root_gitignore(args: argparse.Namespace) -> None:
     print(f"Root .gitignore cleanup performed: {'yes' if cleaned else 'no'}")
 
 
+def command_snapshot_aider_tags_cache(args: argparse.Namespace) -> None:
+    target = Path(args.target).resolve()
+    snapshot = root_tags_cache_snapshot(target)
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(snapshot, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(f"Root Aider tags cache snapshot recorded: {root_tags_cache_state_text(snapshot)}")
+
+
+def command_cleanup_aider_tags_cache(args: argparse.Namespace) -> None:
+    target = Path(args.target).resolve()
+    snapshot = json.loads(Path(args.snapshot).read_text(encoding="utf-8"))
+    before_state = root_tags_cache_state_text(snapshot)
+    removed = cleanup_aider_tags_cache(target, snapshot)
+    after = root_tags_cache_snapshot(target)
+    after_state = root_tags_cache_state_text(after)
+    print(f"Root Aider tags cache before cleanup: {before_state}")
+    print(f"Root Aider tags cache after cleanup: {after_state}")
+    print(f"Root Aider tags cache cleanup removed: {', '.join(removed) if removed else '[none]'}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Forgis read-only and target-scope guardrails")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -351,6 +444,16 @@ def main() -> None:
     cleanup_gitignore.add_argument("--target", required=True)
     cleanup_gitignore.add_argument("--snapshot", required=True)
     cleanup_gitignore.set_defaults(func=command_cleanup_aider_root_gitignore)
+
+    snapshot_tags_cache = subparsers.add_parser("snapshot-aider-tags-cache")
+    snapshot_tags_cache.add_argument("--target", required=True)
+    snapshot_tags_cache.add_argument("--output", required=True)
+    snapshot_tags_cache.set_defaults(func=command_snapshot_aider_tags_cache)
+
+    cleanup_tags_cache = subparsers.add_parser("cleanup-aider-tags-cache")
+    cleanup_tags_cache.add_argument("--target", required=True)
+    cleanup_tags_cache.add_argument("--snapshot", required=True)
+    cleanup_tags_cache.set_defaults(func=command_cleanup_aider_tags_cache)
 
     args = parser.parse_args()
     args.func(args)

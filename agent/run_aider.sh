@@ -26,6 +26,9 @@ CONFIG_PATH="${CONFIG_PATH:-FORGIS_CONFIG.yml}"
 RUN_LOG_PATH="${RUN_LOG_PATH:-$TARGET_SUBDIR/FORGIS_LOG.md}"
 SOURCE_REPO="${SOURCE_REPO:-}"
 TARGET_REPO="${TARGET_REPO:-}"
+if [[ -z "${MODEL_ENV_JSON:-}" ]]; then
+  MODEL_ENV_JSON="{}"
+fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [[ ! -d "$TARGET_REPO_DIR" ]]; then
@@ -108,6 +111,7 @@ READONLY_SNAPSHOT_DIR="${RUNNER_TEMP:-$TARGET_SUBDIR_ABS}"
 mkdir -p "$READONLY_SNAPSHOT_DIR"
 READONLY_SNAPSHOT="$READONLY_SNAPSHOT_DIR/forgis-readonly-snapshot.json"
 GITIGNORE_SNAPSHOT="$READONLY_SNAPSHOT_DIR/forgis-root-gitignore-snapshot.json"
+TAGS_CACHE_SNAPSHOT="$READONLY_SNAPSHOT_DIR/forgis-aider-tags-cache-snapshot.json"
 python3 "$SCRIPT_DIR/guardrails.py" snapshot-readonly \
   --target "$TARGET_REPO_DIR" \
   --config-path "$CONFIG_REL" \
@@ -116,6 +120,9 @@ python3 "$SCRIPT_DIR/guardrails.py" snapshot-readonly \
 python3 "$SCRIPT_DIR/guardrails.py" snapshot-root-gitignore \
   --target "$TARGET_REPO_DIR" \
   --output "$GITIGNORE_SNAPSHOT"
+python3 "$SCRIPT_DIR/guardrails.py" snapshot-aider-tags-cache \
+  --target "$TARGET_REPO_DIR" \
+  --output "$TAGS_CACHE_SNAPSHOT"
 
 WRITABLE_SEED="$TARGET_SUBDIR_ABS/.forgis-write-scope.md"
 WRITABLE_SEED_CREATED="no"
@@ -182,6 +189,26 @@ else
   echo "Config and task prompt files remain protected by pre/post hash checks; target root remains read-only and writable scope remains $TARGET_SUBDIR_REL/." >&2
 fi
 
+MODEL_ENV_PAIRS="$(python3 "$SCRIPT_DIR/model_env.py" --json "$MODEL_ENV_JSON")"
+
+MODEL_ENV_SUMMARY=()
+if [[ -n "$MODEL_ENV_PAIRS" ]]; then
+  while IFS=$'\t' read -r runtime_env secret_env; do
+    if [[ -z "$runtime_env" ]]; then
+      continue
+    fi
+    secret_value="${!secret_env:-}"
+    if [[ -z "$secret_value" ]]; then
+      echo "Required model secret env \`$secret_env\` is not available. Add it to the Forgis repository Actions secrets or update FORGIS_CONFIG.yml model_env." >&2
+      exit 1
+    fi
+    export "$runtime_env=$secret_value"
+    MODEL_ENV_SUMMARY+=("$runtime_env <- $secret_env: present")
+  done <<< "$MODEL_ENV_PAIRS"
+else
+  MODEL_ENV_SUMMARY+=("[none configured]")
+fi
+
 python3 "$SCRIPT_DIR/prompt_diagnostics.py" \
   --file "$FORGIS_PROMPT_FILE" \
   --label "Aider Message File" \
@@ -216,7 +243,13 @@ echo "  Aider supports --read: $AIDER_SUPPORTS_READ"
 echo "  Aider supports --subtree-only: $AIDER_SUPPORTS_SUBTREE_ONLY"
 echo "  selected Aider context mode: $AIDER_CONTEXT_MODE"
 echo "  Aider model: $AIDER_MODEL"
+echo "  model env mapping:"
+for model_env_line in "${MODEL_ENV_SUMMARY[@]}"; do
+  echo "    $model_env_line"
+done
 echo "  Aider runtime dir: $AIDER_RUNTIME_DIR"
+echo "  Aider working directory: $TARGET_SUBDIR_ABS"
+echo "  Aider tags cache cleanup enabled: yes"
 echo "  Aider command summary: aider --model <model> --message-file <forgis_prompt> $READ_CONTEXT_SUMMARY ${AIDER_SAFETY_ARGS[*]} --subtree-only --yes-always --no-auto-commits --no-show-release-notes <writable_scope_seed>"
 
 if [[ -n "${FORGIS_AIDER_COMMAND_SUMMARY_FILE:-}" ]]; then
@@ -234,7 +267,11 @@ if [[ -n "${FORGIS_AIDER_COMMAND_SUMMARY_FILE:-}" ]]; then
 - Supports --read: \`$AIDER_SUPPORTS_READ\`
 - Supports --subtree-only: \`$AIDER_SUPPORTS_SUBTREE_ONLY\`
 - Selected context mode: \`$AIDER_CONTEXT_MODE\`
+- Model env mapping:
+$(for model_env_line in "${MODEL_ENV_SUMMARY[@]}"; do printf '  - `%s`\n' "$model_env_line"; done)
 - Runtime dir: \`$AIDER_RUNTIME_DIR\`
+- Working directory: \`$TARGET_SUBDIR_ABS\`
+- Tags cache cleanup enabled: \`yes\`
 - Command: \`aider --model <model> --message-file <forgis_prompt> $READ_CONTEXT_SUMMARY ${AIDER_SAFETY_ARGS[*]} --subtree-only --yes-always --no-auto-commits --no-show-release-notes <writable_scope_seed>\`
 EOF
 fi
@@ -260,6 +297,9 @@ cd "$TARGET_REPO_DIR"
 python3 "$SCRIPT_DIR/guardrails.py" cleanup-aider-root-gitignore \
   --target "$TARGET_REPO_DIR" \
   --snapshot "$GITIGNORE_SNAPSHOT"
+python3 "$SCRIPT_DIR/guardrails.py" cleanup-aider-tags-cache \
+  --target "$TARGET_REPO_DIR" \
+  --snapshot "$TAGS_CACHE_SNAPSHOT"
 
 python3 "$SCRIPT_DIR/guardrails.py" check-readonly \
   --target "$TARGET_REPO_DIR" \
@@ -277,6 +317,7 @@ python3 "$SCRIPT_DIR/guardrails.py" check-target-scope \
 
 rm -f "$READONLY_SNAPSHOT"
 rm -f "$GITIGNORE_SNAPSHOT"
+rm -f "$TAGS_CACHE_SNAPSHOT"
 if [[ "$WRITABLE_SEED_CREATED" == "yes" ]]; then
   rm -f "$WRITABLE_SEED"
 fi
