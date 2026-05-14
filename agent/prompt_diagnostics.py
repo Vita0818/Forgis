@@ -11,12 +11,14 @@ from typing import Any
 
 
 DEFAULT_FORBIDDEN_PROMPT_MARKERS = (
+    "Change the greeting to be more casual",
     "make the greeting more casual",
     "Which file (or which phrase) should be changed?",
     "casual greeting",
     "I switched to a new code base",
     "I have added these files to the chat",
     "Trust this message as the true contents",
+    "show_greeting.py",
 )
 
 
@@ -127,8 +129,8 @@ def diagnostic_markdown(
     required_text = ", ".join(required_markers) if required_markers else "[none]"
     required_missing_text = ", ".join(required_missing) if required_missing else "[none]"
     required_present_text = ", ".join(required_present) if required_present else "[none]"
-    forbidden_text = ", ".join(forbidden_markers) if forbidden_markers else "[none]"
-    forbidden_hits_text = ", ".join(forbidden_hits) if forbidden_hits else "[none]"
+    forbidden_text = f"{len(forbidden_markers)} marker(s)" if forbidden_markers else "[none]"
+    forbidden_hits_text = f"{len(forbidden_hits)} hit(s)" if forbidden_hits else "[none]"
 
     return "\n".join(
         [
@@ -256,7 +258,7 @@ def main() -> None:
 
     failures: list[str] = []
     if forbidden_hits:
-        failures.append("message file contains forbidden prompt markers: " + ", ".join(forbidden_hits))
+        failures.append("message file contains forbidden prompt markers")
     if required_missing:
         failures.append("message file is missing required prompt markers: " + ", ".join(required_missing))
     if args.task_prompt_path and args.task_prompt_path not in text:
