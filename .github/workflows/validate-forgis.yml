@@ -117,13 +117,19 @@ jobs:
       - name: Build generated migration prompt smoke test
         run: |
           mkdir -p tmp
-          printf '%s\n' "Create a minimal target project skeleton for this validation run." > "$GITHUB_WORKSPACE/tmp/FORGIS_TASK.md"
+          {
+            printf '%s\n' "# Forgis Validation Smoke Task"
+            printf '%s\n' ""
+            printf '%s\n' "Create a minimal target project skeleton for this validation run."
+          } > "$GITHUB_WORKSPACE/tmp/FORGIS_TASK.md"
 
           python agent/build_prompt.py \
             --source "$GITHUB_WORKSPACE" \
             --target "$GITHUB_WORKSPACE" \
             --rules "$GITHUB_WORKSPACE/rules" \
             --prompts "$GITHUB_WORKSPACE/prompts" \
+            --source-repo "forgis/validation-source" \
+            --target-repo "forgis/validation-target" \
             --platform android \
             --target-stack kotlin-compose \
             --migration-profile default \
@@ -146,4 +152,13 @@ jobs:
           grep -q "Migration profile: default" "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
           grep -q "Source Bundle" "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
           grep -q "Source Manifest" "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
+          grep -q "Task prompt sha256:" "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
           ! grep -q "greeting more casual" "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
+
+          python agent/prompt_diagnostics.py \
+            --file "$GITHUB_WORKSPACE/tmp/forgis_prompt.md" \
+            --label "Validation Final Prompt" \
+            --task-prompt-file "$GITHUB_WORKSPACE/tmp/FORGIS_TASK.md" \
+            --task-prompt-path "tmp/FORGIS_TASK.md" \
+            --required-marker "Forgis Validation Smoke Task" \
+            --expected-same-as "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"

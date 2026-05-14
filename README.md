@@ -55,7 +55,15 @@ run_log_path: Kikaria-Android/FORGIS_LOG.md
 dry_run: true
 run_aider: false
 confirm_real_run: false
+
+required_prompt_markers:
+  - Kikaria Android Migration Task
+  - Vita0818/Kikaria
+  - Vita0818/Outposts
+  - Kikaria-Android
 ```
+
+The `required_prompt_markers` block is project-specific. Omit it or replace it for other migration projects.
 
 If `run_log_path` is omitted, Forgis uses:
 
@@ -158,11 +166,31 @@ Diagnostics include:
 - character count
 - SHA256
 - first 20 lines
-- task prompt marker checks
+- task prompt SHA256 marker checks
+- required prompt marker checks
 - forbidden stale greeting prompt checks
 - Aider command summary without secrets
 
-For Kikaria Android runs, the message file must contain `Kikaria Android Migration Task`, `Vita0818/Kikaria`, `Vita0818/Outposts`, `Kikaria-Android`, and `FORGIS_TASK.md`. If stale greeting example text appears, Forgis fails before calling Aider.
+Forgis is a generic migration tool and does not globally require Kikaria-specific text. The generated prompt includes a `Task prompt sha256: ...` marker derived from the target repository task file, and the Aider message file must contain the same marker. The Aider message file must also match the generated final prompt hash.
+
+Project-specific checks are configured with optional markers:
+
+```yaml
+required_prompt_markers:
+  - Kikaria Android Migration Task
+  - Vita0818/Kikaria
+  - Vita0818/Outposts
+  - Kikaria-Android
+```
+
+If `required_prompt_markers` is omitted, Forgis only checks the generic prompt integrity rules. `forbidden_prompt_markers` can extend the default stale prompt blocklist:
+
+```yaml
+forbidden_prompt_markers:
+  - Deprecated migration fallback prompt
+```
+
+The default forbidden markers block old greeting example prompts such as `make the greeting more casual`, `Which file (or which phrase) should be changed?`, and `casual greeting`. The Validate workflow uses its own `Forgis Validation Smoke Task` marker for smoke testing; that marker does not represent a real migration requirement.
 
 ## Long-Term Log
 

@@ -149,6 +149,8 @@ jobs:
             --source-repo "$SOURCE_REPO" \
             --target-repo "$TARGET_REPO" \
             --target-subdir "$TARGET_SUBDIR" \
+            --required-markers-json "$REQUIRED_PROMPT_MARKERS_JSON" \
+            --forbidden-markers-json "$FORBIDDEN_PROMPT_MARKERS_JSON" \
             --artifact-output "$GITHUB_WORKSPACE/forgis-runtime/final_prompt_diagnostics.md"
 
       - name: Check shell scaffolds

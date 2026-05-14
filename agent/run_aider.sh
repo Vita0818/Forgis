@@ -171,6 +171,8 @@ python3 "$SCRIPT_DIR/prompt_diagnostics.py" \
   --source-repo "$SOURCE_REPO" \
   --target-repo "$TARGET_REPO" \
   --target-subdir "$TARGET_SUBDIR_REL" \
+  --required-markers-json "${REQUIRED_PROMPT_MARKERS_JSON:-[]}" \
+  --forbidden-markers-json "${FORBIDDEN_PROMPT_MARKERS_JSON:-[]}" \
   --expected-same-as "$FORGIS_PROMPT_FILE" \
   --artifact-output "${FORGIS_AIDER_DIAGNOSTICS_FILE:-}"
 
@@ -186,9 +188,9 @@ echo "  final prompt character count: $(wc -c < "$FORGIS_PROMPT_FILE" | tr -d ' 
 echo "  final prompt sha256: $(shasum -a 256 "$FORGIS_PROMPT_FILE" | awk '{print $1}')"
 echo "  final prompt first 20 lines:"
 sed -n '1,20p' "$FORGIS_PROMPT_FILE" | sed 's/^/    /'
-echo "  final prompt contains Kikaria Android Migration Task: $(grep -qi 'Kikaria Android Migration Task' "$FORGIS_PROMPT_FILE" && echo yes || echo no)"
-echo "  final prompt contains FORGIS_TASK.md: $(grep -q 'FORGIS_TASK.md' "$FORGIS_PROMPT_FILE" && echo yes || echo no)"
-echo "  final prompt contains forbidden greeting example: $(grep -qi 'make the greeting more casual' "$FORGIS_PROMPT_FILE" && echo yes || echo no)"
+echo "  final prompt contains task prompt path: $(grep -Fq "$TASK_PROMPT_REL" "$FORGIS_PROMPT_FILE" && echo yes || echo no)"
+echo "  required prompt markers json: ${REQUIRED_PROMPT_MARKERS_JSON:-[]}"
+echo "  forbidden prompt markers json: ${FORBIDDEN_PROMPT_MARKERS_JSON:-[]}"
 echo "  Aider --message-file path: $FORGIS_PROMPT_FILE"
 echo "  Aider model: $AIDER_MODEL"
 echo "  Aider runtime dir: $AIDER_RUNTIME_DIR"
