@@ -92,10 +92,25 @@ class ForgisConfigTests(unittest.TestCase):
                     "  exit 0",
                     "fi",
                     "if [[ \"${1:-}\" == \"--help\" ]]; then",
-                    "  printf '%s\\n' 'Usage: aider --read --subtree-only --no-gitignore --input-history-file --chat-history-file --llm-history-file'",
+                    "  printf '%s\\n' 'Usage: aider --read --subtree-only --no-gitignore --input-history-file --chat-history-file --llm-history-file --no-restore-chat-history'",
                     "  exit 0",
                     "fi",
                     "printf '%s\\n' \"$@\" > \"$FAKE_AIDER_ARGS\"",
+                    "if [[ -n \"${FAKE_AIDER_ENV_FILE:-}\" ]]; then",
+                    "  {",
+                    "    printf 'HOME=%s\\n' \"$HOME\"",
+                    "    printf 'XDG_CACHE_HOME=%s\\n' \"${XDG_CACHE_HOME:-}\"",
+                    "    printf 'XDG_CONFIG_HOME=%s\\n' \"${XDG_CONFIG_HOME:-}\"",
+                    "    printf 'XDG_DATA_HOME=%s\\n' \"${XDG_DATA_HOME:-}\"",
+                    "  } > \"$FAKE_AIDER_ENV_FILE\"",
+                    "fi",
+                    "if [[ \"${FAKE_AIDER_READ_HOME_HISTORY:-}\" == \"yes\" && -f \"$HOME/.aider.chat.history.md\" ]]; then",
+                    "  cat \"$HOME/.aider.chat.history.md\"",
+                    "fi",
+                    "if [[ \"${FAKE_AIDER_STALE_OUTPUT:-}\" == \"yes\" ]]; then",
+                    "  printf '%s\\n' 'Change the greeting to be more casual'",
+                    "  exit 0",
+                    "fi",
                     "if [[ \"${FAKE_AIDER_ROOT_CACHE:-}\" == \"yes\" ]]; then",
                     "  mkdir -p ../.aider.tags.cache.v4",
                     "  printf '%s\\n' cache > ../.aider.tags.cache.v4/cache.db",
@@ -404,6 +419,7 @@ class ForgisConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as dirname:
             root = Path(dirname)
             source, target, runtime, fake_bin, message, args_file = self.make_run_aider_fixture(root)
+            command_summary = runtime / "aider_command_summary.md"
             env = {
                 **os.environ,
                 "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
@@ -421,14 +437,130 @@ class ForgisConfigTests(unittest.TestCase):
                 "RUN_AGENT": "true",
                 "MODEL_ENV_JSON": "{}",
                 "SUCCESS_CHECKS_JSON": json.dumps([{"path_exists": "result/output.txt"}]),
+                "FORGIS_AIDER_COMMAND_SUMMARY_FILE": str(command_summary),
             }
             result = self.run_cmd(["bash", str(AGENT_DIR / "run_aider.sh")], env=env)
             self.assertEqual(result.returncode, 0)
-            args_text = args_file.read_text(encoding="utf-8")
-            self.assertIn("--message-file", args_text)
-            self.assertIn("--read", args_text)
+            args_list = args_file.read_text(encoding="utf-8").splitlines()
+            args_text = "\n".join(args_list)
+            self.assertIn("--message-file", args_list)
+            self.assertEqual(args_list[args_list.index("--message-file") + 1], str(message))
+            self.assertIn("--read", args_list)
+            self.assertIn("--no-restore-chat-history", args_list)
             self.assertNotIn(".forgis-write-scope.md", args_text)
+            self.assertIn(f"Aider --message-file: `{message}`", command_summary.read_text(encoding="utf-8"))
             self.assertTrue((target / "target-output/result/output.txt").is_file())
+
+    def test_run_aider_uses_isolated_home_and_empty_run_history_files(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target, runtime, fake_bin, message, args_file = self.make_run_aider_fixture(root)
+            runner_temp = runtime / "runner-temp"
+            isolated_runtime = runner_temp / "aider"
+            stale_isolated_home = isolated_runtime / "home"
+            stale_isolated_home.mkdir(parents=True)
+            (stale_isolated_home / ".aider.chat.history.md").write_text(
+                "Change the greeting to be more casual",
+                encoding="utf-8",
+            )
+            env_file = runtime / "aider_env.txt"
+            env = {
+                **os.environ,
+                "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
+                "RUNNER_TEMP": str(runner_temp),
+                "FAKE_AIDER_ARGS": str(args_file),
+                "FAKE_AIDER_ENV_FILE": str(env_file),
+                "FAKE_AIDER_READ_HOME_HISTORY": "yes",
+                "SOURCE_REPO_DIR": str(source),
+                "TARGET_REPO_DIR": str(target),
+                "FORGIS_PROMPT_FILE": str(message),
+                "AIDER_MODEL": "provider/model-name",
+                "TARGET_SUBDIR": "target-output",
+                "CONFIG_PATH": "FORGIS_CONFIG.yml",
+                "TASK_PROMPT_PATH": "FORGIS_TASK.md",
+                "RUN_LOG_PATH": "target-output/FORGIS_LOG.md",
+                "DRY_RUN": "false",
+                "RUN_AGENT": "true",
+                "MODEL_ENV_JSON": "{}",
+                "SUCCESS_CHECKS_JSON": json.dumps([{"path_exists": "result/output.txt"}]),
+            }
+            self.run_cmd(["bash", str(AGENT_DIR / "run_aider.sh")], env=env)
+            env_text = env_file.read_text(encoding="utf-8")
+            self.assertIn(f"HOME={isolated_runtime / 'home'}", env_text)
+            self.assertIn(f"XDG_CACHE_HOME={isolated_runtime / 'xdg-cache'}", env_text)
+            self.assertIn(f"XDG_CONFIG_HOME={isolated_runtime / 'xdg-config'}", env_text)
+            self.assertIn(f"XDG_DATA_HOME={isolated_runtime / 'xdg-data'}", env_text)
+
+            args_list = args_file.read_text(encoding="utf-8").splitlines()
+            for flag, filename in (
+                ("--input-history-file", "input.history"),
+                ("--chat-history-file", "chat.history.md"),
+                ("--llm-history-file", "llm.history"),
+            ):
+                self.assertIn(flag, args_list)
+                history_path = Path(args_list[args_list.index(flag) + 1])
+                self.assertEqual(history_path, isolated_runtime / filename)
+                self.assertTrue(history_path.is_file())
+                self.assertEqual(history_path.read_text(encoding="utf-8"), "")
+
+    def test_run_aider_fails_without_echoing_stale_output_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target, runtime, fake_bin, message, args_file = self.make_run_aider_fixture(root)
+            env = {
+                **os.environ,
+                "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
+                "RUNNER_TEMP": str(runtime / "runner-temp"),
+                "FAKE_AIDER_ARGS": str(args_file),
+                "FAKE_AIDER_STALE_OUTPUT": "yes",
+                "SOURCE_REPO_DIR": str(source),
+                "TARGET_REPO_DIR": str(target),
+                "FORGIS_PROMPT_FILE": str(message),
+                "AIDER_MODEL": "provider/model-name",
+                "TARGET_SUBDIR": "target-output",
+                "CONFIG_PATH": "FORGIS_CONFIG.yml",
+                "TASK_PROMPT_PATH": "FORGIS_TASK.md",
+                "RUN_LOG_PATH": "target-output/FORGIS_LOG.md",
+                "DRY_RUN": "false",
+                "RUN_AGENT": "true",
+                "MODEL_ENV_JSON": "{}",
+                "SUCCESS_CHECKS_JSON": "[]",
+            }
+            result = self.run_cmd(["bash", str(AGENT_DIR / "run_aider.sh")], env=env, check=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "Aider output contains stale instruction, likely chat history contamination.",
+                result.stdout,
+            )
+            self.assertNotIn("Change the greeting to be more casual", result.stdout)
+
+    def test_run_aider_refuses_preexisting_workdir_aider_state(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target, runtime, fake_bin, message, args_file = self.make_run_aider_fixture(root)
+            (target / "target-output").mkdir(exist_ok=True)
+            (target / "target-output/.aider.chat.history.md").write_text("old", encoding="utf-8")
+            env = {
+                **os.environ,
+                "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
+                "RUNNER_TEMP": str(runtime / "runner-temp"),
+                "FAKE_AIDER_ARGS": str(args_file),
+                "SOURCE_REPO_DIR": str(source),
+                "TARGET_REPO_DIR": str(target),
+                "FORGIS_PROMPT_FILE": str(message),
+                "AIDER_MODEL": "provider/model-name",
+                "TARGET_SUBDIR": "target-output",
+                "CONFIG_PATH": "FORGIS_CONFIG.yml",
+                "TASK_PROMPT_PATH": "FORGIS_TASK.md",
+                "RUN_LOG_PATH": "target-output/FORGIS_LOG.md",
+                "DRY_RUN": "false",
+                "RUN_AGENT": "true",
+                "MODEL_ENV_JSON": "{}",
+                "SUCCESS_CHECKS_JSON": "[]",
+            }
+            result = self.run_cmd(["bash", str(AGENT_DIR / "run_aider.sh")], env=env, check=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("pre-existing .aider state files", result.stdout)
 
     def test_aider_root_cache_is_cleaned(self) -> None:
         with tempfile.TemporaryDirectory() as dirname:

@@ -16,6 +16,7 @@ SUPPORTED_FLAGS = (
     "--input-history-file",
     "--chat-history-file",
     "--llm-history-file",
+    "--no-restore-chat-history",
 )
 
 
@@ -33,6 +34,7 @@ def analyze_help(help_text: str) -> dict[str, bool | str]:
         "supports_input_history_file": supports_flag(help_text, "--input-history-file"),
         "supports_chat_history_file": supports_flag(help_text, "--chat-history-file"),
         "supports_llm_history_file": supports_flag(help_text, "--llm-history-file"),
+        "supports_no_restore_chat_history": supports_flag(help_text, "--no-restore-chat-history"),
     }
     capabilities["context_mode"] = "read-context" if capabilities["supports_read"] else "message-file-only"
     return capabilities
