@@ -14,7 +14,13 @@ AGENT_DIR = REPO_ROOT / "agent"
 sys.path.insert(0, str(AGENT_DIR))
 
 from forgis_config import resolve_config
-from guardrails import changed_read_only_paths, snapshot_paths, target_scope_violations
+from guardrails import (
+    changed_read_only_paths,
+    cleanup_aider_root_gitignore,
+    root_gitignore_snapshot,
+    snapshot_paths,
+    target_scope_violations,
+)
 
 
 class ForgisConfigTests(unittest.TestCase):
@@ -246,6 +252,10 @@ class ForgisConfigTests(unittest.TestCase):
                     str(REPO_ROOT / "rules"),
                     "--prompts",
                     str(REPO_ROOT / "prompts"),
+                    "--source-repo",
+                    "Vita0818/Kikaria",
+                    "--target-repo",
+                    "Vita0818/Outposts",
                     "--platform",
                     "android",
                     "--target-stack",
@@ -269,10 +279,140 @@ class ForgisConfigTests(unittest.TestCase):
 
             prompt = output.read_text(encoding="utf-8")
             self.assertIn("Build the Android target project.", prompt)
+            self.assertIn("Source repository: Vita0818/Kikaria", prompt)
+            self.assertIn("Target repository: Vita0818/Outposts", prompt)
             self.assertIn("Target output directory relative to target repository root: Kikaria-Android", prompt)
             self.assertIn("Config file path relative to target repository root: FORGIS_CONFIG.yml", prompt)
             self.assertIn("Forgis will append the long-term run log at `Kikaria-Android/FORGIS_LOG.md`", prompt)
             self.assertNotIn(" ".join(("make", "the", "greeting", "more", "casual")), prompt)
+
+    def test_build_prompt_fails_when_task_prompt_missing_or_empty(self) -> None:
+        with self.make_temp_target() as dirname:
+            target = Path(dirname)
+            source = target / "source"
+            source.mkdir()
+            (source / "README.md").write_text("Source fixture.", encoding="utf-8")
+
+            base_command = [
+                sys.executable,
+                str(AGENT_DIR / "build_prompt.py"),
+                "--source",
+                str(source),
+                "--target",
+                str(target),
+                "--rules",
+                str(REPO_ROOT / "rules"),
+                "--prompts",
+                str(REPO_ROOT / "prompts"),
+                "--platform",
+                "android",
+                "--target-stack",
+                "kotlin-compose",
+                "--migration-profile",
+                "pixel-clone-app",
+                "--task-prompt-path",
+                "FORGIS_TASK.md",
+                "--require-task-prompt",
+                "--target-subdir",
+                "Kikaria-Android",
+                "--output",
+                str(target / "forgis_prompt.md"),
+            ]
+
+            with self.assertRaises(subprocess.CalledProcessError):
+                subprocess.run(base_command, cwd=REPO_ROOT, check=True, text=True)
+
+            (target / "FORGIS_TASK.md").write_text("", encoding="utf-8")
+            with self.assertRaises(subprocess.CalledProcessError):
+                subprocess.run(base_command, cwd=REPO_ROOT, check=True, text=True)
+
+    def test_prompt_diagnostics_requires_kikaria_task_and_blocks_stale_greeting(self) -> None:
+        with self.make_temp_target() as dirname:
+            target = Path(dirname)
+            task = target / "FORGIS_TASK.md"
+            task.write_text("# Kikaria Android Migration Task\n\nBuild the target.", encoding="utf-8")
+            prompt = target / "forgis_prompt.md"
+            prompt.write_text(
+                "\n".join(
+                    [
+                        "# Forgis Generated Migration Task",
+                        "Source repository: Vita0818/Kikaria",
+                        "Target repository: Vita0818/Outposts",
+                        "Loaded file: FORGIS_TASK.md",
+                        "Target output directory relative to target repository root: Kikaria-Android",
+                        "# Kikaria Android Migration Task",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(AGENT_DIR / "prompt_diagnostics.py"),
+                    "--file",
+                    str(prompt),
+                    "--label",
+                    "Aider Message File",
+                    "--task-prompt-file",
+                    str(task),
+                    "--task-prompt-path",
+                    "FORGIS_TASK.md",
+                    "--source-repo",
+                    "Vita0818/Kikaria",
+                    "--target-repo",
+                    "Vita0818/Outposts",
+                    "--target-subdir",
+                    "Kikaria-Android",
+                    "--expected-same-as",
+                    str(prompt),
+                ],
+                cwd=REPO_ROOT,
+                check=True,
+                text=True,
+            )
+
+            prompt.write_text(prompt.read_text(encoding="utf-8") + "\nmake the greeting more casual\n", encoding="utf-8")
+            with self.assertRaises(subprocess.CalledProcessError):
+                subprocess.run(
+                    [
+                        sys.executable,
+                        str(AGENT_DIR / "prompt_diagnostics.py"),
+                        "--file",
+                        str(prompt),
+                        "--task-prompt-file",
+                        str(task),
+                        "--source-repo",
+                        "Vita0818/Kikaria",
+                        "--target-repo",
+                        "Vita0818/Outposts",
+                        "--target-subdir",
+                        "Kikaria-Android",
+                    ],
+                    cwd=REPO_ROOT,
+                    check=True,
+                    text=True,
+                )
+
+    def test_root_gitignore_violation_and_safe_aider_cleanup(self) -> None:
+        with self.make_temp_target() as dirname:
+            target = Path(dirname)
+            subprocess.run(["git", "init"], cwd=target, check=True, stdout=subprocess.PIPE, text=True)
+            (target / "Kikaria-Android").mkdir()
+
+            snapshot = root_gitignore_snapshot(target)
+            (target / ".gitignore").write_text(".aider*\n.aider.chat.history.md\n", encoding="utf-8")
+            self.assertTrue(cleanup_aider_root_gitignore(target, snapshot))
+            self.assertFalse((target / ".gitignore").exists())
+
+            (target / ".gitignore").write_text("user-rule\n", encoding="utf-8")
+            snapshot = root_gitignore_snapshot(target)
+            (target / ".gitignore").write_text("user-rule\n.aider*\n", encoding="utf-8")
+            self.assertFalse(cleanup_aider_root_gitignore(target, snapshot))
+            self.assertTrue((target / ".gitignore").exists())
+
+            violations = target_scope_violations([".gitignore"], "Kikaria-Android", [])
+            self.assertEqual(violations, [".gitignore"])
 
     def test_main_workflow_ui_only_exposes_target_and_source_repo(self) -> None:
         workflow = yaml.load(
