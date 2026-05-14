@@ -175,7 +175,12 @@ jobs:
           FORGIS_AIDER_COMMAND_SUMMARY_FILE: ${{ github.workspace }}/forgis-runtime/aider_command_summary.md
           FORGIS_AIDER_STATUS_FILE: ${{ github.workspace }}/forgis-runtime/aider_status.env
           FORGIS_MODEL_API_KEY: ${{ secrets.FORGIS_MODEL_API_KEY }}
-          PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
         run: |
           if [[ "$RUN_AGENT" != "true" ]]; then
             echo "RUN_AGENT is false. Skipping Aider execution."
