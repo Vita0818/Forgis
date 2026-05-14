@@ -54,6 +54,30 @@ def snapshot_paths(target: Path, relative_paths: list[str]) -> dict[str, dict[st
     return snapshot
 
 
+def load_snapshot_json(path: Path, *, label: str, producer_step: str) -> dict[str, Any]:
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Missing {label} snapshot file: {path}.\n"
+            f'This usually means the earlier "{producer_step}" step did not run or failed.\n'
+            "Check the checkout and snapshot steps above."
+        )
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"Invalid {label} snapshot file: {path}.\n"
+            f'This usually means the earlier "{producer_step}" step wrote malformed JSON.\n'
+            "Check the checkout and snapshot steps above."
+        ) from exc
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"Invalid {label} snapshot file: {path}.\n"
+            f'This usually means the earlier "{producer_step}" step wrote an unexpected payload.\n'
+            "Check the checkout and snapshot steps above."
+        )
+    return data
+
+
 def changed_read_only_paths(target: Path, snapshot: dict[str, dict[str, Any]]) -> list[str]:
     changed: list[str] = []
     for relative, expected in snapshot.items():
@@ -197,7 +221,11 @@ def command_snapshot_readonly(args: argparse.Namespace) -> None:
 
 def command_check_readonly(args: argparse.Namespace) -> None:
     target = Path(args.target).resolve()
-    snapshot = json.loads(Path(args.snapshot).read_text(encoding="utf-8"))
+    snapshot = load_snapshot_json(
+        Path(args.snapshot),
+        label="read-only",
+        producer_step="Snapshot read-only target inputs",
+    )
     changed = changed_read_only_paths(target, snapshot)
 
     if changed:
