@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -14,20 +15,34 @@ from forgis_config import require_path_inside_subdir, resolve_inside_root, resol
 
 
 IGNORED_CHANGE_PREFIXES = (
-    ".aider",
-    ".forgis-aider-runtime/",
+    ".forgis-cache/",
+    "__pycache__/",
 )
-IGNORED_CHANGE_FILES = {
-    ".gitignore",
-}
+IGNORED_CHANGE_FILES: set[str] = set()
 
 
 def sha256_file(path: Path) -> str:
+    if path_kind_no_follow(path) == "symlink":
+        raise ValueError(f"Refusing to hash symlink target: {path}")
     digest = hashlib.sha256()
     with path.open("rb") as file:
         for chunk in iter(lambda: file.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def path_kind_no_follow(path: Path) -> str:
+    try:
+        mode = path.lstat().st_mode
+    except FileNotFoundError:
+        return "missing"
+    if stat.S_ISLNK(mode):
+        return "symlink"
+    if stat.S_ISDIR(mode):
+        return "dir"
+    if stat.S_ISREG(mode):
+        return "file"
+    return "other"
 
 
 def files_snapshot(root: Path) -> dict[str, str]:
@@ -36,7 +51,17 @@ def files_snapshot(root: Path) -> dict[str, str]:
     return {
         path.relative_to(root).as_posix(): sha256_file(path)
         for path in sorted(root.rglob("*"))
-        if path.is_file()
+        if path_kind_no_follow(path) == "file"
+    }
+
+
+def symlink_paths(root: Path) -> set[str]:
+    if not root.exists():
+        return set()
+    return {
+        path.relative_to(root).as_posix()
+        for path in sorted(root.rglob("*"))
+        if path_kind_no_follow(path) == "symlink"
     }
 
 
@@ -166,8 +191,10 @@ def validate(
     before = json.loads(before_snapshot_path.read_text(encoding="utf-8"))
     after = files_snapshot(target_subdir_path)
     existing_files = sorted(after)
+    after_symlinks = symlink_paths(target_subdir_path)
     changed_paths = changed_since(before, after)
     meaningful_changed = meaningful_changes(changed_paths, run_log_relative_to_subdir)
+    meaningful_changed = [path for path in meaningful_changed if path not in after_symlinks]
     success_checks = parse_json_list(success_checks_json, "success_checks")
     success_failures = validate_success_checks(
         checks=success_checks,

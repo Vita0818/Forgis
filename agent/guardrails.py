@@ -5,28 +5,20 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import shutil
+import os
+import stat
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
 from forgis_config import resolve_inside_root, resolve_target_subdir
-
-
-AIDER_GITIGNORE_MARKERS = (
-    ".aider",
-    "aider",
-)
-AIDER_TAGS_CACHE_PREFIX = ".aider.tags.cache.v"
-AIDER_TAGS_CACHE_ALLOWED_FILES = {
-    "cache.db",
-    "cache.db-shm",
-    "cache.db-wal",
-}
+from model_env import parse_model_env_json
 
 
 def sha256_file(path: Path) -> str:
+    if path_kind_no_follow(path) == "symlink":
+        raise ValueError(f"Refusing to hash symlink target: {path}")
     digest = hashlib.sha256()
     with path.open("rb") as file:
         for chunk in iter(lambda: file.read(1024 * 1024), b""):
@@ -34,14 +26,30 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def path_kind_no_follow(path: Path) -> str:
+    try:
+        mode = path.lstat().st_mode
+    except FileNotFoundError:
+        return "missing"
+    if stat.S_ISLNK(mode):
+        return "symlink"
+    if stat.S_ISDIR(mode):
+        return "dir"
+    if stat.S_ISREG(mode):
+        return "file"
+    return "other"
+
+
 def snapshot_paths(target: Path, relative_paths: list[str]) -> dict[str, dict[str, Any]]:
     snapshot: dict[str, dict[str, Any]] = {}
     for value in relative_paths:
         path, relative = resolve_inside_root(target, value, "read-only path")
-        exists = path.is_file()
+        kind = path_kind_no_follow(path)
+        exists = kind != "missing"
         snapshot[relative] = {
             "exists": exists,
-            "sha256": sha256_file(path) if exists else None,
+            "kind": kind,
+            "sha256": sha256_file(path) if kind == "file" else None,
         }
     return snapshot
 
@@ -50,10 +58,14 @@ def changed_read_only_paths(target: Path, snapshot: dict[str, dict[str, Any]]) -
     changed: list[str] = []
     for relative, expected in snapshot.items():
         path, normalized = resolve_inside_root(target, relative, "read-only path")
-        exists = path.is_file()
-        digest = sha256_file(path) if exists else None
+        kind = path_kind_no_follow(path)
+        exists = kind != "missing"
+        digest = sha256_file(path) if kind == "file" else None
 
-        if exists != expected.get("exists") or digest != expected.get("sha256"):
+        expected_kind = expected.get("kind")
+        if exists != expected.get("exists") or digest != expected.get("sha256") or (
+            expected_kind is not None and kind != expected_kind
+        ):
             changed.append(normalized)
 
     return sorted(changed)
@@ -68,17 +80,6 @@ def git_status_lines(repo: Path) -> list[str]:
         stdout=subprocess.PIPE,
     )
     return result.stdout.splitlines()
-
-
-def git_path_exists_in_head(repo: Path, path: str) -> bool:
-    result = subprocess.run(
-        ["git", "cat-file", "-e", f"HEAD:{path}"],
-        cwd=repo,
-        check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    return result.returncode == 0
 
 
 def classify_status(status: str) -> str:
@@ -110,13 +111,6 @@ def paths_from_status_line(line: str) -> list[str]:
         parts = [path_text]
 
     return [part.strip().strip('"') for part in parts if part.strip()]
-
-
-def changed_paths_from_status(status_lines: list[str]) -> list[str]:
-    paths: list[str] = []
-    for line in status_lines:
-        paths.extend(paths_from_status_line(line))
-    return paths
 
 
 def status_entries(status_lines: list[str]) -> list[dict[str, str]]:
@@ -161,122 +155,29 @@ def target_scope_violations(
     return sorted(set(violations))
 
 
-def looks_like_aider_gitignore(path: Path) -> bool:
-    if not path.is_file():
-        return False
-
-    text = path.read_text(encoding="utf-8", errors="replace")
-    meaningful_lines = [
-        line.strip()
-        for line in text.splitlines()
-        if line.strip() and not line.strip().startswith("#")
-    ]
-    if not meaningful_lines:
-        return False
-
-    return all(any(marker in line.casefold() for marker in AIDER_GITIGNORE_MARKERS) for line in meaningful_lines)
+def secret_values_from_model_env(model_env_json: str, environ: dict[str, str]) -> list[str]:
+    values: list[str] = []
+    for _runtime_env, secret_env in parse_model_env_json(model_env_json):
+        value = environ.get(secret_env, "")
+        if len(value) >= 8:
+            values.append(value)
+    return sorted(set(values))
 
 
-def is_aider_tags_cache_path(path: str) -> bool:
-    return path == AIDER_TAGS_CACHE_PREFIX.rstrip(".") or path.startswith(AIDER_TAGS_CACHE_PREFIX)
-
-
-def root_tags_cache_paths(target: Path) -> list[Path]:
-    return sorted(target.glob(f"{AIDER_TAGS_CACHE_PREFIX}*"))
-
-
-def root_tags_cache_snapshot(target: Path) -> dict[str, Any]:
-    paths: dict[str, dict[str, Any]] = {}
-    for path in root_tags_cache_paths(target):
-        relative = path.relative_to(target).as_posix()
-        paths[relative] = {
-            "exists": path.exists(),
-            "kind": "dir" if path.is_dir() else "file" if path.is_file() else "other",
-        }
-    return {"paths": paths}
-
-
-def root_tags_cache_state_text(snapshot: dict[str, Any]) -> str:
-    paths = sorted((snapshot.get("paths") or {}).keys())
-    if not paths:
-        return "none"
-    return ", ".join(paths)
-
-
-def looks_like_new_aider_tags_cache(path: Path) -> bool:
-    if not path.is_dir():
-        return False
-
-    files = [item for item in path.rglob("*") if item.is_file()]
-    if not files:
-        return True
-
-    for file_path in files:
-        relative = file_path.relative_to(path)
-        if len(relative.parts) != 1:
-            return False
-        if relative.name not in AIDER_TAGS_CACHE_ALLOWED_FILES:
-            return False
-
-    return True
-
-
-def cleanup_aider_tags_cache(target: Path, snapshot: dict[str, Any]) -> list[str]:
-    existing = set((snapshot.get("paths") or {}).keys())
-    removed: list[str] = []
-
-    for path in root_tags_cache_paths(target):
-        relative = path.relative_to(target).as_posix()
-        if relative in existing:
-            print(f"Root Aider tags cache existed before this run; leaving for guardrail checks: {relative}")
+def scan_secret_leaks(root: Path, secret_values: list[str]) -> list[str]:
+    if not secret_values or not root.exists():
+        return []
+    leaks: list[str] = []
+    for path in sorted(root.rglob("*")):
+        if path_kind_no_follow(path) != "file":
             continue
-        if looks_like_new_aider_tags_cache(path):
-            shutil.rmtree(path)
-            removed.append(relative)
-            print(f"Removed root Aider tags cache created during this run: {relative}")
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
             continue
-        print(f"Root Aider tags cache was newly created but did not look safe to remove; leaving it for guardrail failure: {relative}")
-
-    return removed
-
-
-def root_gitignore_snapshot(target: Path) -> dict[str, Any]:
-    path = target / ".gitignore"
-    exists = path.is_file()
-    return {
-        "path": ".gitignore",
-        "exists": exists,
-        "sha256": sha256_file(path) if exists else None,
-    }
-
-
-def root_gitignore_state_text(snapshot: dict[str, Any]) -> str:
-    exists = bool(snapshot.get("exists"))
-    digest = snapshot.get("sha256")
-    return f"exists={'true' if exists else 'false'} sha256={digest if digest else 'null'}"
-
-
-def cleanup_aider_root_gitignore(target: Path, snapshot: dict[str, Any]) -> bool:
-    path = target / ".gitignore"
-    existed_before = bool(snapshot.get("exists"))
-    if existed_before:
-        if path.is_file():
-            before_hash = snapshot.get("sha256")
-            after_hash = sha256_file(path)
-            if before_hash != after_hash:
-                print("Root .gitignore existed before this run and was changed; leaving it for guardrail failure.")
-        return False
-
-    if not path.exists():
-        return False
-
-    if looks_like_aider_gitignore(path):
-        path.unlink()
-        print("Removed root .gitignore because it was newly created and only contained Aider ignore patterns.")
-        return True
-
-    print("Root .gitignore was newly created but did not look like an Aider-only file; leaving it for guardrail failure.")
-    return False
+        if any(value in text for value in secret_values):
+            leaks.append(path.relative_to(root).as_posix())
+    return leaks
 
 
 def command_snapshot_readonly(args: argparse.Namespace) -> None:
@@ -328,17 +229,8 @@ def command_check_target_scope(args: argparse.Namespace) -> None:
         print("ERROR: target repository has changes outside the allowed writable scope:", file=sys.stderr)
         for path in violations:
             entry = entry_by_path.get(path, {"kind": "changed", "status": "??"})
-            abs_path = target / path
-            existed_in_head = git_path_exists_in_head(target, path)
-            aider_generated = "unknown"
-            if path == ".gitignore":
-                aider_generated = "yes" if looks_like_aider_gitignore(abs_path) else "no"
-            elif is_aider_tags_cache_path(path):
-                aider_generated = "yes"
             print(
-                f"  {path} ({entry['kind']}, status={entry['status']}, "
-                f"existed_before={'yes' if existed_in_head else 'no'}, "
-                f"aider_auto_generated={aider_generated})",
+                f"  {path} ({entry['kind']}, status={entry['status']})",
                 file=sys.stderr,
             )
         print(f"Allowed writable scope: {target_subdir}/", file=sys.stderr)
@@ -346,7 +238,7 @@ def command_check_target_scope(args: argparse.Namespace) -> None:
             print("Explicit read-only target inputs:", file=sys.stderr)
             for path in sorted(set(read_only_paths)):
                 print(f"  {path}", file=sys.stderr)
-        print("Fix suggestion: keep generated files, reports, Aider history, and ignore files inside the writable scope.", file=sys.stderr)
+        print("Fix suggestion: keep generated files inside the configured target_subdir.", file=sys.stderr)
         sys.exit(1)
 
     print("Target writable scope verification passed.")
@@ -367,46 +259,28 @@ def command_check_source_clean(args: argparse.Namespace) -> None:
     print("Source repository read-only verification passed.")
 
 
-def command_snapshot_root_gitignore(args: argparse.Namespace) -> None:
+def command_check_dry_run_clean(args: argparse.Namespace) -> None:
     target = Path(args.target).resolve()
-    snapshot = root_gitignore_snapshot(target)
-    output = Path(args.output)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(snapshot, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(f"Root .gitignore snapshot recorded: {root_gitignore_state_text(snapshot)}")
+    status = git_status_lines(target)
+    if status:
+        print("ERROR: dry_run modified the target repository:", file=sys.stderr)
+        for line in status:
+            print(f"  {line}", file=sys.stderr)
+        sys.exit(1)
+    print("Dry run target write verification passed.")
 
 
-def command_cleanup_aider_root_gitignore(args: argparse.Namespace) -> None:
+def command_check_secret_leaks(args: argparse.Namespace) -> None:
     target = Path(args.target).resolve()
-    snapshot = json.loads(Path(args.snapshot).read_text(encoding="utf-8"))
-    before_state = root_gitignore_state_text(snapshot)
-    cleaned = cleanup_aider_root_gitignore(target, snapshot)
-    after = root_gitignore_snapshot(target)
-    after_state = root_gitignore_state_text(after)
-    print(f"Root .gitignore before cleanup: {before_state}")
-    print(f"Root .gitignore after cleanup: {after_state}")
-    print(f"Root .gitignore cleanup performed: {'yes' if cleaned else 'no'}")
-
-
-def command_snapshot_aider_tags_cache(args: argparse.Namespace) -> None:
-    target = Path(args.target).resolve()
-    snapshot = root_tags_cache_snapshot(target)
-    output = Path(args.output)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(snapshot, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(f"Root Aider tags cache snapshot recorded: {root_tags_cache_state_text(snapshot)}")
-
-
-def command_cleanup_aider_tags_cache(args: argparse.Namespace) -> None:
-    target = Path(args.target).resolve()
-    snapshot = json.loads(Path(args.snapshot).read_text(encoding="utf-8"))
-    before_state = root_tags_cache_state_text(snapshot)
-    removed = cleanup_aider_tags_cache(target, snapshot)
-    after = root_tags_cache_snapshot(target)
-    after_state = root_tags_cache_state_text(after)
-    print(f"Root Aider tags cache before cleanup: {before_state}")
-    print(f"Root Aider tags cache after cleanup: {after_state}")
-    print(f"Root Aider tags cache cleanup removed: {', '.join(removed) if removed else '[none]'}")
+    target_subdir_path, target_subdir = resolve_target_subdir(target, args.target_subdir)
+    values = secret_values_from_model_env(args.model_env_json, dict(os.environ))
+    leaks = scan_secret_leaks(target_subdir_path, values)
+    if leaks:
+        print("ERROR: secret-like model value was found in target_subdir output:", file=sys.stderr)
+        for path in leaks:
+            print(f"  {target_subdir}/{path}", file=sys.stderr)
+        sys.exit(1)
+    print("Secret leak verification passed.")
 
 
 def main() -> None:
@@ -435,25 +309,15 @@ def main() -> None:
     source_clean.add_argument("--source", required=True)
     source_clean.set_defaults(func=command_check_source_clean)
 
-    snapshot_gitignore = subparsers.add_parser("snapshot-root-gitignore")
-    snapshot_gitignore.add_argument("--target", required=True)
-    snapshot_gitignore.add_argument("--output", required=True)
-    snapshot_gitignore.set_defaults(func=command_snapshot_root_gitignore)
+    dry_run_clean = subparsers.add_parser("check-dry-run-clean")
+    dry_run_clean.add_argument("--target", required=True)
+    dry_run_clean.set_defaults(func=command_check_dry_run_clean)
 
-    cleanup_gitignore = subparsers.add_parser("cleanup-aider-root-gitignore")
-    cleanup_gitignore.add_argument("--target", required=True)
-    cleanup_gitignore.add_argument("--snapshot", required=True)
-    cleanup_gitignore.set_defaults(func=command_cleanup_aider_root_gitignore)
-
-    snapshot_tags_cache = subparsers.add_parser("snapshot-aider-tags-cache")
-    snapshot_tags_cache.add_argument("--target", required=True)
-    snapshot_tags_cache.add_argument("--output", required=True)
-    snapshot_tags_cache.set_defaults(func=command_snapshot_aider_tags_cache)
-
-    cleanup_tags_cache = subparsers.add_parser("cleanup-aider-tags-cache")
-    cleanup_tags_cache.add_argument("--target", required=True)
-    cleanup_tags_cache.add_argument("--snapshot", required=True)
-    cleanup_tags_cache.set_defaults(func=command_cleanup_aider_tags_cache)
+    secret_leaks = subparsers.add_parser("check-secret-leaks")
+    secret_leaks.add_argument("--target", required=True)
+    secret_leaks.add_argument("--target-subdir", required=True)
+    secret_leaks.add_argument("--model-env-json", default="{}")
+    secret_leaks.set_defaults(func=command_check_secret_leaks)
 
     args = parser.parse_args()
     args.func(args)

@@ -38,7 +38,8 @@ if [[ ! -d "$TARGET_REPO_DIR" ]]; then
   exit 1
 fi
 
-case "${DRY_RUN,,}" in
+DRY_RUN_LOWER="$(printf '%s' "$DRY_RUN" | tr '[:upper:]' '[:lower:]')"
+case "$DRY_RUN_LOWER" in
   true|1|yes|y|on)
     DRY_RUN_NORMALIZED="true"
     ;;
@@ -50,6 +51,11 @@ case "${DRY_RUN,,}" in
     exit 1
     ;;
 esac
+
+if [[ "$DRY_RUN_NORMALIZED" == "true" ]]; then
+  echo "Dry run enabled. Skipping git add, commit, push, and pull request creation."
+  exit 0
+fi
 
 cd "$TARGET_REPO_DIR"
 
@@ -86,12 +92,8 @@ if git diff --quiet "$BASE_REF...HEAD"; then
   exit 0
 fi
 
-if [[ "$DRY_RUN_NORMALIZED" == "true" ]]; then
-  echo "Dry run enabled. Skipping push and pull request creation."
-  exit 0
-fi
-
-if [[ "${CONFIRM_REAL_RUN,,}" != "true" ]]; then
+CONFIRM_REAL_RUN_LOWER="$(printf '%s' "$CONFIRM_REAL_RUN" | tr '[:upper:]' '[:lower:]')"
+if [[ "$CONFIRM_REAL_RUN_LOWER" != "true" ]]; then
   echo "Real Forgis runs require confirm_real_run: true in FORGIS_CONFIG.yml." >&2
   exit 1
 fi

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
+from collections.abc import Mapping
 
 
 ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -31,13 +33,61 @@ def parse_model_env_json(text: str) -> tuple[tuple[str, str], ...]:
     return tuple(pairs)
 
 
+def resolve_model_env_values(
+    pairs: tuple[tuple[str, str], ...],
+    environ: Mapping[str, str],
+) -> tuple[dict[str, str], list[str]]:
+    values: dict[str, str] = {}
+    missing: list[str] = []
+    for runtime_env, secret_env in pairs:
+        value = environ.get(secret_env, "")
+        if value:
+            values[runtime_env] = value
+        else:
+            missing.append(secret_env)
+    return values, sorted(set(missing))
+
+
+def require_model_env_values(
+    pairs: tuple[tuple[str, str], ...],
+    environ: Mapping[str, str],
+) -> dict[str, str]:
+    if not pairs:
+        raise ValueError("model_env must map at least one runtime env name before DeepSeek is called.")
+    values, missing = resolve_model_env_values(pairs, environ)
+    if missing:
+        raise ValueError("Missing required model secret env var(s): " + ", ".join(missing))
+    return values
+
+
+def describe_model_env(
+    pairs: tuple[tuple[str, str], ...],
+    environ: Mapping[str, str],
+) -> list[dict[str, str]]:
+    description: list[dict[str, str]] = []
+    for runtime_env, secret_env in pairs:
+        description.append(
+            {
+                "runtime_env": runtime_env,
+                "secret_env": secret_env,
+                "present": "yes" if bool(environ.get(secret_env, "")) else "no",
+            }
+        )
+    return description
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Validate Forgis model env mappings")
+    parser = argparse.ArgumentParser(description="Validate Forgis model env mappings without printing values")
     parser.add_argument("--json", default="{}")
+    parser.add_argument("--require-present", action="store_true")
     args = parser.parse_args()
 
-    for runtime_env, secret_env in parse_model_env_json(args.json):
-        print(f"{runtime_env}\t{secret_env}")
+    pairs = parse_model_env_json(args.json)
+    if args.require_present:
+        require_model_env_values(pairs, os.environ)
+
+    for item in describe_model_env(pairs, os.environ):
+        print(f"{item['runtime_env']}\t{item['secret_env']}\t{item['present']}")
 
 
 if __name__ == "__main__":
