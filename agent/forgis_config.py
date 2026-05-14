@@ -44,6 +44,7 @@ CONFIG_FIELDS = {
     "max_tool_result_chars",
     "validation_commands",
     "success_checks",
+    "strict_mode",
 }
 
 REQUIRED_FIELDS = {
@@ -79,6 +80,7 @@ class ResolvedConfig:
     max_tool_result_chars: int
     validation_commands: tuple[str, ...]
     success_checks: tuple[dict[str, str], ...]
+    strict_mode: bool
 
     def env(self) -> dict[str, str]:
         model_env = {runtime: source for runtime, source in self.model_env}
@@ -114,6 +116,7 @@ class ResolvedConfig:
                 list(self.success_checks),
                 ensure_ascii=False,
             ),
+            "STRICT_MODE": "true" if self.strict_mode else "false",
         }
 
     def outputs(self) -> dict[str, str]:
@@ -448,6 +451,7 @@ def resolve_config(
     model_env = select_model_env(config)
     validation_commands = select_string_list(config, "validation_commands")
     success_checks = select_success_checks(config)
+    strict_mode = select_config_bool(config, "strict_mode", False)
     max_iterations = select_int(
         config,
         "max_iterations",
@@ -492,6 +496,7 @@ def resolve_config(
         max_tool_result_chars=max_tool_result_chars,
         validation_commands=validation_commands,
         success_checks=success_checks,
+        strict_mode=strict_mode,
     )
 
 
@@ -541,6 +546,7 @@ def markdown_summary(resolved: ResolvedConfig) -> str:
             f"| Max tool result chars | `{resolved.max_tool_result_chars}` |",
             f"| validation_commands | `{validation_commands}` |",
             f"| success_checks | `{success_checks}` |",
+            f"| strict_mode | `{str(resolved.strict_mode).lower()}` |",
             f"| dry_run config value | `{str(resolved.dry_run).lower()}` |",
             f"| run_agent config value | `{str(resolved.run_agent_config).lower()}` |",
             f"| confirm_real_run config value | `{str(resolved.confirm_real_run).lower()}` |",

@@ -182,6 +182,11 @@ class ForgisConfigTests(unittest.TestCase):
         self.assertIn("steps.check_readonly.outcome == 'success'", pr_block)
         self.assertIn("steps.check_secret_leaks.outcome == 'success'", pr_block)
 
+        self.assertIn("strict_mode=false; target output validation failures", validate_block)
+        validation_block = self.workflow_step_block(workflow, "Run configured validation commands")
+        self.assertIn("validation_commands failed and strict_mode=true", validation_block)
+        self.assertIn("continuing because strict_mode=false", validation_block)
+
         diff_block = self.workflow_step_block(workflow, "Show target repository diff")
         self.assertIn("if: always()", diff_block)
         self.assertIn("Target repository checkout is unavailable", diff_block)
@@ -218,6 +223,7 @@ class ForgisConfigTests(unittest.TestCase):
             self.assertEqual(resolved.target_repo, "owner/target-repo")
             self.assertEqual(resolved.target_subdir, "target-output")
             self.assertFalse(resolved.run_agent)
+            self.assertFalse(resolved.strict_mode)
 
             (target / "FORGIS_CONFIG.yml").write_text(
                 (target / "FORGIS_CONFIG.yml").read_text(encoding="utf-8")
@@ -226,6 +232,14 @@ class ForgisConfigTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(ValueError, "Unsupported"):
                 resolve_config(target_root=target, target_repo="owner/target-repo")
+
+    def test_strict_mode_can_be_enabled_from_config(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            target = Path(dirname)
+            self.write_config(target, extra="strict_mode: true\n")
+            resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
+            self.assertTrue(resolved.strict_mode)
+            self.assertEqual(resolved.env()["STRICT_MODE"], "true")
 
     def test_task_file_is_required_non_empty_and_configured_path_is_read(self) -> None:
         with tempfile.TemporaryDirectory() as dirname:
@@ -441,6 +455,76 @@ class ForgisConfigTests(unittest.TestCase):
             self.assertNotIn(final_hidden_reasoning, status_text)
             self.assertNotIn(hidden_reasoning, json.dumps(result.as_dict(), ensure_ascii=False))
 
+    def test_tool_loop_logs_progress_without_sensitive_content(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target = self.make_source_target(root)
+            self.write_config(target, extra="dry_run: false\nrun_agent: true\nconfirm_real_run: true\n")
+            resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
+            hidden_reasoning = "internal hidden reasoning"
+            write_content = "do-not-print-write-content"
+            fake = FakeDeepSeekClient(
+                [
+                    {
+                        "choices": [
+                            {
+                                "message": {
+                                    "reasoning_content": hidden_reasoning,
+                                    "tool_calls": [
+                                        {
+                                            "id": "call-read",
+                                            "type": "function",
+                                            "function": {
+                                                "name": "read_file",
+                                                "arguments": json.dumps({"path": "task"}),
+                                            },
+                                        },
+                                        {
+                                            "id": "call-write",
+                                            "type": "function",
+                                            "function": {
+                                                "name": "write_file",
+                                                "arguments": json.dumps(
+                                                    {
+                                                        "path": "target_subdir/progress.txt",
+                                                        "content": write_content,
+                                                    }
+                                                ),
+                                            },
+                                        },
+                                    ],
+                                }
+                            }
+                        ]
+                    },
+                    {"choices": [{"message": {"content": json.dumps({"final_summary": "visible"})}}]},
+                ]
+            )
+
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                result = run_tool_loop(
+                    config=resolved,
+                    source_root=source,
+                    target_root=target,
+                    environ={"DEEPSEEK_API_KEY": "mock-secret-value"},
+                    client_factory=lambda _config, _env: fake,
+                )
+
+            log = stdout.getvalue()
+            self.assertEqual(result.final_summary, "visible")
+            self.assertIn("[forgis] tool loop started: max_iterations=", log)
+            self.assertIn("[forgis] iteration 1/8: requesting model", log)
+            self.assertIn("model returned 2 tool calls", log)
+            self.assertIn("tool call 1: iteration=1 read_file path=task", log)
+            self.assertIn("tool call 2: iteration=1 write_file path=target_subdir/progress.txt", log)
+            self.assertIn("changed_path=target/target-output/progress.txt", log)
+            self.assertIn("final_summary received", log)
+            self.assertIn("changed_paths=1", log)
+            self.assertNotIn(write_content, log)
+            self.assertNotIn("# Mock Task", log)
+            self.assertNotIn(hidden_reasoning, log)
+
     def test_list_dir_only_reads_allowed_paths(self) -> None:
         with tempfile.TemporaryDirectory() as dirname:
             sandbox = self.make_sandbox(Path(dirname))
@@ -568,6 +652,37 @@ class ForgisConfigTests(unittest.TestCase):
 
             self.assertEqual(scan_secret_leaks(target_subdir, [secret]), [])
 
+    def test_secret_leak_check_remains_hard_fail_without_printing_secret(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            target = Path(dirname)
+            target_subdir = target / "target-output"
+            target_subdir.mkdir(parents=True)
+            secret = "mock-secret-value"
+            (target_subdir / "leak.txt").write_text(f"value={secret}\n", encoding="utf-8")
+            env = {
+                **os.environ,
+                "DEEPSEEK_API_KEY": secret,
+            }
+            result = self.run_cmd(
+                [
+                    sys.executable,
+                    str(AGENT_DIR / "guardrails.py"),
+                    "check-secret-leaks",
+                    "--target",
+                    str(target),
+                    "--target-subdir",
+                    "target-output",
+                    "--model-env-json",
+                    json.dumps({"DEEPSEEK_API_KEY": "DEEPSEEK_API_KEY"}),
+                ],
+                env=env,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("secret-like model value", result.stdout)
+            self.assertIn("target-output/leak.txt", result.stdout)
+            self.assertNotIn(secret, result.stdout)
+
     def test_validate_target_output_does_not_count_symlink_target_as_output(self) -> None:
         with tempfile.TemporaryDirectory() as dirname:
             root = Path(dirname)
@@ -620,6 +735,45 @@ class ForgisConfigTests(unittest.TestCase):
             read_only_paths=[],
         )
         self.assertEqual(violations, ["README.md"])
+
+    def test_target_scope_violation_warning_only_can_continue(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            target = Path(dirname)
+            self.write_config(target)
+            (target / "target-output").mkdir()
+            self.init_git_repo(target)
+            self.commit_all(target)
+            (target / "README.md").write_text("outside target_subdir", encoding="utf-8")
+
+            warning = self.run_cmd(
+                [
+                    sys.executable,
+                    str(AGENT_DIR / "guardrails.py"),
+                    "check-target-scope",
+                    "--target",
+                    str(target),
+                    "--target-subdir",
+                    "target-output",
+                    "--warning-only",
+                ],
+            )
+            self.assertIn("WARNING: target repository has changes outside", warning.stdout)
+            self.assertIn("strict_mode=false", warning.stdout)
+
+            strict = self.run_cmd(
+                [
+                    sys.executable,
+                    str(AGENT_DIR / "guardrails.py"),
+                    "check-target-scope",
+                    "--target",
+                    str(target),
+                    "--target-subdir",
+                    "target-output",
+                ],
+                check=False,
+            )
+            self.assertNotEqual(strict.returncode, 0)
+            self.assertIn("ERROR: target repository has changes outside", strict.stdout)
 
     def test_config_and_task_modification_is_detected(self) -> None:
         with tempfile.TemporaryDirectory() as dirname:
@@ -722,6 +876,80 @@ class ForgisConfigTests(unittest.TestCase):
                     before_snapshot_path=snapshot,
                     require_meaningful_change=False,
                     success_checks_json=json.dumps(list(resolved.success_checks)),
+                )
+
+    def test_success_checks_failure_warning_only_can_continue(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            target = Path(dirname)
+            subdir = target / "target-output"
+            subdir.mkdir(parents=True)
+            snapshot = target / "before.json"
+            snapshot.write_text(json.dumps(files_snapshot(subdir)), encoding="utf-8")
+
+            result = self.run_cmd(
+                [
+                    sys.executable,
+                    str(AGENT_DIR / "validate_target_output.py"),
+                    "validate",
+                    "--target",
+                    str(target),
+                    "--target-subdir",
+                    "target-output",
+                    "--run-log-path",
+                    "target-output/FORGIS_LOG.md",
+                    "--snapshot",
+                    str(snapshot),
+                    "--require-meaningful-change",
+                    "--success-checks-json",
+                    json.dumps([{"path_exists": "missing.txt"}]),
+                    "--warning-only",
+                ],
+            )
+            self.assertIn("WARNING: generic target output validation failed", result.stdout)
+            self.assertIn("Continuing because strict_mode=false.", result.stdout)
+
+            strict = self.run_cmd(
+                [
+                    sys.executable,
+                    str(AGENT_DIR / "validate_target_output.py"),
+                    "validate",
+                    "--target",
+                    str(target),
+                    "--target-subdir",
+                    "target-output",
+                    "--run-log-path",
+                    "target-output/FORGIS_LOG.md",
+                    "--snapshot",
+                    str(snapshot),
+                    "--success-checks-json",
+                    json.dumps([{"path_exists": "missing.txt"}]),
+                ],
+                check=False,
+            )
+            self.assertNotEqual(strict.returncode, 0)
+            self.assertIn("ERROR: generic target output validation failed", strict.stdout)
+
+    def test_success_checks_accept_target_subdir_prefix_or_relative_path(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            target = Path(dirname)
+            subdir = target / "custom-output"
+            subdir.mkdir(parents=True)
+            (subdir / "result.txt").write_text("ok", encoding="utf-8")
+            snapshot = target / "before.json"
+            snapshot.write_text(json.dumps(files_snapshot(subdir)), encoding="utf-8")
+            checks = [
+                {"path_exists": "result.txt"},
+                {"path_exists": "custom-output/result.txt"},
+            ]
+
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                validate(
+                    target=target,
+                    target_subdir="custom-output",
+                    run_log_path="custom-output/FORGIS_LOG.md",
+                    before_snapshot_path=snapshot,
+                    require_meaningful_change=False,
+                    success_checks_json=json.dumps(checks),
                 )
 
     def test_create_pr_dry_run_exits_before_git_or_gh(self) -> None:
