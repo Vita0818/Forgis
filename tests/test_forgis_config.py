@@ -70,6 +70,12 @@ class ForgisConfigTests(unittest.TestCase):
         self.run_cmd(["git", "add", "."], cwd=root)
         self.run_cmd(["git", "commit", "-q", "-m", message], cwd=root)
 
+    def workflow_step_block(self, workflow: str, name: str) -> str:
+        marker = f"      - name: {name}\n"
+        start = workflow.index(marker)
+        next_start = workflow.find("\n      - name: ", start + len(marker))
+        return workflow[start:] if next_start == -1 else workflow[start:next_start]
+
     def write_config(self, target: Path, extra: str = "", *, task_text: str = "# Mock Task\n\nUse mock files only.") -> None:
         target.mkdir(parents=True, exist_ok=True)
         config = textwrap.dedent(
@@ -147,6 +153,42 @@ class ForgisConfigTests(unittest.TestCase):
             "GOOGLE_API_KEY",
         ):
             self.assertIn(secret_name, workflow)
+
+    def test_workflow_gates_snapshot_dependent_steps_after_prerequisites(self) -> None:
+        workflow = (REPO_ROOT / ".github/workflows/migrate.yml").read_text(encoding="utf-8")
+
+        validate_block = self.workflow_step_block(workflow, "Validate DeepSeek target changes")
+        self.assertNotIn("always()", validate_block)
+        self.assertIn("steps.snapshot_target_output.outcome == 'success'", validate_block)
+        self.assertIn("steps.tool_loop.outcome == 'success'", validate_block)
+
+        readonly_block = self.workflow_step_block(workflow, "Verify read-only target inputs")
+        self.assertNotIn("always()", readonly_block)
+        self.assertIn("steps.snapshot_readonly.outcome == 'success'", readonly_block)
+        self.assertIn("steps.tool_loop.outcome == 'success'", readonly_block)
+
+        target_scope_block = self.workflow_step_block(workflow, "Verify target writable scope")
+        self.assertNotIn("always()", target_scope_block)
+        self.assertIn("steps.run_controller.outcome == 'success'", target_scope_block)
+        self.assertIn("steps.tool_loop.outcome == 'success'", target_scope_block)
+
+        log_block = self.workflow_step_block(workflow, "Append long-term Forgis log")
+        self.assertNotIn("always()", log_block)
+        self.assertIn("steps.run_controller.outcome == 'success'", log_block)
+        self.assertIn("steps.validation_commands.outcome == 'success'", log_block)
+
+        pr_block = self.workflow_step_block(workflow, "Create pull request")
+        self.assertIn("steps.resolve_base.outputs.dry_run == 'false'", pr_block)
+        self.assertIn("steps.check_readonly.outcome == 'success'", pr_block)
+        self.assertIn("steps.check_secret_leaks.outcome == 'success'", pr_block)
+
+        diff_block = self.workflow_step_block(workflow, "Show target repository diff")
+        self.assertIn("if: always()", diff_block)
+        self.assertIn("Target repository checkout is unavailable", diff_block)
+
+        package_block = self.workflow_step_block(workflow, "Package target output snapshot")
+        self.assertIn("if: always()", package_block)
+        self.assertIn("Target repository checkout is unavailable", package_block)
 
     def test_aider_related_files_and_backend_are_removed(self) -> None:
         removed = [
@@ -511,6 +553,29 @@ class ForgisConfigTests(unittest.TestCase):
                 changed_read_only_paths(target, snapshot),
                 ["FORGIS_CONFIG.yml", "FORGIS_TASK.md"],
             )
+
+    def test_check_readonly_missing_snapshot_has_clear_error(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            target = Path(dirname)
+            self.write_config(target)
+            missing = target / "forgis-runtime/read_only_snapshot.json"
+            result = self.run_cmd(
+                [
+                    sys.executable,
+                    str(AGENT_DIR / "guardrails.py"),
+                    "check-readonly",
+                    "--target",
+                    str(target),
+                    "--snapshot",
+                    str(missing),
+                ],
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Missing read-only snapshot file", result.stdout)
+            self.assertIn("Snapshot read-only target inputs", result.stdout)
+            self.assertIn("Check the checkout and snapshot steps above.", result.stdout)
+            self.assertNotIn("FileNotFoundError", result.stdout)
 
     def test_run_log_path_must_be_inside_target_subdir(self) -> None:
         with tempfile.TemporaryDirectory() as dirname:

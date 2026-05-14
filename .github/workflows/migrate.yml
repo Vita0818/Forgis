@@ -33,6 +33,7 @@ jobs:
           pip install -r forgis/requirements.txt
 
       - name: Checkout target repository
+        id: checkout_target
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.target_repo }}
@@ -53,6 +54,7 @@ jobs:
             --summary-output "$GITHUB_WORKSPACE/forgis-runtime/resolved_config.md"
 
       - name: Checkout resolved target base branch
+        id: checkout_target_base
         run: |
           cd "$GITHUB_WORKSPACE/target-repo"
           git fetch origin "$TARGET_BASE_BRANCH"
@@ -69,6 +71,7 @@ jobs:
             --summary-output "$GITHUB_WORKSPACE/forgis-runtime/resolved_config.md"
 
       - name: Checkout source repository read-only
+        id: checkout_source
         uses: actions/checkout@v4
         with:
           repository: ${{ steps.resolve_base.outputs.source_repo }}
@@ -78,6 +81,8 @@ jobs:
           persist-credentials: false
 
       - name: Snapshot read-only target inputs
+        id: snapshot_readonly
+        if: ${{ steps.checkout_source.outcome == 'success' }}
         run: |
           python forgis/agent/guardrails.py snapshot-readonly \
             --target "$GITHUB_WORKSPACE/target-repo" \
@@ -86,6 +91,8 @@ jobs:
             --output "$GITHUB_WORKSPACE/forgis-runtime/read_only_snapshot.json"
 
       - name: Snapshot target output before agent
+        id: snapshot_target_output
+        if: ${{ steps.snapshot_readonly.outcome == 'success' }}
         run: |
           python forgis/agent/validate_target_output.py snapshot \
             --target "$GITHUB_WORKSPACE/target-repo" \
@@ -93,6 +100,8 @@ jobs:
             --output "$GITHUB_WORKSPACE/forgis-runtime/target_output_before.json"
 
       - name: Run Forgis controller
+        id: run_controller
+        if: ${{ steps.snapshot_readonly.outcome == 'success' && steps.snapshot_target_output.outcome == 'success' }}
         run: |
           python forgis/agent/forge.py \
             --source "$GITHUB_WORKSPACE/source-repo" \
@@ -101,11 +110,15 @@ jobs:
             --summary-output "$GITHUB_WORKSPACE/forgis-runtime/run_summary.md"
 
       - name: Check shell scripts
+        id: check_shell_scripts
+        if: ${{ steps.run_controller.outcome == 'success' }}
         run: |
           bash -n forgis/agent/build_target.sh
           bash -n forgis/agent/create_pr.sh
 
       - name: Run DeepSeek tool loop
+        id: tool_loop
+        if: ${{ steps.run_controller.outcome == 'success' && steps.check_shell_scripts.outcome == 'success' }}
         env:
           FORGIS_MODEL_API_KEY: ${{ secrets.FORGIS_MODEL_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -136,7 +149,8 @@ jobs:
             --summary-output "$GITHUB_WORKSPACE/forgis-runtime/tool_loop_summary.json"
 
       - name: Validate DeepSeek target changes
-        if: ${{ always() && steps.resolve_base.outcome == 'success' }}
+        id: validate_target_output
+        if: ${{ steps.run_controller.outcome == 'success' && steps.snapshot_target_output.outcome == 'success' && steps.tool_loop.outcome == 'success' }}
         run: |
           if [[ "$RUN_AGENT" != "true" ]]; then
             echo "RUN_AGENT is false. Skipping target output validation."
@@ -152,7 +166,8 @@ jobs:
             --success-checks-json "$SUCCESS_CHECKS_JSON"
 
       - name: Run configured validation commands
-        if: ${{ always() && steps.resolve_base.outcome == 'success' }}
+        id: validation_commands
+        if: ${{ steps.run_controller.outcome == 'success' && steps.tool_loop.outcome == 'success' && steps.validate_target_output.outcome == 'success' }}
         env:
           TARGET_REPO_DIR: ${{ github.workspace }}/target-repo
         run: |
@@ -164,7 +179,8 @@ jobs:
           bash forgis/agent/build_target.sh
 
       - name: Append long-term Forgis log
-        if: ${{ always() && steps.resolve_base.outcome == 'success' }}
+        id: append_log
+        if: ${{ steps.run_controller.outcome == 'success' && steps.tool_loop.outcome == 'success' && steps.validate_target_output.outcome == 'success' && steps.validation_commands.outcome == 'success' }}
         env:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
@@ -217,20 +233,23 @@ jobs:
             --preview-output "$GITHUB_WORKSPACE/forgis-runtime/forgis_log_entry.md"
 
       - name: Verify source repository stayed read-only
-        if: ${{ always() && steps.resolve_base.outcome == 'success' }}
+        id: check_source_clean
+        if: ${{ steps.checkout_source.outcome == 'success' && steps.run_controller.outcome == 'success' && steps.tool_loop.outcome == 'success' && steps.append_log.outcome == 'success' }}
         run: |
           python forgis/agent/guardrails.py check-source-clean \
             --source "$GITHUB_WORKSPACE/source-repo"
 
       - name: Verify read-only target inputs
-        if: ${{ always() && steps.resolve_base.outcome == 'success' }}
+        id: check_readonly
+        if: ${{ steps.snapshot_readonly.outcome == 'success' && steps.run_controller.outcome == 'success' && steps.tool_loop.outcome == 'success' && steps.append_log.outcome == 'success' }}
         run: |
           python forgis/agent/guardrails.py check-readonly \
             --target "$GITHUB_WORKSPACE/target-repo" \
             --snapshot "$GITHUB_WORKSPACE/forgis-runtime/read_only_snapshot.json"
 
       - name: Verify target writable scope
-        if: ${{ always() && steps.resolve_base.outcome == 'success' }}
+        id: check_target_scope
+        if: ${{ steps.run_controller.outcome == 'success' && steps.tool_loop.outcome == 'success' && steps.append_log.outcome == 'success' }}
         run: |
           python forgis/agent/guardrails.py check-target-scope \
             --target "$GITHUB_WORKSPACE/target-repo" \
@@ -239,7 +258,8 @@ jobs:
             --read-only-path "$TASK_PROMPT_PATH"
 
       - name: Verify dry run did not write target
-        if: ${{ always() && steps.resolve_base.outcome == 'success' }}
+        id: check_dry_run_clean
+        if: ${{ steps.run_controller.outcome == 'success' && steps.tool_loop.outcome == 'success' && steps.append_log.outcome == 'success' }}
         run: |
           if [[ "$DRY_RUN" == "true" ]]; then
             python forgis/agent/guardrails.py check-dry-run-clean \
@@ -249,7 +269,8 @@ jobs:
           fi
 
       - name: Verify model secrets were not written
-        if: ${{ always() && steps.resolve_base.outcome == 'success' }}
+        id: check_secret_leaks
+        if: ${{ steps.run_controller.outcome == 'success' && steps.tool_loop.outcome == 'success' && steps.append_log.outcome == 'success' }}
         env:
           FORGIS_MODEL_API_KEY: ${{ secrets.FORGIS_MODEL_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -267,6 +288,10 @@ jobs:
       - name: Show target repository diff
         if: always()
         run: |
+          if [[ ! -d "$GITHUB_WORKSPACE/target-repo/.git" ]]; then
+            echo "Target repository checkout is unavailable. Skipping target diff diagnostic."
+            exit 0
+          fi
           cd "$GITHUB_WORKSPACE/target-repo"
           echo "Git status:"
           git status --short || true
@@ -274,6 +299,7 @@ jobs:
           git diff --stat || true
 
       - name: Create pull request
+        if: ${{ steps.resolve_base.outputs.dry_run == 'false' && steps.resolve_base.outputs.run_agent == 'true' && steps.resolve_base.outputs.confirm_real_run == 'true' && steps.validate_target_output.outcome == 'success' && steps.validation_commands.outcome == 'success' && steps.append_log.outcome == 'success' && steps.check_source_clean.outcome == 'success' && steps.check_readonly.outcome == 'success' && steps.check_target_scope.outcome == 'success' && steps.check_dry_run_clean.outcome == 'success' && steps.check_secret_leaks.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ secrets.FORGIS_TARGET_TOKEN }}
           TARGET_REPO_DIR: ${{ github.workspace }}/target-repo
@@ -298,6 +324,10 @@ jobs:
       - name: Package target output snapshot
         if: always()
         run: |
+          if [[ ! -d "$GITHUB_WORKSPACE/target-repo/.git" ]]; then
+            echo "Target repository checkout is unavailable. Skipping target snapshot package."
+            exit 0
+          fi
           mkdir -p "$GITHUB_WORKSPACE/forgis-runtime"
           tar -czf "$GITHUB_WORKSPACE/forgis-runtime/target-repo-snapshot.tar.gz" \
             -C "$GITHUB_WORKSPACE" \
@@ -309,6 +339,7 @@ jobs:
         with:
           name: forgis-resolved-config
           path: forgis-runtime/resolved_config.md
+          if-no-files-found: ignore
 
       - name: Upload run summary
         if: always()
@@ -316,6 +347,7 @@ jobs:
         with:
           name: forgis-run-summary
           path: forgis-runtime/run_summary.md
+          if-no-files-found: ignore
 
       - name: Upload DeepSeek tool loop summary
         if: always()
@@ -326,6 +358,7 @@ jobs:
             forgis-runtime/tool_loop_summary.json
             forgis-runtime/tool_operations.json
             forgis-runtime/deepseek_status.env
+          if-no-files-found: ignore
 
       - name: Upload generated long log preview
         if: always()
@@ -333,6 +366,7 @@ jobs:
         with:
           name: forgis-long-log-preview
           path: forgis-runtime/forgis_log_entry.md
+          if-no-files-found: ignore
 
       - name: Upload target output snapshot
         if: always()
@@ -340,3 +374,4 @@ jobs:
         with:
           name: forgis-target-repo
           path: forgis-runtime/target-repo-snapshot.tar.gz
+          if-no-files-found: ignore
