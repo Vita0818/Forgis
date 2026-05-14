@@ -33,7 +33,7 @@ The agent should preserve:
 - Loading or placeholder states when present
 - Primary interaction gestures and button actions
 
-If an exact source-platform visual effect is not available on the target platform, implement the closest idiomatic target-platform equivalent and document the difference in MIGRATION_REPORT.md.
+If an exact source-platform visual effect is not available on the target platform, implement the closest idiomatic target-platform equivalent and document the difference in notes under the target output directory.
 
 ## Behavior fidelity rules
 
@@ -76,7 +76,7 @@ When target stack is kotlin-compose:
 
 ## Reporting requirements
 
-MIGRATION_REPORT.md must include:
+Migration notes under the target output directory must include:
 
 - Source commit used
 - Source files scanned

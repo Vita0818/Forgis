@@ -12,4 +12,4 @@ Use this stack for cross-platform desktop applications with Windows as a primary
 
 - Keep the first generated version minimal and buildable.
 - Avoid platform-specific Windows APIs unless explicitly required.
-- Record unsupported source-platform features in `MIGRATION_REPORT.md`.
+- Record unsupported source-platform features in notes under the target output directory.

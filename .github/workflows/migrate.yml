@@ -3,88 +3,100 @@ name: Forgis Migration Scaffold
 on:
   workflow_dispatch:
     inputs:
-      source_repo:
-        description: "Source repository, for example owner/source-repo"
-        required: true
-        default: "Vita0818/Forgis"
-        type: string
-
-      source_ref:
-        description: "Source branch, tag, or commit"
-        required: true
-        default: "main"
-        type: string
-
       target_repo:
-        description: "Target output repository, for example owner/target-repo"
+        description: "Target repository containing FORGIS_CONFIG.yml and FORGIS_TASK.md, for example owner/target-repo"
         required: true
-        default: "Vita0818/Forgis"
         type: string
 
-      target_platform:
-        description: "Target platform"
-        required: true
-        default: "android"
-        type: choice
-        options:
-          - android
-          - windows
-          - harmonyos
-          - web
-
-      target_stack:
-        description: "Target technical stack, for example kotlin-compose, csharp-avalonia, arkts, web-react"
-        required: true
-        default: "kotlin-compose"
-        type: string
-
-      migration_profile:
-        description: "Migration profile, for example default or local-first-app"
-        required: true
-        default: "default"
-        type: string
-
-      target_branch:
-        description: "Target migration branch"
-        required: true
-        default: "forgis/android-from-source"
-        type: string
-
-      target_base_branch:
-        description: "Target repository base branch for pull requests"
-        required: true
-        default: "main"
-        type: string
-
-      base_branch:
-        description: "Deprecated alias for target_base_branch"
+      config_path:
+        description: "Config file path relative to the target repository root"
         required: false
-        default: ""
+        default: "FORGIS_CONFIG.yml"
         type: string
 
       dry_run:
-        description: "Run without pushing changes or creating pull requests"
+        description: "Run without AI execution, push, or pull request creation"
         required: true
         default: true
         type: boolean
 
-      run_ai:
-        description: "Deprecated alias for run_aider"
+      run_aider:
+        description: "Allow Aider/AI execution when dry_run is false"
         required: true
         default: false
         type: boolean
 
-      run_aider:
-        description: "Actually run Aider with the configured AI model"
-        required: true
-        default: false
-        type: boolean
+      source_repo:
+        description: "Advanced override: source repository, for example owner/source-repo"
+        required: false
+        default: ""
+        type: string
+
+      source_ref:
+        description: "Advanced override: source branch, tag, or commit"
+        required: false
+        default: ""
+        type: string
+
+      target_platform:
+        description: "Advanced override: target platform, for example android"
+        required: false
+        default: ""
+        type: string
+
+      target_stack:
+        description: "Advanced override: target technical stack, for example kotlin-compose"
+        required: false
+        default: ""
+        type: string
+
+      migration_profile:
+        description: "Advanced override: migration profile, for example default or pixel-clone-app"
+        required: false
+        default: ""
+        type: string
+
+      target_subdir:
+        description: "Advanced override: only writable target output directory"
+        required: false
+        default: ""
+        type: string
 
       task_prompt_path:
-        description: "Markdown task prompt file path relative to target repository root"
-        required: true
-        default: "FORGIS_TASK.md"
+        description: "Advanced override: read-only task prompt path relative to target root"
+        required: false
+        default: ""
         type: string
+
+      run_log_path:
+        description: "Advanced override: long-term log path; must be inside target_subdir"
+        required: false
+        default: ""
+        type: string
+
+      target_branch:
+        description: "Advanced override: target migration branch"
+        required: false
+        default: ""
+        type: string
+
+      target_base_branch:
+        description: "Advanced override: target repository base branch for pull requests"
+        required: false
+        default: ""
+        type: string
+
+      model:
+        description: "Advanced override: Aider model name"
+        required: false
+        default: ""
+        type: string
+
+      run_ai:
+        description: "Deprecated alias for run_aider"
+        required: false
+        default: false
+        type: boolean
 
       target_prompt_file:
         description: "Deprecated alias for task_prompt_path"
@@ -92,20 +104,14 @@ on:
         default: ""
         type: string
 
-      target_subdir:
-        description: "Target output directory relative to target repository root"
-        required: true
-        default: "forgis-output"
-        type: string
-
       aider_model:
         description: "Deprecated alias for model"
-        required: true
-        default: "deepseek/deepseek-v4-pro"
+        required: false
+        default: ""
         type: string
 
-      model:
-        description: "Aider model name. Use DeepSeek Pro by default."
+      base_branch:
+        description: "Deprecated alias for target_base_branch"
         required: false
         default: ""
         type: string
@@ -118,76 +124,106 @@ jobs:
     name: Run Forgis migration scaffold
     runs-on: ubuntu-latest
 
-    env:
-      SOURCE_REPO: ${{ inputs.source_repo }}
-      SOURCE_REF: ${{ inputs.source_ref }}
-      TARGET_REPO: ${{ inputs.target_repo }}
-      TARGET_PLATFORM: ${{ inputs.target_platform }}
-      TARGET_STACK: ${{ inputs.target_stack }}
-      MIGRATION_PROFILE: ${{ inputs.migration_profile }}
-      TARGET_BRANCH: ${{ inputs.target_branch }}
-      TARGET_BASE_BRANCH: ${{ inputs.base_branch || inputs.target_base_branch }}
-      DRY_RUN: ${{ inputs.dry_run }}
-      RUN_AIDER: ${{ inputs.run_aider || inputs.run_ai }}
-      RUN_AI: ${{ inputs.run_aider || inputs.run_ai }}
-      TASK_PROMPT_PATH: ${{ inputs.task_prompt_path != 'FORGIS_TASK.md' && inputs.task_prompt_path || inputs.target_prompt_file || inputs.task_prompt_path }}
-      TARGET_SUBDIR: ${{ inputs.target_subdir }}
-      AIDER_MODEL: ${{ inputs.model || inputs.aider_model }}
-
     steps:
       - name: Checkout Forgis
         uses: actions/checkout@v4
         with:
           path: forgis
 
-      - name: Checkout source repository
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.SOURCE_REPO }}
-          ref: ${{ env.SOURCE_REF }}
-          token: ${{ secrets.FORGIS_SOURCE_TOKEN }}
-          path: source-repo
-
-      - name: Checkout target repository
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.TARGET_REPO }}
-          ref: ${{ env.TARGET_BASE_BRANCH }}
-          token: ${{ secrets.FORGIS_TARGET_TOKEN }}
-          path: target-output
-          fetch-depth: 0
-
-      - name: Log Forgis migration configuration
-        run: |
-          echo "Forgis migration configuration:"
-          echo "  source_repo: $SOURCE_REPO"
-          echo "  source_ref: $SOURCE_REF"
-          echo "  target_repo: $TARGET_REPO"
-          echo "  target_base_branch: $TARGET_BASE_BRANCH"
-          echo "  target_branch: $TARGET_BRANCH"
-          echo "  target_platform: $TARGET_PLATFORM"
-          echo "  target_stack: $TARGET_STACK"
-          echo "  migration_profile: $MIGRATION_PROFILE"
-          echo "  task_prompt_path: $TASK_PROMPT_PATH"
-          echo "  target_subdir: $TARGET_SUBDIR"
-          echo "  aider_model: $AIDER_MODEL"
-          echo "  dry_run: $DRY_RUN"
-          echo "  run_aider: $RUN_AIDER"
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install Python dependencies and Aider
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r forgis/requirements.txt
-          pip install aider-chat
 
-      - name: Check Aider installation
+      - name: Checkout target repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.target_repo }}
+          token: ${{ secrets.FORGIS_TARGET_TOKEN }}
+          path: target-output
+          fetch-depth: 0
+
+      - name: Resolve Forgis config
+        id: resolve
+        env:
+          DRY_RUN_INPUT: ${{ inputs.dry_run }}
+          RUN_AIDER_INPUT: ${{ inputs.run_aider || inputs.run_ai }}
         run: |
-          aider --version
+          mkdir -p "$GITHUB_WORKSPACE/forgis-runtime"
+
+          python forgis/agent/resolve_config.py \
+            --target "$GITHUB_WORKSPACE/target-output" \
+            --target-repo "${{ inputs.target_repo }}" \
+            --config-path "${{ inputs.config_path }}" \
+            --source-repo "${{ inputs.source_repo }}" \
+            --source-ref "${{ inputs.source_ref }}" \
+            --target-platform "${{ inputs.target_platform }}" \
+            --target-stack "${{ inputs.target_stack }}" \
+            --migration-profile "${{ inputs.migration_profile }}" \
+            --target-subdir "${{ inputs.target_subdir }}" \
+            --task-prompt-path "${{ inputs.task_prompt_path }}" \
+            --target-prompt-file "${{ inputs.target_prompt_file }}" \
+            --run-log-path "${{ inputs.run_log_path }}" \
+            --target-branch "${{ inputs.target_branch }}" \
+            --target-base-branch "${{ inputs.target_base_branch }}" \
+            --base-branch "${{ inputs.base_branch }}" \
+            --model "${{ inputs.model }}" \
+            --aider-model "${{ inputs.aider_model }}" \
+            --dry-run "$DRY_RUN_INPUT" \
+            --run-aider "$RUN_AIDER_INPUT" \
+            --github-env "$GITHUB_ENV" \
+            --github-output "$GITHUB_OUTPUT" \
+            --summary-output "$GITHUB_WORKSPACE/forgis-runtime/resolved_config.md"
+
+      - name: Checkout resolved target base branch
+        run: |
+          cd "$GITHUB_WORKSPACE/target-output"
+          git fetch origin "$TARGET_BASE_BRANCH"
+          git checkout -B "$TARGET_BASE_BRANCH" "origin/$TARGET_BASE_BRANCH"
+
+      - name: Resolve Forgis config from base branch
+        id: resolve_base
+        env:
+          DRY_RUN_INPUT: ${{ inputs.dry_run }}
+          RUN_AIDER_INPUT: ${{ inputs.run_aider || inputs.run_ai }}
+        run: |
+          python forgis/agent/resolve_config.py \
+            --target "$GITHUB_WORKSPACE/target-output" \
+            --target-repo "${{ inputs.target_repo }}" \
+            --config-path "${{ inputs.config_path }}" \
+            --source-repo "${{ inputs.source_repo }}" \
+            --source-ref "${{ inputs.source_ref }}" \
+            --target-platform "${{ inputs.target_platform }}" \
+            --target-stack "${{ inputs.target_stack }}" \
+            --migration-profile "${{ inputs.migration_profile }}" \
+            --target-subdir "${{ inputs.target_subdir }}" \
+            --task-prompt-path "${{ inputs.task_prompt_path }}" \
+            --target-prompt-file "${{ inputs.target_prompt_file }}" \
+            --run-log-path "${{ inputs.run_log_path }}" \
+            --target-branch "${{ inputs.target_branch }}" \
+            --target-base-branch "${{ inputs.target_base_branch }}" \
+            --base-branch "${{ inputs.base_branch }}" \
+            --model "${{ inputs.model }}" \
+            --aider-model "${{ inputs.aider_model }}" \
+            --dry-run "$DRY_RUN_INPUT" \
+            --run-aider "$RUN_AIDER_INPUT" \
+            --github-env "$GITHUB_ENV" \
+            --github-output "$GITHUB_OUTPUT" \
+            --summary-output "$GITHUB_WORKSPACE/forgis-runtime/resolved_config.md"
+
+      - name: Checkout source repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.resolve_base.outputs.source_repo }}
+          ref: ${{ steps.resolve_base.outputs.source_ref }}
+          token: ${{ secrets.FORGIS_SOURCE_TOKEN }}
+          path: source-repo
+          persist-credentials: false
 
       - name: Run Forgis controller
         run: |
@@ -195,19 +231,25 @@ jobs:
             --source "$GITHUB_WORKSPACE/source-repo" \
             --target "$GITHUB_WORKSPACE/target-output" \
             --rules "$GITHUB_WORKSPACE/forgis/rules" \
+            --source-repo "$SOURCE_REPO" \
+            --source-ref "$SOURCE_REF" \
+            --target-repo "$TARGET_REPO" \
             --platform "$TARGET_PLATFORM" \
             --target-stack "$TARGET_STACK" \
             --migration-profile "$MIGRATION_PROFILE" \
             --target-branch "$TARGET_BRANCH" \
+            --target-base-branch "$TARGET_BASE_BRANCH" \
+            --config-path "$CONFIG_PATH" \
             --task-prompt-path "$TASK_PROMPT_PATH" \
             --target-subdir "$TARGET_SUBDIR" \
+            --run-log-path "$RUN_LOG_PATH" \
+            --model "$AIDER_MODEL" \
             --dry-run "$DRY_RUN" \
-            --run-ai "$RUN_AI"
+            --run-ai "$RUN_AIDER" \
+            --summary-output "$GITHUB_WORKSPACE/forgis-runtime/run_summary.md"
 
       - name: Collect source bundle and manifest
         run: |
-          mkdir -p "$GITHUB_WORKSPACE/forgis-runtime"
-
           python forgis/agent/collect_source.py \
             --source "$GITHUB_WORKSPACE/source-repo" \
             --output "$GITHUB_WORKSPACE/forgis-runtime/source_bundle.md" \
@@ -215,8 +257,6 @@ jobs:
 
       - name: Build Forgis migration prompt
         run: |
-          mkdir -p "$GITHUB_WORKSPACE/forgis-runtime"
-
           python forgis/agent/build_prompt.py \
             --source "$GITHUB_WORKSPACE/source-repo" \
             --target "$GITHUB_WORKSPACE/target-output" \
@@ -227,9 +267,11 @@ jobs:
             --migration-profile "$MIGRATION_PROFILE" \
             --source-bundle "$GITHUB_WORKSPACE/forgis-runtime/source_bundle.md" \
             --source-manifest "$GITHUB_WORKSPACE/forgis-runtime/source_manifest.md" \
+            --config-path "$CONFIG_PATH" \
             --task-prompt-path "$TASK_PROMPT_PATH" \
             --require-task-prompt \
             --target-subdir "$TARGET_SUBDIR" \
+            --run-log-path "$RUN_LOG_PATH" \
             --output "$GITHUB_WORKSPACE/forgis-runtime/forgis_prompt.md"
 
           test -f "$GITHUB_WORKSPACE/forgis-runtime/forgis_prompt.md"
@@ -240,39 +282,83 @@ jobs:
           bash -n forgis/agent/build_target.sh
           bash -n forgis/agent/create_pr.sh
 
-      - name: Check target repository task prompt
-        if: ${{ inputs.run_aider == true || inputs.run_aider == 'true' || inputs.run_ai == true || inputs.run_ai == 'true' }}
+      - name: Install and check Aider if enabled
         run: |
-          TARGET_PROMPT_PATH="$GITHUB_WORKSPACE/target-output/$TASK_PROMPT_PATH"
-
-          if [ ! -f "$TARGET_PROMPT_PATH" ] || [ ! -s "$TARGET_PROMPT_PATH" ]; then
-            echo "Target repository task prompt is required when run_aider is true."
-            echo "Create a non-empty $TASK_PROMPT_PATH file in the target repository root."
-            exit 1
+          if [[ "$RUN_AIDER" != "true" ]]; then
+            echo "RUN_AIDER is false. Skipping Aider installation."
+            exit 0
           fi
 
+          pip install aider-chat
+          aider --version
+
       - name: Run Aider with configured model
-        if: ${{ inputs.run_aider == true || inputs.run_aider == 'true' || inputs.run_ai == true || inputs.run_ai == 'true' }}
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           TARGET_REPO_DIR: ${{ github.workspace }}/target-output
           FORGIS_PROMPT_FILE: ${{ github.workspace }}/forgis-runtime/forgis_prompt.md
-          TASK_PROMPT_PATH: ${{ env.TASK_PROMPT_PATH }}
-          TARGET_SUBDIR: ${{ env.TARGET_SUBDIR }}
-          AIDER_MODEL: ${{ env.AIDER_MODEL }}
         run: |
+          if [[ "$RUN_AIDER" != "true" ]]; then
+            echo "RUN_AIDER is false. Skipping Aider execution."
+            exit 0
+          fi
+
           bash forgis/agent/run_aider.sh
 
       - name: Build target repository
-        if: ${{ inputs.run_aider == true || inputs.run_aider == 'true' || inputs.run_ai == true || inputs.run_ai == 'true' }}
         env:
           TARGET_REPO_DIR: ${{ github.workspace }}/target-output
-          TARGET_PLATFORM: ${{ env.TARGET_PLATFORM }}
-          TARGET_SUBDIR: ${{ env.TARGET_SUBDIR }}
-          RUN_AIDER: ${{ env.RUN_AIDER }}
-          DRY_RUN: ${{ env.DRY_RUN }}
         run: |
+          if [[ "$RUN_AIDER" != "true" ]]; then
+            echo "RUN_AIDER is false. Skipping target build."
+            exit 0
+          fi
+
           bash forgis/agent/build_target.sh
+
+      - name: Append long-term Forgis log
+        if: ${{ always() && steps.resolve_base.outcome == 'success' }}
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python forgis/agent/write_run_log.py \
+            --target "$GITHUB_WORKSPACE/target-output" \
+            --source-repo "$SOURCE_REPO" \
+            --source-ref "$SOURCE_REF" \
+            --target-repo "$TARGET_REPO" \
+            --target-base-branch "$TARGET_BASE_BRANCH" \
+            --target-branch "$TARGET_BRANCH" \
+            --target-platform "$TARGET_PLATFORM" \
+            --target-stack "$TARGET_STACK" \
+            --migration-profile "$MIGRATION_PROFILE" \
+            --target-subdir "$TARGET_SUBDIR" \
+            --task-prompt-path "$TASK_PROMPT_PATH" \
+            --config-path "$CONFIG_PATH" \
+            --model "$AIDER_MODEL" \
+            --run-log-path "$RUN_LOG_PATH" \
+            --dry-run "$DRY_RUN" \
+            --run-aider "$RUN_AIDER" \
+            --run-aider-requested "$RUN_AIDER_REQUESTED" \
+            --run-url "$RUN_URL" \
+            --build-result "See workflow logs for build and guardrail checks." \
+            --summary "Forgis resolved config, built the final prompt, and ran the enabled migration steps." \
+            --next-steps "Review generated files inside $TARGET_SUBDIR/." \
+            --preview-output "$GITHUB_WORKSPACE/forgis-runtime/forgis_log_entry.md"
+
+      - name: Verify source repository stayed read-only
+        if: ${{ always() && steps.resolve_base.outcome == 'success' }}
+        run: |
+          python forgis/agent/guardrails.py check-source-clean \
+            --source "$GITHUB_WORKSPACE/source-repo"
+
+      - name: Verify target writable scope
+        if: ${{ always() && steps.resolve_base.outcome == 'success' }}
+        run: |
+          python forgis/agent/guardrails.py check-target-scope \
+            --target "$GITHUB_WORKSPACE/target-output" \
+            --target-subdir "$TARGET_SUBDIR" \
+            --read-only-path "$CONFIG_PATH" \
+            --read-only-path "$TASK_PROMPT_PATH"
 
       - name: Show target repository diff
         if: always()
@@ -283,53 +369,75 @@ jobs:
           echo "Git diff stat:"
           git diff --stat || true
 
-
       - name: Create pull request
-        if: ${{ (inputs.run_aider == true || inputs.run_aider == 'true' || inputs.run_ai == true || inputs.run_ai == 'true') && (inputs.dry_run != true && inputs.dry_run != 'true') }}
         env:
           GH_TOKEN: ${{ secrets.FORGIS_TARGET_TOKEN }}
           TARGET_REPO_DIR: ${{ github.workspace }}/target-output
-          TARGET_REPO: ${{ env.TARGET_REPO }}
-          TARGET_BRANCH: ${{ env.TARGET_BRANCH }}
-          TARGET_BASE_BRANCH: ${{ env.TARGET_BASE_BRANCH }}
-          TARGET_PLATFORM: ${{ env.TARGET_PLATFORM }}
-          TARGET_STACK: ${{ env.TARGET_STACK }}
-          DRY_RUN: ${{ env.DRY_RUN }}
         run: |
+          if [[ "$RUN_AIDER" != "true" ]]; then
+            echo "RUN_AIDER is false. Skipping push and pull request creation."
+            exit 0
+          fi
+
+          if [[ "$DRY_RUN" == "true" ]]; then
+            echo "DRY_RUN is true. Skipping push and pull request creation."
+            exit 0
+          fi
+
           bash forgis/agent/create_pr.sh
 
       - name: Package target output snapshot
+        if: always()
         run: |
           mkdir -p "$GITHUB_WORKSPACE/forgis-runtime"
           tar -czf "$GITHUB_WORKSPACE/forgis-runtime/target-output-snapshot.tar.gz" \
             -C "$GITHUB_WORKSPACE" \
             target-output
 
-      - name: Upload migration report
+      - name: Upload resolved config summary
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: forgis-migration-report
-          path: target-output/MIGRATION_REPORT.md
+          name: forgis-resolved-config
+          path: forgis-runtime/resolved_config.md
+
+      - name: Upload run summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: forgis-run-summary
+          path: forgis-runtime/run_summary.md
 
       - name: Upload source bundle
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: forgis-source-bundle
           path: forgis-runtime/source_bundle.md
 
       - name: Upload source manifest
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: forgis-source-manifest
           path: forgis-runtime/source_manifest.md
 
       - name: Upload generated Forgis prompt
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: forgis-generated-prompt
           path: forgis-runtime/forgis_prompt.md
 
+      - name: Upload generated long log preview
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: forgis-long-log-preview
+          path: forgis-runtime/forgis_log_entry.md
+
       - name: Upload target output snapshot
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: forgis-target-output

@@ -9,10 +9,10 @@ Its purpose is to read a selected source repository and generate or update a sel
 The agent must:
 
 - Treat the source repository as read-only.
-- Modify only the selected target output repository.
+- Modify only the configured `target_subdir` inside the selected target repository.
 - Follow all rules in `PROJECT_BOUNDARY.md`.
 - Prefer pull requests over direct changes to the main branch.
-- Generate a clear migration report for every run.
+- Keep run notes and generated project documentation inside `target_subdir`.
 - Avoid leaking secrets into logs, prompts, commits, reports, or generated files.
 - Remain project-agnostic and avoid hardcoding a specific app or repository name.
 
@@ -49,6 +49,9 @@ The agent may:
 The agent must not:
 
 - Push directly to `main`.
+- Modify the target repository root.
+- Modify files outside the configured `target_subdir`.
+- Modify `FORGIS_CONFIG.yml`, `FORGIS_TASK.md`, or their configured equivalents.
 - Modify unrelated branches.
 - Change repository settings.
 - Add credentials, tokens, private keys, certificates, or local-only files.
@@ -62,7 +65,7 @@ The agent should prioritize:
 3. Producing buildable target-platform code.
 4. Writing clear reports about what was translated, skipped, or uncertain.
 
-When uncertain, the agent should write the uncertainty into `MIGRATION_REPORT.md` instead of guessing silently.
+When uncertain, the agent should write the uncertainty into a note inside `target_subdir` instead of guessing silently.
 
 ## Safety rule
 

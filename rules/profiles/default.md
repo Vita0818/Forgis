@@ -10,4 +10,4 @@ Use this profile when no product-specific strategy is required.
 - Prefer a clean, idiomatic implementation on the target platform.
 - Keep the first migration small and buildable.
 - Do not overfit to a specific project name.
-- Record unsupported features in `MIGRATION_REPORT.md`.
+- Record unsupported features in notes under the target output directory.

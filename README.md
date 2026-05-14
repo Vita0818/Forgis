@@ -6,97 +6,161 @@ It reads a selected source repository, applies a selected migration profile and 
 
 Forgis is not tied to any single project.
 
-## Concept
+## Recommended Mode
 
-Forgis is organized around five parts:
+Put these two files in the target repository root:
 
-- Wrench: migration rules and prompts
-- Robotic arm: GitHub Actions and agent scripts
-- Power: an external LLM API such as DeepSeek
-- Input screw: the selected source repository
-- Output screw: the selected target repository
+- `FORGIS_CONFIG.yml`: machine-readable migration parameters
+- `FORGIS_TASK.md`: long-form human task prompt for the current run
 
-## Core inputs
+Then run the GitHub Action with only the common inputs:
 
-A Forgis run is configured by workflow inputs:
+```text
+target_repo: owner/target-repo
+config_path: FORGIS_CONFIG.yml
+dry_run: true
+run_aider: false
+```
 
-- `source_repo`: source repository, for example `owner/source-repo`
-- `source_ref`: source branch, tag, or commit
-- `target_repo`: target output repository, for example `owner/target-repo`
-- `target_platform`: broad target platform, for example `android`, `windows`, `harmonyos`, or `web`
-- `target_stack`: concrete target technology stack, for example `kotlin-compose`, `csharp-avalonia`, `arkts`, or `web-react`
-- `migration_profile`: migration strategy profile, for example `default` or `local-first-app`
-- `target_branch`: target migration branch
-- `target_base_branch`: target repository base branch for pull requests
-- `dry_run`: whether to skip push and pull request creation
-- `run_aider`: whether to actually call Aider with the configured AI model
-- `task_prompt_path`: Markdown task prompt file path relative to the target repository root. Defaults to `FORGIS_TASK.md`.
-- `target_subdir`: target output directory relative to the target repository root. Defaults to `forgis-output`.
-- `model`: Aider model name. Defaults to `deepseek/deepseek-v4-pro`.
+For a live AI migration run:
 
-Deprecated aliases are still accepted by the workflow for compatibility:
+```text
+target_repo: owner/target-repo
+config_path: FORGIS_CONFIG.yml
+dry_run: false
+run_aider: true
+```
+
+`dry_run: true` is the safe default and does not call Aider, push, or create a pull request. `run_aider` must be explicitly enabled, and it only takes effect when `dry_run` is false.
+
+## Example Config
+
+```yaml
+source_repo: Vita0818/Kikaria
+source_ref: main
+
+target_platform: android
+target_stack: kotlin-compose
+migration_profile: pixel-clone-app
+
+target_subdir: Kikaria-Android
+task_prompt_path: FORGIS_TASK.md
+
+model: deepseek/deepseek-v4-pro
+target_branch: forgis/kikaria-android-pixel-2
+target_base_branch: main
+
+run_log_path: Kikaria-Android/FORGIS_LOG.md
+```
+
+If `run_log_path` is omitted, Forgis uses:
+
+```text
+{target_subdir}/FORGIS_LOG.md
+```
+
+For example:
+
+```text
+Kikaria-Android/FORGIS_LOG.md
+```
+
+## Configuration Priority
+
+For migration parameters, Forgis resolves values in this order:
+
+1. Non-empty workflow input override
+2. `FORGIS_CONFIG.yml`
+3. Safe default, where one exists
+
+`dry_run` and `run_aider` are different: they are controlled only by workflow inputs. The target repository config cannot silently enable AI execution, pushes, or pull request creation.
+
+## Target Task Prompt
+
+`task_prompt_path` is resolved relative to the target repository root. The recommended file is:
+
+```text
+FORGIS_TASK.md
+```
+
+Forgis reads this file after checking out the target repository and embeds it into the generated final prompt. Aider receives it through read-only context and must not edit it.
+
+If the task prompt file is missing or empty, the migration workflow fails instead of falling back to an example task.
+
+Do not put API keys, tokens, certificates, signing material, or private information in `FORGIS_TASK.md` or any other task prompt file.
+
+## Safety Boundaries
+
+Forgis enforces these runtime boundaries:
+
+- `source_repo` is fully read-only.
+- The target repository root is read-only.
+- Only `target_subdir` inside the target repository is writable.
+- Everything outside `target_subdir` is read-only, including other project directories.
+- `FORGIS_CONFIG.yml` and `FORGIS_TASK.md` are read-only input files.
+- `run_log_path` must be inside `target_subdir`.
+- Aider writable scope is `target_subdir`, not the config file or task prompt file.
+- The target repository root must not be polluted with generated project files.
+- Sibling project directories must not be modified.
+- Dry runs do not call AI, push, or create pull requests.
+- `run_aider` requires explicit workflow confirmation.
+
+Before Aider runs, Forgis records hashes for the configured config and task prompt files. After Aider returns, Forgis checks the hashes again and fails the workflow if either read-only file changed.
+
+Forgis also checks target git status and fails if any changed file is outside `target_subdir`.
+
+## Long-Term Log
+
+Each run appends a Markdown entry to the long-term log file:
+
+```text
+{target_subdir}/FORGIS_LOG.md
+```
+
+This file is intentionally inside the writable target output directory, so it can be committed with the migration branch.
+
+In dry run mode, Forgis still prints the proposed log entry to the workflow log and uploads it as an artifact. In live mode, the log file is part of the target repository changes that are pushed and included in the pull request.
+
+## Workflow Inputs
+
+Common inputs:
+
+- `target_repo`
+- `config_path`
+- `dry_run`
+- `run_aider`
+
+Advanced override inputs remain available for compatibility:
+
+- `source_repo`
+- `source_ref`
+- `target_platform`
+- `target_stack`
+- `migration_profile`
+- `target_subdir`
+- `task_prompt_path`
+- `run_log_path`
+- `target_branch`
+- `target_base_branch`
+- `model`
+
+Deprecated aliases are still accepted:
 
 - `run_ai` for `run_aider`
 - `target_prompt_file` for `task_prompt_path`
 - `aider_model` for `model`
 - `base_branch` for `target_base_branch`
 
-## Per-run task prompt
+If `config_path` is missing from the target repository, Forgis can still run in the old parameter mode, but all required migration fields must be supplied through workflow inputs.
 
-Forgis itself stays generic and does not need to be edited for each migration phase.
-
-Before each run, create or update a Markdown task prompt in the target repository root. The default file is:
-
-```text
-FORGIS_TASK.md
-```
-
-GitHub Actions checks out the target repository, reads `task_prompt_path` from that target repository root, and embeds the file contents in the final prompt sent to Aider.
-
-For example, a run can use:
-
-- `source_repo`: `owner/source-repo`
-- `target_repo`: `owner/target-repo`
-- `target_stack`: `kotlin-compose`
-- `task_prompt_path`: `FORGIS_TASK.md`
-- `target_subdir`: `android-output`
-
-Long task instructions should be written into a `.md` file in the target repository root instead of being pasted into a workflow input box. You may choose another filename by changing `task_prompt_path`, but the path is always resolved relative to the target repository root.
-
-Do not put API keys, tokens, certificates, signing material, or private information in `FORGIS_TASK.md` or any other task prompt file.
-
-If the task prompt file is missing or empty, the migration workflow fails instead of falling back to an example task.
-
-## Target output directory
-
-Forgis uses `target_subdir` to define the project directory Aider may create or modify inside the target repository.
-
-The default is:
-
-```text
-forgis-output
-```
-
-Aider receives the task prompt as read-only context and runs with the target output directory as its writable scope. Generated project files should stay under `target_subdir`; `MIGRATION_REPORT.md` may be updated at the target repository root for run reporting.
-
-Set `target_subdir` explicitly for real migrations when the target repository should contain a named project directory.
-
-## Safety
-
-By default:
-
-- `dry_run` is `true`
-- `run_aider` is `false`
-- the source repository is treated as read-only
-- generated project changes are written only inside the configured `target_subdir`
-- push and PR creation are disabled unless explicitly enabled
+## Required Secrets
 
 API keys must be stored in GitHub Actions Secrets, not in repository files.
 
 Required GitHub Actions secrets:
 
 - `DEEPSEEK_API_KEY`
-  - Used only for DeepSeek API access.
+  - Used only for DeepSeek API access when `run_aider` is effective.
 - `FORGIS_SOURCE_TOKEN`
   - Used only to check out the source repository.
   - Should have source repository Contents read and Metadata read permissions.
@@ -107,7 +171,7 @@ Required GitHub Actions secrets:
 
 Do not reuse the target token for source checkout.
 
-## Default AI model
+## Default AI Model
 
 Forgis uses DeepSeek Pro by default.
 

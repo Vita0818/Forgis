@@ -26,7 +26,8 @@ Forgis must not read:
 
 Forgis may write only:
 
-- The selected target output repository
+- The configured `target_subdir` inside the selected target output repository
+- The configured `run_log_path`, which must be inside `target_subdir`
 - The selected migration branch
 
 ## Forbidden to write
@@ -34,6 +35,9 @@ Forgis may write only:
 Forgis must not write:
 
 - The source repository
+- The target repository root
+- Target repository files outside `target_subdir`
+- `FORGIS_CONFIG.yml`, `FORGIS_TASK.md`, or any configured config/task prompt file
 - The target repository main branch directly
 - Any unrelated repository
 - Any credential, token, certificate, or private key file

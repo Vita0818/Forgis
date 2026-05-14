@@ -45,9 +45,9 @@ Examples:
 
 ## Reporting
 
-Every run must update `MIGRATION_REPORT.md`.
+Every run must keep migration notes inside the configured target output directory.
 
-The report must say:
+Run notes should say:
 
 - Which source commit was used.
 - Which source files were translated.
