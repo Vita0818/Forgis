@@ -8,15 +8,6 @@ import re
 import sys
 
 
-ALLOWED_SECRET_ENV_NAMES = {
-    "FORGIS_MODEL_API_KEY",
-    "DEEPSEEK_API_KEY",
-    "OPENAI_API_KEY",
-    "ANTHROPIC_API_KEY",
-    "OPENROUTER_API_KEY",
-    "GEMINI_API_KEY",
-    "GOOGLE_API_KEY",
-}
 ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -35,11 +26,6 @@ def parse_model_env_json(text: str) -> tuple[tuple[str, str], ...]:
             raise ValueError(f"Invalid model_env runtime env name: {runtime_env}")
         if not isinstance(secret_env, str) or not ENV_NAME_PATTERN.fullmatch(secret_env):
             raise ValueError(f"Invalid model_env secret env name for {runtime_env}: {secret_env}")
-        if secret_env not in ALLOWED_SECRET_ENV_NAMES:
-            raise ValueError(
-                f"Model secret env `{secret_env}` is not in the main workflow allowlist. "
-                "Add it to the workflow candidate secret env list before using it in model_env."
-            )
         pairs.append((runtime_env, secret_env))
 
     return tuple(pairs)

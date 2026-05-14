@@ -11,46 +11,60 @@ import yaml
 
 DEFAULT_CONFIG_PATH = "FORGIS_CONFIG.yml"
 DEFAULT_SOURCE_REF = "main"
-DEFAULT_TARGET_BASE_BRANCH = "main"
-DEFAULT_MIGRATION_PROFILE = "default"
 DEFAULT_TASK_PROMPT_PATH = "FORGIS_TASK.md"
-DEFAULT_TARGET_SUBDIR = "forgis-output"
+DEFAULT_TARGET_SUBDIR = "target-output"
+DEFAULT_AGENT_BACKEND = "aider"
 DEFAULT_MODEL = "provider/model-name"
+DEFAULT_TARGET_BASE_BRANCH = "main"
 DEFAULT_RUN_LOG_FILENAME = "FORGIS_LOG.md"
-DEFAULT_FORBIDDEN_PROMPT_MARKERS = (
-    "make the greeting more casual",
-    "Which file (or which phrase) should be changed?",
-    "casual greeting",
-)
+DEFAULT_SOURCE_CONTEXT_MODE = "none"
+DEFAULT_SOURCE_CONTEXT_MAX_CHARS = 100_000
+DEFAULT_SOURCE_CONTEXT_EXCLUDE = (".git/**",)
 ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 CONFIG_FIELDS = {
     "source_repo",
     "source_ref",
-    "target_platform",
-    "target_stack",
-    "migration_profile",
     "target_subdir",
     "task_prompt_path",
+    "agent_backend",
     "model",
     "target_branch",
     "target_base_branch",
     "run_log_path",
     "dry_run",
+    "run_agent",
     "run_aider",
     "confirm_real_run",
-    "required_prompt_markers",
-    "forbidden_prompt_markers",
     "model_env",
+    "validation_commands",
+    "success_checks",
+    "source_context",
+    "target_stack",
+    "migration_profile",
 }
 
 REQUIRED_FIELDS = {
     "source_repo",
     "target_repo",
-    "target_platform",
-    "target_stack",
     "target_branch",
 }
+
+
+@dataclasses.dataclass(frozen=True)
+class SourceContextConfig:
+    mode: str = DEFAULT_SOURCE_CONTEXT_MODE
+    max_chars: int = DEFAULT_SOURCE_CONTEXT_MAX_CHARS
+    include: tuple[str, ...] = ()
+    exclude: tuple[str, ...] = DEFAULT_SOURCE_CONTEXT_EXCLUDE
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "mode": self.mode,
+            "max_chars": self.max_chars,
+            "include": list(self.include),
+            "exclude": list(self.exclude),
+        }
 
 
 @dataclasses.dataclass(frozen=True)
@@ -58,11 +72,9 @@ class ResolvedConfig:
     source_repo: str
     source_ref: str
     target_repo: str
-    target_platform: str
-    target_stack: str
-    migration_profile: str
     target_subdir: str
     task_prompt_path: str
+    agent_backend: str
     model: str
     target_branch: str
     target_base_branch: str
@@ -71,13 +83,15 @@ class ResolvedConfig:
     config_found: bool
     config_keys: tuple[str, ...]
     dry_run: bool
-    run_aider_config: bool
+    run_agent_config: bool
     confirm_real_run: bool
     real_run_allowed: bool
-    run_aider: bool
-    required_prompt_markers: tuple[str, ...]
-    forbidden_prompt_markers: tuple[str, ...]
+    run_agent: bool
     model_env: tuple[tuple[str, str], ...]
+    validation_commands: tuple[str, ...]
+    success_checks: tuple[dict[str, str], ...]
+    source_context: SourceContextConfig
+    passthrough_config: tuple[tuple[str, str], ...]
 
     def env(self) -> dict[str, str]:
         model_env = {runtime: source for runtime, source in self.model_env}
@@ -85,11 +99,9 @@ class ResolvedConfig:
             "SOURCE_REPO": self.source_repo,
             "SOURCE_REF": self.source_ref,
             "TARGET_REPO": self.target_repo,
-            "TARGET_PLATFORM": self.target_platform,
-            "TARGET_STACK": self.target_stack,
-            "MIGRATION_PROFILE": self.migration_profile,
             "TARGET_SUBDIR": self.target_subdir,
             "TASK_PROMPT_PATH": self.task_prompt_path,
+            "AGENT_BACKEND": self.agent_backend,
             "AIDER_MODEL": self.model,
             "TARGET_BRANCH": self.target_branch,
             "TARGET_BASE_BRANCH": self.target_base_branch,
@@ -99,21 +111,44 @@ class ResolvedConfig:
             "CONFIG_KEYS": ",".join(self.config_keys),
             "DRY_RUN": "true" if self.dry_run else "false",
             "DRY_RUN_CONFIG": "true" if self.dry_run else "false",
-            "RUN_AIDER_CONFIG": "true" if self.run_aider_config else "false",
-            "RUN_AIDER_REQUESTED": "true" if self.run_aider_config else "false",
+            "RUN_AGENT_CONFIG": "true" if self.run_agent_config else "false",
+            "RUN_AGENT_REQUESTED": "true" if self.run_agent_config else "false",
+            "RUN_AIDER_CONFIG": "true" if self.run_agent_config else "false",
+            "RUN_AIDER_REQUESTED": "true" if self.run_agent_config else "false",
             "CONFIRM_REAL_RUN": "true" if self.confirm_real_run else "false",
             "REAL_RUN_ALLOWED": "true" if self.real_run_allowed else "false",
-            "RUN_AIDER": "true" if self.run_aider else "false",
-            "RUN_AI": "true" if self.run_aider else "false",
-            "REQUIRED_PROMPT_MARKERS_JSON": json.dumps(
-                list(self.required_prompt_markers),
-                ensure_ascii=False,
-            ),
-            "FORBIDDEN_PROMPT_MARKERS_JSON": json.dumps(
-                list(self.forbidden_prompt_markers),
-                ensure_ascii=False,
-            ),
+            "RUN_AGENT": "true" if self.run_agent else "false",
+            "RUN_AIDER": "true" if self.run_agent else "false",
+            "RUN_AI": "true" if self.run_agent else "false",
             "MODEL_ENV_JSON": json.dumps(model_env, ensure_ascii=False, sort_keys=True),
+            "VALIDATION_COMMANDS_JSON": json.dumps(
+                list(self.validation_commands),
+                ensure_ascii=False,
+            ),
+            "SUCCESS_CHECKS_JSON": json.dumps(
+                list(self.success_checks),
+                ensure_ascii=False,
+            ),
+            "SOURCE_CONTEXT_JSON": json.dumps(
+                self.source_context.as_dict(),
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            "SOURCE_CONTEXT_MODE": self.source_context.mode,
+            "SOURCE_CONTEXT_MAX_CHARS": str(self.source_context.max_chars),
+            "SOURCE_CONTEXT_INCLUDE_JSON": json.dumps(
+                list(self.source_context.include),
+                ensure_ascii=False,
+            ),
+            "SOURCE_CONTEXT_EXCLUDE_JSON": json.dumps(
+                list(self.source_context.exclude),
+                ensure_ascii=False,
+            ),
+            "FORGIS_PASSTHROUGH_CONFIG_JSON": json.dumps(
+                dict(self.passthrough_config),
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
         }
 
     def outputs(self) -> dict[str, str]:
@@ -165,14 +200,14 @@ def select_string_list(config: dict[str, Any], field: str) -> tuple[str, ...]:
     if not isinstance(value, list):
         raise ValueError(f"{field} must be a YAML list of single-line strings.")
 
-    markers: list[str] = []
+    strings: list[str] = []
     for index, item in enumerate(value):
         text = non_empty(item)
         if text is None:
             raise ValueError(f"{field}[{index}] must be a non-empty string.")
-        markers.append(clean_single_line(text, f"{field}[{index}]"))
+        strings.append(clean_single_line(text, f"{field}[{index}]"))
 
-    return dedupe_strings(markers)
+    return dedupe_strings(strings)
 
 
 def validate_env_name(value: str, label: str) -> str:
@@ -203,6 +238,91 @@ def select_model_env(config: dict[str, Any]) -> tuple[tuple[str, str], ...]:
         pairs.append((runtime_name, secret_name))
 
     return tuple(sorted(pairs))
+
+
+def select_success_checks(config: dict[str, Any]) -> tuple[dict[str, str], ...]:
+    if "success_checks" not in config or config["success_checks"] is None:
+        return ()
+
+    value = config["success_checks"]
+    if not isinstance(value, list):
+        raise ValueError("success_checks must be a YAML list.")
+
+    checks: list[dict[str, str]] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise ValueError(f"success_checks[{index}] must be a mapping.")
+
+        allowed_keys = {"path_exists", "command"}
+        keys = [key for key in item if key in allowed_keys]
+        if len(keys) != 1:
+            raise ValueError(
+                f"success_checks[{index}] must contain exactly one of: path_exists, command."
+            )
+        key = keys[0]
+        text = non_empty(item.get(key))
+        if text is None:
+            raise ValueError(f"success_checks[{index}].{key} must be a non-empty string.")
+        checks.append({key: clean_single_line(text, f"success_checks[{index}].{key}")})
+
+    return tuple(checks)
+
+
+def select_source_context(config: dict[str, Any]) -> SourceContextConfig:
+    if "source_context" not in config or config["source_context"] is None:
+        return SourceContextConfig()
+
+    value = config["source_context"]
+    if not isinstance(value, dict):
+        raise ValueError("source_context must be a YAML mapping.")
+
+    mode = non_empty(value.get("mode")) or DEFAULT_SOURCE_CONTEXT_MODE
+    mode = clean_single_line(mode, "source_context.mode").lower()
+    if mode not in {"none", "tree", "selected_files"}:
+        raise ValueError("source_context.mode must be one of: none, tree, selected_files.")
+
+    max_chars_raw = value.get("max_chars", DEFAULT_SOURCE_CONTEXT_MAX_CHARS)
+    try:
+        max_chars = int(max_chars_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("source_context.max_chars must be an integer.") from exc
+    if max_chars < 0:
+        raise ValueError("source_context.max_chars must not be negative.")
+
+    include = select_nested_string_list(value, "include", "source_context.include")
+    exclude = select_nested_string_list(value, "exclude", "source_context.exclude")
+    if not exclude:
+        exclude = DEFAULT_SOURCE_CONTEXT_EXCLUDE
+
+    if mode == "selected_files" and not include:
+        raise ValueError("source_context.include is required when mode is selected_files.")
+
+    return SourceContextConfig(
+        mode=mode,
+        max_chars=max_chars,
+        include=include,
+        exclude=exclude,
+    )
+
+
+def select_nested_string_list(
+    config: dict[str, Any],
+    field: str,
+    label: str,
+) -> tuple[str, ...]:
+    if field not in config or config[field] is None:
+        return ()
+    value = config[field]
+    if not isinstance(value, list):
+        raise ValueError(f"{label} must be a YAML list of single-line strings.")
+
+    strings: list[str] = []
+    for index, item in enumerate(value):
+        text = non_empty(item)
+        if text is None:
+            raise ValueError(f"{label}[{index}] must be a non-empty string.")
+        strings.append(clean_single_line(text, f"{label}[{index}]"))
+    return dedupe_strings(strings)
 
 
 def resolve_inside_root(root: Path, relative_path: str, label: str) -> tuple[Path, str]:
@@ -286,26 +406,36 @@ def load_config_file(target_root: Path, config_path: str) -> tuple[bool, dict[st
 
 def select_value(
     field: str,
-    explicit_inputs: dict[str, Any],
     config: dict[str, Any],
     default: str | None = None,
 ) -> str | None:
-    explicit = non_empty(explicit_inputs.get(field))
-    if explicit is not None:
-        return clean_single_line(explicit, field)
-
     configured = non_empty(config.get(field))
     if configured is not None:
         return clean_single_line(configured, field)
-
     return default
 
 
 def select_config_bool(config: dict[str, Any], field: str, default: bool) -> bool:
     if field not in config or config[field] is None:
         return default
-
     return parse_bool(config[field], field)
+
+
+def select_run_agent(config: dict[str, Any]) -> bool:
+    if "run_agent" in config and config["run_agent"] is not None:
+        return parse_bool(config["run_agent"], "run_agent")
+    if "run_aider" in config and config["run_aider"] is not None:
+        return parse_bool(config["run_aider"], "run_aider")
+    return False
+
+
+def select_passthrough_config(config: dict[str, Any]) -> tuple[tuple[str, str], ...]:
+    passthrough: list[tuple[str, str]] = []
+    for key in ("target_stack", "migration_profile"):
+        text = non_empty(config.get(key))
+        if text is not None:
+            passthrough.append((key, clean_single_line(text, key)))
+    return tuple(passthrough)
 
 
 def resolve_config(
@@ -327,43 +457,36 @@ def resolve_config(
     if target_repo_value is not None:
         target_repo_value = clean_single_line(target_repo_value, "target_repo")
 
+    source_repo = select_value("source_repo", config)
+    target_branch = select_value("target_branch", config)
     values: dict[str, str | None] = {
-        "source_repo": select_value("source_repo", {}, config),
-        "source_ref": select_value("source_ref", {}, config, DEFAULT_SOURCE_REF),
+        "source_repo": source_repo,
+        "source_ref": select_value("source_ref", config, DEFAULT_SOURCE_REF),
         "target_repo": target_repo_value,
-        "target_platform": select_value("target_platform", {}, config),
-        "target_stack": select_value("target_stack", {}, config),
-        "migration_profile": select_value(
-            "migration_profile",
-            {},
-            config,
-            DEFAULT_MIGRATION_PROFILE,
-        ),
-        "target_subdir": select_value("target_subdir", {}, config, DEFAULT_TARGET_SUBDIR),
-        "task_prompt_path": select_value(
-            "task_prompt_path",
-            {},
-            config,
-            DEFAULT_TASK_PROMPT_PATH,
-        ),
-        "model": select_value("model", {}, config, DEFAULT_MODEL),
-        "target_branch": select_value("target_branch", {}, config),
+        "target_subdir": select_value("target_subdir", config, DEFAULT_TARGET_SUBDIR),
+        "task_prompt_path": select_value("task_prompt_path", config, DEFAULT_TASK_PROMPT_PATH),
+        "agent_backend": select_value("agent_backend", config, DEFAULT_AGENT_BACKEND),
+        "model": select_value("model", config, DEFAULT_MODEL),
+        "target_branch": target_branch,
         "target_base_branch": select_value(
             "target_base_branch",
-            {},
             config,
             DEFAULT_TARGET_BASE_BRANCH,
         ),
-        "run_log_path": select_value("run_log_path", {}, config),
+        "run_log_path": select_value("run_log_path", config),
     }
 
     missing = sorted(field for field in REQUIRED_FIELDS if not values.get(field))
     if missing:
         raise ValueError(
-            "Missing required Forgis migration parameters: "
+            "Missing required Forgis parameters: "
             + ", ".join(missing)
-            + f". Provide them in FORGIS_CONFIG.yml; target_repo is supplied by the workflow input. {resolved_config_path} is incomplete."
+            + ". Provide them in FORGIS_CONFIG.yml; target_repo is supplied by the workflow input."
         )
+
+    agent_backend = (values["agent_backend"] or DEFAULT_AGENT_BACKEND).casefold()
+    if agent_backend != "aider":
+        raise ValueError("Only agent_backend: aider is currently supported.")
 
     target_subdir = values["target_subdir"] or DEFAULT_TARGET_SUBDIR
     _, target_subdir_relative = resolve_target_subdir(target_root, target_subdir)
@@ -383,30 +506,27 @@ def resolve_config(
     )
 
     dry_run_value = select_config_bool(config, "dry_run", True)
-    run_aider_config = select_config_bool(config, "run_aider", False)
+    run_agent_config = select_run_agent(config)
     confirm_real_run = select_config_bool(config, "confirm_real_run", False)
-    required_prompt_markers = select_string_list(config, "required_prompt_markers")
-    configured_forbidden_prompt_markers = select_string_list(config, "forbidden_prompt_markers")
-    forbidden_prompt_markers = dedupe_strings(
-        list(DEFAULT_FORBIDDEN_PROMPT_MARKERS) + list(configured_forbidden_prompt_markers)
-    )
     model_env = select_model_env(config)
+    validation_commands = select_string_list(config, "validation_commands")
+    success_checks = select_success_checks(config)
+    source_context = select_source_context(config)
+    passthrough_config = select_passthrough_config(config)
 
     if not dry_run_value and not confirm_real_run:
-        raise ValueError("Real AI migration requires confirm_real_run: true in FORGIS_CONFIG.yml.")
+        raise ValueError("Real Forgis runs require confirm_real_run: true in FORGIS_CONFIG.yml.")
 
     real_run_allowed = not dry_run_value and confirm_real_run
-    run_aider_effective = run_aider_config and real_run_allowed
+    run_agent_effective = run_agent_config and real_run_allowed
 
     return ResolvedConfig(
         source_repo=values["source_repo"] or "",
         source_ref=values["source_ref"] or DEFAULT_SOURCE_REF,
         target_repo=values["target_repo"] or "",
-        target_platform=values["target_platform"] or "",
-        target_stack=values["target_stack"] or "",
-        migration_profile=values["migration_profile"] or DEFAULT_MIGRATION_PROFILE,
         target_subdir=target_subdir_relative,
         task_prompt_path=task_prompt_relative,
+        agent_backend=agent_backend,
         model=values["model"] or DEFAULT_MODEL,
         target_branch=values["target_branch"] or "",
         target_base_branch=values["target_base_branch"] or DEFAULT_TARGET_BASE_BRANCH,
@@ -415,30 +535,41 @@ def resolve_config(
         config_found=config_found,
         config_keys=tuple(sorted(str(key) for key in config.keys())),
         dry_run=dry_run_value,
-        run_aider_config=run_aider_config,
+        run_agent_config=run_agent_config,
         confirm_real_run=confirm_real_run,
         real_run_allowed=real_run_allowed,
-        run_aider=run_aider_effective,
-        required_prompt_markers=required_prompt_markers,
-        forbidden_prompt_markers=forbidden_prompt_markers,
+        run_agent=run_agent_effective,
         model_env=model_env,
+        validation_commands=validation_commands,
+        success_checks=success_checks,
+        source_context=source_context,
+        passthrough_config=passthrough_config,
     )
 
 
 def markdown_summary(resolved: ResolvedConfig) -> str:
     config_keys = ", ".join(resolved.config_keys) if resolved.config_keys else "[none]"
-    run_aider_note = ""
-    if resolved.dry_run and resolved.run_aider_config:
-        run_aider_note = " (dry_run=true, Aider execution is disabled.)"
-    required_markers = (
-        ", ".join(resolved.required_prompt_markers)
-        if resolved.required_prompt_markers
-        else "[none]"
-    )
-    forbidden_markers = ", ".join(resolved.forbidden_prompt_markers)
+    run_agent_note = ""
+    if resolved.dry_run and resolved.run_agent_config:
+        run_agent_note = " (dry_run=true, agent execution is disabled.)"
     model_env = (
         ", ".join(f"{runtime} <- {source}" for runtime, source in resolved.model_env)
         if resolved.model_env
+        else "[none]"
+    )
+    validation_commands = (
+        f"{len(resolved.validation_commands)} configured"
+        if resolved.validation_commands
+        else "[none]"
+    )
+    success_checks = (
+        f"{len(resolved.success_checks)} configured"
+        if resolved.success_checks
+        else "[none]"
+    )
+    passthrough = (
+        ", ".join(f"{key}={value}" for key, value in resolved.passthrough_config)
+        if resolved.passthrough_config
         else "[none]"
     )
 
@@ -456,26 +587,26 @@ def markdown_summary(resolved: ResolvedConfig) -> str:
             f"| Target repo | `{resolved.target_repo}` |",
             f"| Target base branch | `{resolved.target_base_branch}` |",
             f"| Target branch | `{resolved.target_branch}` |",
-            f"| Target platform | `{resolved.target_platform}` |",
-            f"| Target stack | `{resolved.target_stack}` |",
-            f"| Migration profile | `{resolved.migration_profile}` |",
+            f"| Agent backend | `{resolved.agent_backend}` |",
             f"| Task prompt path | `{resolved.task_prompt_path}` |",
             f"| Target subdir | `{resolved.target_subdir}` |",
             f"| Run log path | `{resolved.run_log_path}` |",
             f"| Model | `{resolved.model}` |",
             f"| Model env mapping | `{model_env}` |",
+            f"| validation_commands | `{validation_commands}` |",
+            f"| success_checks | `{success_checks}` |",
+            f"| source_context mode | `{resolved.source_context.mode}` |",
+            f"| passthrough user config | `{passthrough}` |",
             f"| dry_run config value | `{str(resolved.dry_run).lower()}` |",
-            f"| run_aider config value | `{str(resolved.run_aider_config).lower()}` |",
+            f"| run_agent config value | `{str(resolved.run_agent_config).lower()}` |",
             f"| confirm_real_run config value | `{str(resolved.confirm_real_run).lower()}` |",
             f"| Effective dry_run | `{str(resolved.dry_run).lower()}` |",
-            f"| Effective run_aider | `{str(resolved.run_aider).lower()}`{run_aider_note} |",
-            f"| Required prompt markers | `{required_markers}` |",
-            f"| Forbidden prompt markers | `{forbidden_markers}` |",
+            f"| Effective run_agent | `{str(resolved.run_agent).lower()}`{run_agent_note} |",
             f"| Writable scope | `{resolved.target_subdir}/` |",
             f"| Read-only files | `{resolved.config_path}`, `{resolved.task_prompt_path}`, source repository, target paths outside `{resolved.target_subdir}/` |",
-            f"| Real migration allowed | `{str(resolved.real_run_allowed and resolved.run_aider).lower()}` |",
+            f"| Real run allowed | `{str(resolved.real_run_allowed and resolved.run_agent).lower()}` |",
             "",
             "Config path is fixed to FORGIS_CONFIG.yml in the main workflow.",
-            "Real AI migration is allowed only when dry_run=false, run_aider=true, and confirm_real_run=true.",
+            "Agent execution is allowed only when dry_run=false, run_agent=true, and confirm_real_run=true.",
         ]
     )

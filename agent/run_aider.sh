@@ -6,6 +6,11 @@ if [[ -z "${TARGET_REPO_DIR:-}" ]]; then
   exit 1
 fi
 
+if [[ -z "${SOURCE_REPO_DIR:-}" ]]; then
+  echo "SOURCE_REPO_DIR is required." >&2
+  exit 1
+fi
+
 if [[ -z "${FORGIS_PROMPT_FILE:-}" ]]; then
   echo "FORGIS_PROMPT_FILE is required." >&2
   exit 1
@@ -16,35 +21,50 @@ if [[ -z "${AIDER_MODEL:-}" ]]; then
   exit 1
 fi
 
-if [[ -z "${TASK_PROMPT_PATH:-}" ]]; then
-  echo "TASK_PROMPT_PATH is required." >&2
-  exit 1
-fi
-
-TARGET_SUBDIR="${TARGET_SUBDIR:-forgis-output}"
+TARGET_SUBDIR="${TARGET_SUBDIR:-target-output}"
 CONFIG_PATH="${CONFIG_PATH:-FORGIS_CONFIG.yml}"
+TASK_PROMPT_PATH="${TASK_PROMPT_PATH:-FORGIS_TASK.md}"
 RUN_LOG_PATH="${RUN_LOG_PATH:-$TARGET_SUBDIR/FORGIS_LOG.md}"
+DRY_RUN="${DRY_RUN:-true}"
+RUN_AGENT="${RUN_AGENT:-false}"
 SOURCE_REPO="${SOURCE_REPO:-}"
 TARGET_REPO="${TARGET_REPO:-}"
+SOURCE_CONTEXT_FILE="${SOURCE_CONTEXT_FILE:-}"
+SUCCESS_CHECKS_JSON="${SUCCESS_CHECKS_JSON:-[]}"
 if [[ -z "${MODEL_ENV_JSON:-}" ]]; then
   MODEL_ENV_JSON="{}"
 fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [[ "$DRY_RUN" == "true" ]]; then
+  echo "DRY_RUN is true. Refusing to invoke Aider." >&2
+  exit 1
+fi
+
+if [[ "$RUN_AGENT" != "true" ]]; then
+  echo "RUN_AGENT is not true. Refusing to invoke Aider." >&2
+  exit 1
+fi
 
 if [[ ! -d "$TARGET_REPO_DIR" ]]; then
   echo "Target repository directory does not exist: $TARGET_REPO_DIR" >&2
   exit 1
 fi
 
+if [[ ! -d "$SOURCE_REPO_DIR" ]]; then
+  echo "Source repository directory does not exist: $SOURCE_REPO_DIR" >&2
+  exit 1
+fi
+
 if [[ ! -f "$FORGIS_PROMPT_FILE" ]]; then
-  echo "Forgis prompt file does not exist: $FORGIS_PROMPT_FILE" >&2
+  echo "Forgis Aider message file does not exist: $FORGIS_PROMPT_FILE" >&2
   exit 1
 fi
 
 PATH_INFO="$(
   python3 - "$TARGET_REPO_DIR" "$TASK_PROMPT_PATH" "$TARGET_SUBDIR" "$CONFIG_PATH" "$RUN_LOG_PATH" <<'PY'
-import sys
 import shlex
+import sys
 from pathlib import Path
 
 target = Path(sys.argv[1]).resolve()
@@ -54,7 +74,7 @@ config_input = sys.argv[4]
 run_log_input = sys.argv[5]
 
 
-def resolve_inside_target(value: str, label: str, allow_root: bool = False) -> tuple[Path, str]:
+def resolve_inside_target(value: str, label: str) -> tuple[Path, str]:
     if not value.strip():
         raise SystemExit(f"{label} is required.")
 
@@ -69,7 +89,7 @@ def resolve_inside_target(value: str, label: str, allow_root: bool = False) -> t
     if not resolved.is_relative_to(target):
         raise SystemExit(f"{label} escapes the target repository root: {value}")
 
-    if resolved == target and not allow_root:
+    if resolved == target:
         raise SystemExit(f"{label} must not resolve to the target repository root.")
 
     return resolved, resolved.relative_to(target).as_posix()
@@ -83,13 +103,15 @@ run_log_abs, run_log_rel = resolve_inside_target(run_log_input, "RUN_LOG_PATH")
 if run_log_abs == target_subdir_abs or not run_log_abs.is_relative_to(target_subdir_abs):
     raise SystemExit(f"RUN_LOG_PATH must be inside TARGET_SUBDIR '{target_subdir_rel}/': {run_log_input}")
 
+if not config_abs.is_file():
+    raise SystemExit(f"Config file does not exist in target repository: {config_rel}")
+
 if not task_prompt_abs.is_file():
-    raise SystemExit(f"Task prompt file does not exist in target repository: {task_prompt_rel}")
+    raise SystemExit(f"Task file does not exist in target repository: {task_prompt_rel}")
 
-if task_prompt_abs.stat().st_size == 0:
-    raise SystemExit(f"Task prompt file is empty in target repository: {task_prompt_rel}")
+if not task_prompt_abs.read_text(encoding="utf-8", errors="replace").strip():
+    raise SystemExit(f"Task file is empty in target repository: {task_prompt_rel}")
 
-target_subdir_created = not target_subdir_abs.exists()
 target_subdir_abs.mkdir(parents=True, exist_ok=True)
 
 print(f"TASK_PROMPT_ABS={shlex.quote(str(task_prompt_abs))}")
@@ -98,20 +120,23 @@ print(f"TARGET_SUBDIR_ABS={shlex.quote(str(target_subdir_abs))}")
 print(f"TARGET_SUBDIR_REL={shlex.quote(target_subdir_rel)}")
 print(f"CONFIG_ABS={shlex.quote(str(config_abs))}")
 print(f"CONFIG_REL={shlex.quote(config_rel)}")
-print(f"CONFIG_FOUND={'yes' if config_abs.is_file() else 'no'}")
 print(f"RUN_LOG_ABS={shlex.quote(str(run_log_abs))}")
 print(f"RUN_LOG_REL={shlex.quote(run_log_rel)}")
-print(f"TARGET_SUBDIR_CREATED={'yes' if target_subdir_created else 'no'}")
 PY
 )"
 
 eval "$PATH_INFO"
 
-READONLY_SNAPSHOT_DIR="${RUNNER_TEMP:-$TARGET_SUBDIR_ABS}"
+AIDER_RUNTIME_DIR="${RUNNER_TEMP:-$TARGET_SUBDIR_ABS/.forgis-aider-runtime}/aider"
+mkdir -p "$AIDER_RUNTIME_DIR"
+
+READONLY_SNAPSHOT_DIR="${RUNNER_TEMP:-$TARGET_SUBDIR_ABS/.forgis-aider-runtime}"
 mkdir -p "$READONLY_SNAPSHOT_DIR"
 READONLY_SNAPSHOT="$READONLY_SNAPSHOT_DIR/forgis-readonly-snapshot.json"
 GITIGNORE_SNAPSHOT="$READONLY_SNAPSHOT_DIR/forgis-root-gitignore-snapshot.json"
 TAGS_CACHE_SNAPSHOT="$READONLY_SNAPSHOT_DIR/forgis-aider-tags-cache-snapshot.json"
+AIDER_BEFORE_SNAPSHOT="$READONLY_SNAPSHOT_DIR/forgis-aider-before-output-snapshot.json"
+
 python3 "$SCRIPT_DIR/guardrails.py" snapshot-readonly \
   --target "$TARGET_REPO_DIR" \
   --config-path "$CONFIG_REL" \
@@ -123,21 +148,10 @@ python3 "$SCRIPT_DIR/guardrails.py" snapshot-root-gitignore \
 python3 "$SCRIPT_DIR/guardrails.py" snapshot-aider-tags-cache \
   --target "$TARGET_REPO_DIR" \
   --output "$TAGS_CACHE_SNAPSHOT"
-
-WRITABLE_SEED="$TARGET_SUBDIR_ABS/.forgis-write-scope.md"
-WRITABLE_SEED_CREATED="no"
-if [[ ! -e "$WRITABLE_SEED" ]]; then
-  cat > "$WRITABLE_SEED" <<'EOF'
-# Forgis Writable Scope
-
-This file marks the directory that Forgis is allowed to modify during this run.
-Aider may create, update, or remove files inside this directory to complete the task.
-EOF
-  WRITABLE_SEED_CREATED="yes"
-fi
-
-AIDER_RUNTIME_DIR="${RUNNER_TEMP:-$TARGET_SUBDIR_ABS/.forgis-aider-runtime}/aider"
-mkdir -p "$AIDER_RUNTIME_DIR"
+python3 "$SCRIPT_DIR/validate_target_output.py" snapshot \
+  --target "$TARGET_REPO_DIR" \
+  --target-subdir "$TARGET_SUBDIR_REL" \
+  --output "$AIDER_BEFORE_SNAPSHOT"
 
 AIDER_HELP_FILE="$AIDER_RUNTIME_DIR/aider-help.txt"
 AIDER_VERSION="$(aider --version 2>&1 || true)"
@@ -152,7 +166,12 @@ CAPABILITY_INFO="$(
 eval "$CAPABILITY_INFO"
 
 if [[ "$AIDER_SUPPORTS_SUBTREE_ONLY" != "yes" ]]; then
-  echo "Aider does not support --subtree-only; refusing to run without subtree write isolation." >&2
+  echo "Aider does not support --subtree-only; refusing to run without target_subdir write isolation." >&2
+  exit 1
+fi
+
+if [[ "$AIDER_SUPPORTS_READ" != "yes" ]]; then
+  echo "Aider backend does not support --read; refusing to run because Forgis will not copy task/config/source content into a large prompt." >&2
   exit 1
 fi
 
@@ -175,18 +194,13 @@ if [[ "$AIDER_SUPPORTS_LLM_HISTORY_FILE" == "yes" ]]; then
   AIDER_SAFETY_ARGS+=(--llm-history-file "$AIDER_RUNTIME_DIR/llm.history")
 fi
 
-AIDER_READ_ARGS=()
-READ_CONTEXT_SUMMARY="message-file-only"
-if [[ "$AIDER_SUPPORTS_READ" == "yes" ]]; then
-  AIDER_READ_ARGS+=(--read "$TASK_PROMPT_ABS")
-  if [[ "$CONFIG_FOUND" == "yes" ]]; then
-    AIDER_READ_ARGS+=(--read "$CONFIG_ABS")
+AIDER_READ_ARGS=(--read "$TASK_PROMPT_ABS" --read "$CONFIG_ABS")
+if [[ -n "$SOURCE_CONTEXT_FILE" ]]; then
+  if [[ ! -f "$SOURCE_CONTEXT_FILE" ]]; then
+    echo "SOURCE_CONTEXT_FILE does not exist: $SOURCE_CONTEXT_FILE" >&2
+    exit 1
   fi
-  READ_CONTEXT_SUMMARY="--read <task_prompt> --read <config_if_present>"
-else
-  echo "Aider does not support --read; using message-file-only mode." >&2
-  echo "The final prompt already embeds the task prompt content, task prompt sha256, resolved configuration summary, writable scope, and read-only boundaries." >&2
-  echo "Config and task prompt files remain protected by pre/post hash checks; target root remains read-only and writable scope remains $TARGET_SUBDIR_REL/." >&2
+  AIDER_READ_ARGS+=(--read "$SOURCE_CONTEXT_FILE")
 fi
 
 MODEL_ENV_PAIRS="$(python3 "$SCRIPT_DIR/model_env.py" --json "$MODEL_ENV_JSON")"
@@ -199,7 +213,7 @@ if [[ -n "$MODEL_ENV_PAIRS" ]]; then
     fi
     secret_value="${!secret_env:-}"
     if [[ -z "$secret_value" ]]; then
-      echo "Required model secret env \`$secret_env\` is not available. Add it to the Forgis repository Actions secrets or update FORGIS_CONFIG.yml model_env." >&2
+      echo "Required model secret env \`$secret_env\` is not available. Add it to the workflow environment or update FORGIS_CONFIG.yml model_env." >&2
       exit 1
     fi
     export "$runtime_env=$secret_value"
@@ -214,66 +228,54 @@ python3 "$SCRIPT_DIR/prompt_diagnostics.py" \
   --label "Aider Message File" \
   --task-prompt-file "$TASK_PROMPT_ABS" \
   --task-prompt-path "$TASK_PROMPT_REL" \
-  --source-repo "$SOURCE_REPO" \
-  --target-repo "$TARGET_REPO" \
+  --source-path "$SOURCE_REPO_DIR" \
+  --target-path "$TARGET_REPO_DIR" \
   --target-subdir "$TARGET_SUBDIR_REL" \
-  --required-markers-json "${REQUIRED_PROMPT_MARKERS_JSON:-[]}" \
   --forbidden-markers-json "${FORBIDDEN_PROMPT_MARKERS_JSON:-[]}" \
   --expected-same-as "$FORGIS_PROMPT_FILE" \
   --artifact-output "${FORGIS_AIDER_DIAGNOSTICS_FILE:-}"
 
 echo "Running Aider with Forgis scope:"
-echo "  target repository: $TARGET_REPO_DIR"
+echo "  source repository path: $SOURCE_REPO_DIR"
+echo "  target repository path: $TARGET_REPO_DIR"
 echo "  target writable scope: $TARGET_SUBDIR_REL"
-echo "  target writable scope created: $TARGET_SUBDIR_CREATED"
-echo "  read-only config: $CONFIG_REL (found: $CONFIG_FOUND)"
-echo "  read-only task prompt: $TASK_PROMPT_REL"
+echo "  read-only config: $CONFIG_REL"
+echo "  read-only task file: $TASK_PROMPT_REL"
 echo "  long-term run log: $RUN_LOG_REL"
-echo "  final prompt file: $FORGIS_PROMPT_FILE"
-echo "  final prompt character count: $(wc -c < "$FORGIS_PROMPT_FILE" | tr -d ' ')"
-echo "  final prompt sha256: $(shasum -a 256 "$FORGIS_PROMPT_FILE" | awk '{print $1}')"
-echo "  final prompt first 20 lines:"
-sed -n '1,20p' "$FORGIS_PROMPT_FILE" | sed 's/^/    /'
-echo "  final prompt contains task prompt path: $(grep -Fq "$TASK_PROMPT_REL" "$FORGIS_PROMPT_FILE" && echo yes || echo no)"
-echo "  required prompt markers json: ${REQUIRED_PROMPT_MARKERS_JSON:-[]}"
-echo "  forbidden prompt markers json: ${FORBIDDEN_PROMPT_MARKERS_JSON:-[]}"
-echo "  Aider --message-file path: $FORGIS_PROMPT_FILE"
+echo "  message file: $FORGIS_PROMPT_FILE"
+echo "  message character count: $(wc -c < "$FORGIS_PROMPT_FILE" | tr -d ' ')"
 echo "  Aider version: ${AIDER_VERSION:-[unknown]}"
 echo "  Aider supports --read: $AIDER_SUPPORTS_READ"
 echo "  Aider supports --subtree-only: $AIDER_SUPPORTS_SUBTREE_ONLY"
-echo "  selected Aider context mode: $AIDER_CONTEXT_MODE"
 echo "  Aider model: $AIDER_MODEL"
+echo "  source context file: ${SOURCE_CONTEXT_FILE:-[none]}"
 echo "  model env mapping:"
 for model_env_line in "${MODEL_ENV_SUMMARY[@]}"; do
   echo "    $model_env_line"
 done
 echo "  Aider runtime dir: $AIDER_RUNTIME_DIR"
 echo "  Aider working directory: $TARGET_SUBDIR_ABS"
-echo "  Aider tags cache cleanup enabled: yes"
-echo "  Aider command summary: aider --model <model> --message-file <forgis_prompt> $READ_CONTEXT_SUMMARY ${AIDER_SAFETY_ARGS[*]} --subtree-only --yes-always --no-auto-commits --no-show-release-notes <writable_scope_seed>"
+echo "  Aider command summary: aider --model <model> --message-file <forgis_message> --read <task> --read <config> ${AIDER_SAFETY_ARGS[*]} --subtree-only --yes-always --no-auto-commits --no-show-release-notes"
 
 if [[ -n "${FORGIS_AIDER_COMMAND_SUMMARY_FILE:-}" ]]; then
   mkdir -p "$(dirname "$FORGIS_AIDER_COMMAND_SUMMARY_FILE")"
-  cat > "$FORGIS_AIDER_COMMAND_SUMMARY_FILE" <<EOF
-# Aider Command Summary
-
-- Target repository: \`$TARGET_REPO_DIR\`
-- Writable scope: \`$TARGET_SUBDIR_REL/\`
-- Read-only task prompt: \`$TASK_PROMPT_REL\`
-- Read-only config: \`$CONFIG_REL\`
-- Message file: \`$FORGIS_PROMPT_FILE\`
-- Message file sha256: \`$(shasum -a 256 "$FORGIS_PROMPT_FILE" | awk '{print $1}')\`
-- Aider version: \`${AIDER_VERSION:-[unknown]}\`
-- Supports --read: \`$AIDER_SUPPORTS_READ\`
-- Supports --subtree-only: \`$AIDER_SUPPORTS_SUBTREE_ONLY\`
-- Selected context mode: \`$AIDER_CONTEXT_MODE\`
-- Model env mapping:
-$(for model_env_line in "${MODEL_ENV_SUMMARY[@]}"; do printf '  - `%s`\n' "$model_env_line"; done)
-- Runtime dir: \`$AIDER_RUNTIME_DIR\`
-- Working directory: \`$TARGET_SUBDIR_ABS\`
-- Tags cache cleanup enabled: \`yes\`
-- Command: \`aider --model <model> --message-file <forgis_prompt> $READ_CONTEXT_SUMMARY ${AIDER_SAFETY_ARGS[*]} --subtree-only --yes-always --no-auto-commits --no-show-release-notes <writable_scope_seed>\`
-EOF
+  {
+    echo "# Aider Command Summary"
+    echo ""
+    echo "- Source repository path: \`$SOURCE_REPO_DIR\`"
+    echo "- Target repository path: \`$TARGET_REPO_DIR\`"
+    echo "- Writable scope: \`$TARGET_SUBDIR_REL/\`"
+    echo "- Read-only task file: \`$TASK_PROMPT_REL\`"
+    echo "- Read-only config: \`$CONFIG_REL\`"
+    echo "- Message file: \`$FORGIS_PROMPT_FILE\`"
+    echo "- Aider version: \`${AIDER_VERSION:-[unknown]}\`"
+    echo "- Supports --read: \`$AIDER_SUPPORTS_READ\`"
+    echo "- Supports --subtree-only: \`$AIDER_SUPPORTS_SUBTREE_ONLY\`"
+    echo "- Source context file: \`${SOURCE_CONTEXT_FILE:-[none]}\`"
+    echo "- Runtime dir: \`$AIDER_RUNTIME_DIR\`"
+    echo "- Working directory: \`$TARGET_SUBDIR_ABS\`"
+    echo "- Command: \`aider --model <model> --message-file <forgis_message> --read <task> --read <config> ${AIDER_SAFETY_ARGS[*]} --subtree-only --yes-always --no-auto-commits --no-show-release-notes\`"
+  } > "$FORGIS_AIDER_COMMAND_SUMMARY_FILE"
 fi
 
 cd "$TARGET_SUBDIR_ABS"
@@ -282,17 +284,24 @@ set +e
 aider \
   --model "$AIDER_MODEL" \
   --message-file "$FORGIS_PROMPT_FILE" \
-  ${AIDER_READ_ARGS[@]+"${AIDER_READ_ARGS[@]}"} \
-  ${AIDER_SAFETY_ARGS[@]+"${AIDER_SAFETY_ARGS[@]}"} \
+  "${AIDER_READ_ARGS[@]}" \
+  "${AIDER_SAFETY_ARGS[@]}" \
   --subtree-only \
   --yes-always \
   --no-auto-commits \
-  --no-show-release-notes \
-  "$WRITABLE_SEED"
+  --no-show-release-notes
 AIDER_EXIT=$?
 set -e
 
 cd "$TARGET_REPO_DIR"
+
+if [[ -n "${FORGIS_AIDER_STATUS_FILE:-}" ]]; then
+  mkdir -p "$(dirname "$FORGIS_AIDER_STATUS_FILE")"
+  {
+    echo "aider_executed=true"
+    echo "aider_exit_status=$AIDER_EXIT"
+  } > "$FORGIS_AIDER_STATUS_FILE"
+fi
 
 python3 "$SCRIPT_DIR/guardrails.py" cleanup-aider-root-gitignore \
   --target "$TARGET_REPO_DIR" \
@@ -305,45 +314,27 @@ python3 "$SCRIPT_DIR/guardrails.py" check-readonly \
   --target "$TARGET_REPO_DIR" \
   --snapshot "$READONLY_SNAPSHOT"
 
-READ_ONLY_ARGS=(--read-only-path "$TASK_PROMPT_REL")
-if [[ "$CONFIG_FOUND" == "yes" ]]; then
-  READ_ONLY_ARGS+=(--read-only-path "$CONFIG_REL")
-fi
-
 python3 "$SCRIPT_DIR/guardrails.py" check-target-scope \
   --target "$TARGET_REPO_DIR" \
   --target-subdir "$TARGET_SUBDIR_REL" \
-  "${READ_ONLY_ARGS[@]}"
+  --read-only-path "$TASK_PROMPT_REL" \
+  --read-only-path "$CONFIG_REL"
 
 rm -f "$READONLY_SNAPSHOT"
 rm -f "$GITIGNORE_SNAPSHOT"
 rm -f "$TAGS_CACHE_SNAPSHOT"
-if [[ "$WRITABLE_SEED_CREATED" == "yes" ]]; then
-  rm -f "$WRITABLE_SEED"
-fi
 
 if [[ "$AIDER_EXIT" -ne 0 ]]; then
   echo "Aider exited with status $AIDER_EXIT." >&2
   exit "$AIDER_EXIT"
 fi
 
-python3 - "$TARGET_REPO_DIR" "$TARGET_SUBDIR_REL" <<'PY'
-import sys
-from pathlib import Path
+python3 "$SCRIPT_DIR/validate_target_output.py" validate \
+  --target "$TARGET_REPO_DIR" \
+  --target-subdir "$TARGET_SUBDIR_REL" \
+  --run-log-path "$RUN_LOG_REL" \
+  --snapshot "$AIDER_BEFORE_SNAPSHOT" \
+  --require-meaningful-change \
+  --success-checks-json "$SUCCESS_CHECKS_JSON"
 
-target = Path(sys.argv[1]).resolve()
-target_subdir = sys.argv[2].rstrip("/")
-scope_root = target / target_subdir
-scope_files = [
-    path for path in scope_root.rglob("*")
-    if path.is_file()
-    and path.name not in {".forgis-write-scope.md", ".forgis-readonly-snapshot.json"}
-]
-
-if not scope_files:
-    print(f"ERROR: Aider completed without creating or retaining files in the target writable scope: {target_subdir}/", file=sys.stderr)
-    sys.exit(1)
-
-print("Aider target scope verification passed.")
-print(f"  files in writable scope excluding Forgis markers: {len(scope_files)}")
-PY
+rm -f "$AIDER_BEFORE_SNAPSHOT"

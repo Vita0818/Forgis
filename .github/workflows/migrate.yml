@@ -1,4 +1,4 @@
-name: Forgis Migration Scaffold
+name: Forgis Aider Interface
 
 on:
   workflow_dispatch:
@@ -12,8 +12,8 @@ permissions:
   contents: read
 
 jobs:
-  scaffold:
-    name: Run Forgis migration scaffold
+  run:
+    name: Run Forgis
     runs-on: ubuntu-latest
 
     steps:
@@ -37,7 +37,7 @@ jobs:
         with:
           repository: ${{ inputs.target_repo }}
           token: ${{ secrets.FORGIS_TARGET_TOKEN }}
-          path: target-output
+          path: target-repo
           fetch-depth: 0
 
       - name: Resolve Forgis config
@@ -46,7 +46,7 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/forgis-runtime"
 
           python forgis/agent/resolve_config.py \
-            --target "$GITHUB_WORKSPACE/target-output" \
+            --target "$GITHUB_WORKSPACE/target-repo" \
             --target-repo "${{ inputs.target_repo }}" \
             --github-env "$GITHUB_ENV" \
             --github-output "$GITHUB_OUTPUT" \
@@ -54,7 +54,7 @@ jobs:
 
       - name: Checkout resolved target base branch
         run: |
-          cd "$GITHUB_WORKSPACE/target-output"
+          cd "$GITHUB_WORKSPACE/target-repo"
           git fetch origin "$TARGET_BASE_BRANCH"
           git checkout -B "$TARGET_BASE_BRANCH" "origin/$TARGET_BASE_BRANCH"
 
@@ -62,7 +62,7 @@ jobs:
         id: resolve_base
         run: |
           python forgis/agent/resolve_config.py \
-            --target "$GITHUB_WORKSPACE/target-output" \
+            --target "$GITHUB_WORKSPACE/target-repo" \
             --target-repo "${{ inputs.target_repo }}" \
             --github-env "$GITHUB_ENV" \
             --github-output "$GITHUB_OUTPUT" \
@@ -81,71 +81,75 @@ jobs:
         run: |
           python forgis/agent/forge.py \
             --source "$GITHUB_WORKSPACE/source-repo" \
-            --target "$GITHUB_WORKSPACE/target-output" \
-            --rules "$GITHUB_WORKSPACE/forgis/rules" \
+            --target "$GITHUB_WORKSPACE/target-repo" \
             --source-repo "$SOURCE_REPO" \
             --source-ref "$SOURCE_REF" \
             --target-repo "$TARGET_REPO" \
-            --platform "$TARGET_PLATFORM" \
-            --target-stack "$TARGET_STACK" \
-            --migration-profile "$MIGRATION_PROFILE" \
             --target-branch "$TARGET_BRANCH" \
             --target-base-branch "$TARGET_BASE_BRANCH" \
             --config-path "$CONFIG_PATH" \
             --task-prompt-path "$TASK_PROMPT_PATH" \
             --target-subdir "$TARGET_SUBDIR" \
             --run-log-path "$RUN_LOG_PATH" \
+            --agent-backend "$AGENT_BACKEND" \
             --model "$AIDER_MODEL" \
             --dry-run "$DRY_RUN" \
-            --run-ai "$RUN_AIDER" \
+            --run-agent "$RUN_AGENT" \
             --confirm-real-run "$CONFIRM_REAL_RUN" \
             --summary-output "$GITHUB_WORKSPACE/forgis-runtime/run_summary.md"
 
-      - name: Collect source bundle and manifest
+      - name: Build optional source context
         run: |
+          if [[ "$SOURCE_CONTEXT_MODE" == "none" ]]; then
+            echo "source_context.mode is none. Skipping source context collection."
+            exit 0
+          fi
+
           python forgis/agent/collect_source.py \
             --source "$GITHUB_WORKSPACE/source-repo" \
-            --output "$GITHUB_WORKSPACE/forgis-runtime/source_bundle.md" \
-            --manifest-output "$GITHUB_WORKSPACE/forgis-runtime/source_manifest.md"
+            --mode "$SOURCE_CONTEXT_MODE" \
+            --max-chars "$SOURCE_CONTEXT_MAX_CHARS" \
+            --include-json "$SOURCE_CONTEXT_INCLUDE_JSON" \
+            --exclude-json "$SOURCE_CONTEXT_EXCLUDE_JSON" \
+            --output "$GITHUB_WORKSPACE/forgis-runtime/source_context.md"
 
-      - name: Build Forgis migration prompt
+      - name: Build Forgis Aider message
         run: |
+          SOURCE_CONTEXT_ARGS=()
+          if [[ -f "$GITHUB_WORKSPACE/forgis-runtime/source_context.md" ]]; then
+            SOURCE_CONTEXT_ARGS+=(--source-context-file "$GITHUB_WORKSPACE/forgis-runtime/source_context.md")
+          fi
+
           python forgis/agent/build_prompt.py \
             --source "$GITHUB_WORKSPACE/source-repo" \
-            --target "$GITHUB_WORKSPACE/target-output" \
-            --rules "$GITHUB_WORKSPACE/forgis/rules" \
-            --prompts "$GITHUB_WORKSPACE/forgis/prompts" \
+            --target "$GITHUB_WORKSPACE/target-repo" \
             --source-repo "$SOURCE_REPO" \
+            --source-ref "$SOURCE_REF" \
             --target-repo "$TARGET_REPO" \
-            --platform "$TARGET_PLATFORM" \
-            --target-stack "$TARGET_STACK" \
-            --migration-profile "$MIGRATION_PROFILE" \
-            --source-bundle "$GITHUB_WORKSPACE/forgis-runtime/source_bundle.md" \
-            --source-manifest "$GITHUB_WORKSPACE/forgis-runtime/source_manifest.md" \
             --config-path "$CONFIG_PATH" \
             --task-prompt-path "$TASK_PROMPT_PATH" \
             --require-task-prompt \
             --target-subdir "$TARGET_SUBDIR" \
             --run-log-path "$RUN_LOG_PATH" \
-            --output "$GITHUB_WORKSPACE/forgis-runtime/forgis_prompt.md"
+            "${SOURCE_CONTEXT_ARGS[@]}" \
+            --output "$GITHUB_WORKSPACE/forgis-runtime/forgis_message.md"
 
-          test -f "$GITHUB_WORKSPACE/forgis-runtime/forgis_prompt.md"
+          test -f "$GITHUB_WORKSPACE/forgis-runtime/forgis_message.md"
 
-      - name: Diagnose generated final prompt
+      - name: Diagnose Aider message
         run: |
           python forgis/agent/prompt_diagnostics.py \
-            --file "$GITHUB_WORKSPACE/forgis-runtime/forgis_prompt.md" \
-            --label "Final Prompt" \
-            --task-prompt-file "$GITHUB_WORKSPACE/target-output/$TASK_PROMPT_PATH" \
+            --file "$GITHUB_WORKSPACE/forgis-runtime/forgis_message.md" \
+            --label "Forgis Aider Message" \
+            --task-prompt-file "$GITHUB_WORKSPACE/target-repo/$TASK_PROMPT_PATH" \
             --task-prompt-path "$TASK_PROMPT_PATH" \
-            --source-repo "$SOURCE_REPO" \
-            --target-repo "$TARGET_REPO" \
+            --source-path "$GITHUB_WORKSPACE/source-repo" \
+            --target-path "$GITHUB_WORKSPACE/target-repo" \
             --target-subdir "$TARGET_SUBDIR" \
-            --required-markers-json "$REQUIRED_PROMPT_MARKERS_JSON" \
-            --forbidden-markers-json "$FORBIDDEN_PROMPT_MARKERS_JSON" \
-            --artifact-output "$GITHUB_WORKSPACE/forgis-runtime/final_prompt_diagnostics.md"
+            --expected-same-as "$GITHUB_WORKSPACE/forgis-runtime/forgis_message.md" \
+            --artifact-output "$GITHUB_WORKSPACE/forgis-runtime/message_diagnostics.md"
 
-      - name: Check shell scaffolds
+      - name: Check shell scripts
         run: |
           bash -n forgis/agent/run_aider.sh
           bash -n forgis/agent/build_target.sh
@@ -153,8 +157,8 @@ jobs:
 
       - name: Install and check Aider if enabled
         run: |
-          if [[ "$RUN_AIDER" != "true" ]]; then
-            echo "RUN_AIDER is false. Skipping Aider installation."
+          if [[ "$RUN_AGENT" != "true" ]]; then
+            echo "RUN_AGENT is false. Skipping Aider installation."
             exit 0
           fi
 
@@ -163,31 +167,33 @@ jobs:
 
       - name: Run Aider with configured model
         env:
-          TARGET_REPO_DIR: ${{ github.workspace }}/target-output
-          FORGIS_PROMPT_FILE: ${{ github.workspace }}/forgis-runtime/forgis_prompt.md
+          SOURCE_REPO_DIR: ${{ github.workspace }}/source-repo
+          TARGET_REPO_DIR: ${{ github.workspace }}/target-repo
+          FORGIS_PROMPT_FILE: ${{ github.workspace }}/forgis-runtime/forgis_message.md
+          SOURCE_CONTEXT_FILE: ${{ github.workspace }}/forgis-runtime/source_context.md
           FORGIS_AIDER_DIAGNOSTICS_FILE: ${{ github.workspace }}/forgis-runtime/aider_message_diagnostics.md
           FORGIS_AIDER_COMMAND_SUMMARY_FILE: ${{ github.workspace }}/forgis-runtime/aider_command_summary.md
+          FORGIS_AIDER_STATUS_FILE: ${{ github.workspace }}/forgis-runtime/aider_status.env
           FORGIS_MODEL_API_KEY: ${{ secrets.FORGIS_MODEL_API_KEY }}
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          PROVIDER_API_KEY: ${{ secrets.PROVIDER_API_KEY }}
         run: |
-          if [[ "$RUN_AIDER" != "true" ]]; then
-            echo "RUN_AIDER is false. Skipping Aider execution."
+          if [[ "$RUN_AGENT" != "true" ]]; then
+            echo "RUN_AGENT is false. Skipping Aider execution."
             exit 0
+          fi
+
+          if [[ ! -f "$SOURCE_CONTEXT_FILE" ]]; then
+            SOURCE_CONTEXT_FILE=""
           fi
 
           bash forgis/agent/run_aider.sh
 
-      - name: Build target repository
+      - name: Run configured validation commands
         env:
-          TARGET_REPO_DIR: ${{ github.workspace }}/target-output
+          TARGET_REPO_DIR: ${{ github.workspace }}/target-repo
         run: |
-          if [[ "$RUN_AIDER" != "true" ]]; then
-            echo "RUN_AIDER is false. Skipping target build."
+          if [[ "$RUN_AGENT" != "true" ]]; then
+            echo "RUN_AGENT is false. Skipping validation commands."
             exit 0
           fi
 
@@ -198,30 +204,42 @@ jobs:
         env:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
+          AIDER_EXECUTED="false"
+          AIDER_EXIT_STATUS="not-run"
+          if [[ -f "$GITHUB_WORKSPACE/forgis-runtime/aider_status.env" ]]; then
+            source "$GITHUB_WORKSPACE/forgis-runtime/aider_status.env"
+            AIDER_EXECUTED="${aider_executed:-false}"
+            AIDER_EXIT_STATUS="${aider_exit_status:-not-run}"
+          fi
+
           python forgis/agent/write_run_log.py \
-            --target "$GITHUB_WORKSPACE/target-output" \
+            --target "$GITHUB_WORKSPACE/target-repo" \
             --source-repo "$SOURCE_REPO" \
             --source-ref "$SOURCE_REF" \
             --target-repo "$TARGET_REPO" \
             --target-base-branch "$TARGET_BASE_BRANCH" \
             --target-branch "$TARGET_BRANCH" \
-            --target-platform "$TARGET_PLATFORM" \
-            --target-stack "$TARGET_STACK" \
-            --migration-profile "$MIGRATION_PROFILE" \
             --target-subdir "$TARGET_SUBDIR" \
             --task-prompt-path "$TASK_PROMPT_PATH" \
             --config-path "$CONFIG_PATH" \
+            --agent-backend "$AGENT_BACKEND" \
             --model "$AIDER_MODEL" \
             --run-log-path "$RUN_LOG_PATH" \
             --dry-run "$DRY_RUN" \
-            --run-aider "$RUN_AIDER" \
-            --run-aider-config "$RUN_AIDER_CONFIG" \
+            --run-agent "$RUN_AGENT" \
+            --run-agent-config "$RUN_AGENT_CONFIG" \
             --confirm-real-run "$CONFIRM_REAL_RUN" \
-            --append-target-log "$RUN_AIDER" \
+            --aider-executed "$AIDER_EXECUTED" \
+            --aider-exit-status "$AIDER_EXIT_STATUS" \
+            --guardrail-result "See workflow logs." \
+            --validation-commands-json "$VALIDATION_COMMANDS_JSON" \
+            --success-checks-json "$SUCCESS_CHECKS_JSON" \
+            --append-target-log "$RUN_AGENT" \
+            --run-id "${{ github.run_id }}" \
             --run-url "$RUN_URL" \
-            --build-result "See workflow logs for build and guardrail checks." \
-            --summary "Forgis resolved config, built the final prompt, and ran the enabled migration steps." \
-            --next-steps "Review generated files inside $TARGET_SUBDIR/." \
+            --validation-result "See workflow logs." \
+            --summary "Forgis resolved config, built a thin Aider message, and ran the enabled generic steps." \
+            --next-steps "Review changed files inside $TARGET_SUBDIR/." \
             --preview-output "$GITHUB_WORKSPACE/forgis-runtime/forgis_log_entry.md"
 
       - name: Verify source repository stayed read-only
@@ -234,7 +252,7 @@ jobs:
         if: ${{ always() && steps.resolve_base.outcome == 'success' }}
         run: |
           python forgis/agent/guardrails.py check-target-scope \
-            --target "$GITHUB_WORKSPACE/target-output" \
+            --target "$GITHUB_WORKSPACE/target-repo" \
             --target-subdir "$TARGET_SUBDIR" \
             --read-only-path "$CONFIG_PATH" \
             --read-only-path "$TASK_PROMPT_PATH"
@@ -242,7 +260,7 @@ jobs:
       - name: Show target repository diff
         if: always()
         run: |
-          cd "$GITHUB_WORKSPACE/target-output"
+          cd "$GITHUB_WORKSPACE/target-repo"
           echo "Git status:"
           git status --short || true
           echo "Git diff stat:"
@@ -251,10 +269,10 @@ jobs:
       - name: Create pull request
         env:
           GH_TOKEN: ${{ secrets.FORGIS_TARGET_TOKEN }}
-          TARGET_REPO_DIR: ${{ github.workspace }}/target-output
+          TARGET_REPO_DIR: ${{ github.workspace }}/target-repo
         run: |
-          if [[ "$RUN_AIDER" != "true" ]]; then
-            echo "RUN_AIDER is false. Skipping push and pull request creation."
+          if [[ "$RUN_AGENT" != "true" ]]; then
+            echo "RUN_AGENT is false. Skipping push and pull request creation."
             exit 0
           fi
 
@@ -264,7 +282,7 @@ jobs:
           fi
 
           if [[ "$CONFIRM_REAL_RUN" != "true" ]]; then
-            echo "Real AI migration requires confirm_real_run: true in FORGIS_CONFIG.yml."
+            echo "Real Forgis runs require confirm_real_run: true in FORGIS_CONFIG.yml."
             exit 1
           fi
 
@@ -274,9 +292,9 @@ jobs:
         if: always()
         run: |
           mkdir -p "$GITHUB_WORKSPACE/forgis-runtime"
-          tar -czf "$GITHUB_WORKSPACE/forgis-runtime/target-output-snapshot.tar.gz" \
+          tar -czf "$GITHUB_WORKSPACE/forgis-runtime/target-repo-snapshot.tar.gz" \
             -C "$GITHUB_WORKSPACE" \
-            target-output
+            target-repo
 
       - name: Upload resolved config summary
         if: always()
@@ -292,34 +310,21 @@ jobs:
           name: forgis-run-summary
           path: forgis-runtime/run_summary.md
 
-      - name: Upload source bundle
+      - name: Upload source context
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: forgis-source-bundle
-          path: forgis-runtime/source_bundle.md
+          name: forgis-source-context
+          path: forgis-runtime/source_context.md
 
-      - name: Upload source manifest
+      - name: Upload Aider message diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: forgis-source-manifest
-          path: forgis-runtime/source_manifest.md
-
-      - name: Upload generated Forgis prompt
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: forgis-generated-prompt
-          path: forgis-runtime/forgis_prompt.md
-
-      - name: Upload prompt diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: forgis-prompt-diagnostics
+          name: forgis-message-diagnostics
           path: |
-            forgis-runtime/final_prompt_diagnostics.md
+            forgis-runtime/forgis_message.md
+            forgis-runtime/message_diagnostics.md
             forgis-runtime/aider_message_diagnostics.md
             forgis-runtime/aider_command_summary.md
 
@@ -334,5 +339,5 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: forgis-target-output
-          path: forgis-runtime/target-output-snapshot.tar.gz
+          name: forgis-target-repo
+          path: forgis-runtime/target-repo-snapshot.tar.gz

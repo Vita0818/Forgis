@@ -1,473 +1,241 @@
 from __future__ import annotations
 
-import hashlib
+import json
 import os
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
-
-import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 AGENT_DIR = REPO_ROOT / "agent"
 sys.path.insert(0, str(AGENT_DIR))
 
-from aider_compat import analyze_help, supports_flag
-from forgis_config import resolve_config
-from guardrails import (
-    changed_read_only_paths,
-    cleanup_aider_tags_cache,
-    cleanup_aider_root_gitignore,
-    root_gitignore_snapshot,
-    root_gitignore_state_text,
-    root_tags_cache_snapshot,
-    root_tags_cache_state_text,
-    snapshot_paths,
-    target_scope_violations,
-)
-
-
-MODEL_SECRET_ENV_CANDIDATES = (
-    "FORGIS_MODEL_API_KEY",
-    "DEEPSEEK_API_KEY",
-    "OPENAI_API_KEY",
-    "ANTHROPIC_API_KEY",
-    "OPENROUTER_API_KEY",
-    "GEMINI_API_KEY",
-    "GOOGLE_API_KEY",
-)
+from forgis_config import resolve_config, require_path_inside_subdir
+from guardrails import changed_read_only_paths, snapshot_paths, target_scope_violations
+from validate_target_output import files_snapshot, meaningful_changes
 
 
 class ForgisConfigTests(unittest.TestCase):
-    def make_temp_target(self) -> tempfile.TemporaryDirectory[str]:
-        tmp_root = REPO_ROOT / "tmp"
-        tmp_root.mkdir(exist_ok=True)
-        return tempfile.TemporaryDirectory(dir=tmp_root)
-
-    def write_default_config(self, target: Path) -> None:
-        (target / "FORGIS_CONFIG.yml").write_text(
-            "\n".join(
-                [
-                    "source_repo: owner/source-repo",
-                    "source_ref: main",
-                    "target_platform: android",
-                    "target_stack: kotlin-compose",
-                    "migration_profile: pixel-clone-app",
-                    "target_subdir: sample-output",
-                    "task_prompt_path: FORGIS_TASK.md",
-                    "model: provider/model-name",
-                    "target_branch: forgis/migration-output",
-                    "target_base_branch: main",
-                    "dry_run: true",
-                    "run_aider: false",
-                    "confirm_real_run: false",
-                    "",
-                ]
-            ),
-            encoding="utf-8",
-        )
-        (target / "FORGIS_TASK.md").write_text("Build the Android target project.", encoding="utf-8")
-
-    def prompt_with_task(self, task_text: str, extra_lines: list[str] | None = None) -> str:
-        task_hash = hashlib.sha256(task_text.encode("utf-8")).hexdigest()
-        lines = [
-            "# Forgis Generated Migration Task",
-            "Loaded file: FORGIS_TASK.md",
-            f"Task prompt sha256: {task_hash}",
-            "",
-            task_text,
-        ]
-        if extra_lines:
-            lines.extend(extra_lines)
-        return "\n".join(lines)
-
-    def make_run_aider_fixture(
+    def run_cmd(
         self,
-        root: Path,
+        args: list[str],
         *,
-        fake_help: str,
-    ) -> tuple[Path, Path, Path, Path, Path]:
-        target = root / "target"
-        runtime = root / "runtime"
-        fake_bin = root / "fake-bin"
-        target.mkdir()
-        runtime.mkdir()
-        fake_bin.mkdir()
+        cwd: Path | None = None,
+        env: dict[str, str] | None = None,
+        check: bool = True,
+    ) -> subprocess.CompletedProcess[str]:
+        result = subprocess.run(
+            args,
+            cwd=cwd or REPO_ROOT,
+            env=env,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        if check and result.returncode != 0:
+            raise AssertionError(
+                f"command failed with exit {result.returncode}: {' '.join(args)}\n{result.stdout}"
+            )
+        return result
 
-        (target / "FORGIS_CONFIG.yml").write_text(
-            "\n".join(
-                [
-                    "source_repo: owner/source-repo",
-                    "target_platform: android",
-                    "target_stack: kotlin-compose",
-                    "target_branch: forgis/test",
-                    "target_subdir: sample-output",
-                    "task_prompt_path: FORGIS_TASK.md",
-                    "",
-                ]
-            ),
+    def init_git_repo(self, root: Path) -> None:
+        self.run_cmd(["git", "init", "-q"], cwd=root)
+        self.run_cmd(["git", "config", "user.name", "test"], cwd=root)
+        self.run_cmd(["git", "config", "user.email", "test@example.invalid"], cwd=root)
+
+    def commit_all(self, root: Path, message: str = "initial") -> None:
+        self.run_cmd(["git", "add", "."], cwd=root)
+        self.run_cmd(["git", "commit", "-q", "-m", message], cwd=root)
+
+    def write_default_config(self, target: Path, extra: str = "") -> None:
+        config = textwrap.dedent(
+            """\
+            source_repo: owner/source-repo
+            source_ref: main
+            target_subdir: target-output
+            task_prompt_path: FORGIS_TASK.md
+            agent_backend: aider
+            model: provider/model-name
+            target_branch: forgis/output
+            target_base_branch: main
+            run_log_path: target-output/FORGIS_LOG.md
+            dry_run: true
+            run_agent: false
+            confirm_real_run: false
+            model_env:
+              PROVIDER_API_KEY: PROVIDER_API_KEY
+            """
+        )
+        if extra:
+            config += extra if extra.endswith("\n") else extra + "\n"
+        (target / "FORGIS_CONFIG.yml").write_text(config, encoding="utf-8")
+        (target / "FORGIS_TASK.md").write_text(
+            "# Mock Task\n\nCreate the requested output from the mock source.",
             encoding="utf-8",
         )
-        task_text = "# Forgis Validation Smoke Task\n\nBuild the target."
-        (target / "FORGIS_TASK.md").write_text(task_text, encoding="utf-8")
-        (target / "sample-output").mkdir()
-        prompt = runtime / "forgis_prompt.md"
-        prompt.write_text(self.prompt_with_task(task_text), encoding="utf-8")
 
-        subprocess.run(["git", "init"], cwd=target, check=True, stdout=subprocess.PIPE, text=True)
-        subprocess.run(["git", "add", "FORGIS_CONFIG.yml", "FORGIS_TASK.md"], cwd=target, check=True)
-        subprocess.run(
-            [
-                "git",
-                "-c",
-                "user.name=Forgis Test",
-                "-c",
-                "user.email=forgis@example.invalid",
-                "commit",
-                "-m",
-                "initial target inputs",
-            ],
-            cwd=target,
-            check=True,
-            stdout=subprocess.PIPE,
-            text=True,
-        )
-
-        args_file = runtime / "fake-aider-args.txt"
-        fake_aider = fake_bin / "aider"
-        fake_aider.write_text(
+    def make_fake_aider(self, fake_bin: Path, args_file: Path) -> None:
+        fake_bin.mkdir(parents=True, exist_ok=True)
+        script = fake_bin / "aider"
+        script.write_text(
             "\n".join(
                 [
                     "#!/usr/bin/env bash",
                     "set -euo pipefail",
-                    "if [[ \"${1:-}\" == \"--help\" ]]; then",
-                    "  cat <<'EOF'",
-                    fake_help,
-                    "EOF",
-                    "  exit 0",
-                    "fi",
                     "if [[ \"${1:-}\" == \"--version\" ]]; then",
-                    "  echo \"aider fake 1.0\"",
+                    "  echo \"aider fake\"",
                     "  exit 0",
                     "fi",
-                    "printf '%s\\n' \"$@\" > \"$FAKE_AIDER_ARGS_FILE\"",
-                    "if [[ \"${CREATE_AIDER_TAGS_CACHE:-}\" == \"yes\" ]]; then",
-                    "  mkdir -p \"$TARGET_REPO_DIR/.aider.tags.cache.v4\"",
-                    "  printf '%s\\n' \"fake tags cache\" > \"$TARGET_REPO_DIR/.aider.tags.cache.v4/cache.db\"",
+                    "if [[ \"${1:-}\" == \"--help\" ]]; then",
+                    "  printf '%s\\n' 'Usage: aider --read --subtree-only --no-gitignore --input-history-file --chat-history-file --llm-history-file'",
+                    "  exit 0",
                     "fi",
-                    "if [[ \"${REQUIRE_PROVIDER_ENV:-}\" == \"yes\" ]]; then",
-                    "  if [[ \"${PROVIDER_API_KEY:-}\" != \"${EXPECTED_PROVIDER_VALUE:-}\" ]]; then",
-                    "    echo \"provider env was not mapped\" >&2",
-                    "    exit 77",
-                    "  fi",
-                    "  printf '%s\\n' \"PROVIDER_API_KEY=present\" > \"$FAKE_AIDER_ENV_FILE\"",
+                    "printf '%s\\n' \"$@\" > \"$FAKE_AIDER_ARGS\"",
+                    "if [[ \"${FAKE_AIDER_ROOT_CACHE:-}\" == \"yes\" ]]; then",
+                    "  mkdir -p ../.aider.tags.cache.v4",
+                    "  printf '%s\\n' cache > ../.aider.tags.cache.v4/cache.db",
                     "fi",
-                    "if [[ \"${FAKE_AIDER_EXIT:-0}\" != \"0\" ]]; then",
-                    "  exit \"$FAKE_AIDER_EXIT\"",
+                    "if [[ \"${FAKE_AIDER_LOG_ONLY:-}\" == \"yes\" ]]; then",
+                    "  printf '%s\\n' log-only > FORGIS_LOG.md",
+                    "  exit 0",
                     "fi",
-                    "printf '%s\\n' \"generated by fake aider\" > generated.txt",
+                    "mkdir -p result",
+                    "printf '%s\\n' generated > result/output.txt",
                     "exit 0",
                     "",
                 ]
             ),
             encoding="utf-8",
         )
-        fake_aider.chmod(0o755)
-        return target, runtime, prompt, args_file, fake_bin
+        script.chmod(0o755)
+        args_file.parent.mkdir(parents=True, exist_ok=True)
 
-    def run_fake_aider(
-        self,
-        target: Path,
-        runtime: Path,
-        prompt: Path,
-        args_file: Path,
-        fake_bin: Path,
-        *,
-        extra_env: dict[str, str] | None = None,
-        check: bool = True,
-    ) -> subprocess.CompletedProcess[str]:
-        env = os.environ.copy()
-        for key in MODEL_SECRET_ENV_CANDIDATES:
-            env.pop(key, None)
-        env.update(
-            {
-                "PATH": str(fake_bin) + os.pathsep + env["PATH"],
-                "FAKE_AIDER_ARGS_FILE": str(args_file),
-                "RUNNER_TEMP": str(runtime),
-                "TARGET_REPO_DIR": str(target),
-                "FORGIS_PROMPT_FILE": str(prompt),
-                "FORGIS_AIDER_DIAGNOSTICS_FILE": str(runtime / "aider_message_diagnostics.md"),
-                "FORGIS_AIDER_COMMAND_SUMMARY_FILE": str(runtime / "aider_command_summary.md"),
-                "AIDER_MODEL": "provider/model-name",
-                "TASK_PROMPT_PATH": "FORGIS_TASK.md",
-                "CONFIG_PATH": "FORGIS_CONFIG.yml",
-                "TARGET_SUBDIR": "sample-output",
-                "RUN_LOG_PATH": "sample-output/FORGIS_LOG.md",
-                "SOURCE_REPO": "owner/source-repo",
-                "TARGET_REPO": "owner/target-repo",
-                "REQUIRED_PROMPT_MARKERS_JSON": "[]",
-                "FORBIDDEN_PROMPT_MARKERS_JSON": "[]",
-                "MODEL_ENV_JSON": "{}",
-            }
+    def make_run_aider_fixture(self, root: Path) -> tuple[Path, Path, Path, Path, Path, Path]:
+        source = root / "source"
+        target = root / "target"
+        runtime = root / "runtime"
+        fake_bin = root / "fake-bin"
+        source.mkdir()
+        target.mkdir()
+        runtime.mkdir()
+        (source / "input.txt").write_text("mock source", encoding="utf-8")
+        self.init_git_repo(source)
+        self.commit_all(source)
+        self.write_default_config(
+            target,
+            extra="dry_run: false\nrun_agent: true\nconfirm_real_run: true\nsuccess_checks:\n  - path_exists: result/output.txt\n",
         )
-        if extra_env:
-            env.update(extra_env)
-        return subprocess.run(
-            ["bash", str(AGENT_DIR / "run_aider.sh")],
-            cwd=REPO_ROOT,
-            env=env,
-            check=check,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
+        self.init_git_repo(target)
+        self.commit_all(target)
+        message = runtime / "forgis_message.md"
+        self.run_cmd(
+            [
+                sys.executable,
+                str(AGENT_DIR / "build_prompt.py"),
+                "--source",
+                str(source),
+                "--target",
+                str(target),
+                "--config-path",
+                "FORGIS_CONFIG.yml",
+                "--task-prompt-path",
+                "FORGIS_TASK.md",
+                "--target-subdir",
+                "target-output",
+                "--run-log-path",
+                "target-output/FORGIS_LOG.md",
+                "--require-task-prompt",
+                "--output",
+                str(message),
+            ]
         )
+        args_file = runtime / "aider_args.txt"
+        self.make_fake_aider(fake_bin, args_file)
+        return source, target, runtime, fake_bin, message, args_file
 
-    def test_reads_target_repo_config_and_defaults_log_path(self) -> None:
-        with self.make_temp_target() as dirname:
-            target = Path(dirname)
-            self.write_default_config(target)
-
-            resolved = resolve_config(
-                target_root=target,
-                target_repo="owner/target-repo",
-                config_path="FORGIS_CONFIG.yml",
-            )
-
-            self.assertEqual(resolved.source_repo, "owner/source-repo")
-            self.assertEqual(resolved.task_prompt_path, "FORGIS_TASK.md")
-            self.assertEqual(resolved.target_subdir, "sample-output")
-            self.assertEqual(resolved.run_log_path, "sample-output/FORGIS_LOG.md")
-            self.assertTrue(resolved.dry_run)
-            self.assertFalse(resolved.run_aider_config)
-            self.assertFalse(resolved.confirm_real_run)
-            self.assertFalse(resolved.run_aider)
-
-    def test_config_drives_dry_run_run_aider_and_confirm_real_run(self) -> None:
-        with self.make_temp_target() as dirname:
-            target = Path(dirname)
-            self.write_default_config(target)
-            with (target / "FORGIS_CONFIG.yml").open("a", encoding="utf-8") as file:
-                file.write("run_aider: true\n")
-
-            resolved = resolve_config(
-                target_root=target,
-                target_repo="owner/target-repo",
-                config_path="FORGIS_CONFIG.yml",
-            )
-
-            self.assertTrue(resolved.dry_run)
-            self.assertTrue(resolved.run_aider_config)
-            self.assertFalse(resolved.run_aider)
-            self.assertFalse(resolved.real_run_allowed)
-
-    def test_config_parses_prompt_markers_and_exports_json(self) -> None:
-        with self.make_temp_target() as dirname:
-            target = Path(dirname)
-            self.write_default_config(target)
-            with (target / "FORGIS_CONFIG.yml").open("a", encoding="utf-8") as file:
-                file.write("required_prompt_markers:\n")
-                file.write("  - Sample App Migration Task\n")
-                file.write("  - sample-output\n")
-                file.write("forbidden_prompt_markers:\n")
-                file.write("  - Deprecated fallback prompt\n")
-
-            resolved = resolve_config(
-                target_root=target,
-                target_repo="owner/target-repo",
-                config_path="FORGIS_CONFIG.yml",
-            )
-
-            self.assertEqual(
-                resolved.required_prompt_markers,
-                ("Sample App Migration Task", "sample-output"),
-            )
-            self.assertIn("make the greeting more casual", resolved.forbidden_prompt_markers)
-            self.assertIn("Deprecated fallback prompt", resolved.forbidden_prompt_markers)
-            self.assertIn(
-                '"Sample App Migration Task"',
-                resolved.env()["REQUIRED_PROMPT_MARKERS_JSON"],
-            )
-
-    def test_config_parses_model_env_mapping_without_secret_values(self) -> None:
-        with self.make_temp_target() as dirname:
-            target = Path(dirname)
-            self.write_default_config(target)
-            with (target / "FORGIS_CONFIG.yml").open("a", encoding="utf-8") as file:
-                file.write("model_env:\n")
-                file.write("  PROVIDER_API_KEY: FORGIS_MODEL_API_KEY\n")
-
-            resolved = resolve_config(
-                target_root=target,
-                target_repo="owner/target-repo",
-                config_path="FORGIS_CONFIG.yml",
-            )
-
-            self.assertEqual(resolved.model_env, (("PROVIDER_API_KEY", "FORGIS_MODEL_API_KEY"),))
-            self.assertEqual(
-                resolved.env()["MODEL_ENV_JSON"],
-                '{"PROVIDER_API_KEY": "FORGIS_MODEL_API_KEY"}',
-            )
-            self.assertNotIn("unit-test-secret", resolved.env()["MODEL_ENV_JSON"])
-
-    def test_model_env_requires_valid_env_names(self) -> None:
-        with self.make_temp_target() as dirname:
-            target = Path(dirname)
-            self.write_default_config(target)
-            with (target / "FORGIS_CONFIG.yml").open("a", encoding="utf-8") as file:
-                file.write("model_env:\n")
-                file.write("  PROVIDER-API-KEY: FORGIS_MODEL_API_KEY\n")
-
-            with self.assertRaisesRegex(ValueError, "valid environment variable name"):
-                resolve_config(
-                    target_root=target,
-                    target_repo="owner/target-repo",
-                    config_path="FORGIS_CONFIG.yml",
-                )
-
-    def test_prompt_marker_fields_must_be_lists(self) -> None:
-        with self.make_temp_target() as dirname:
-            target = Path(dirname)
-            self.write_default_config(target)
-            with (target / "FORGIS_CONFIG.yml").open("a", encoding="utf-8") as file:
-                file.write("required_prompt_markers: Sample App Migration Task\n")
-
-            with self.assertRaisesRegex(ValueError, "required_prompt_markers must be a YAML list"):
-                resolve_config(
-                    target_root=target,
-                    target_repo="owner/target-repo",
-                    config_path="FORGIS_CONFIG.yml",
-                )
-
-    def test_dry_run_false_requires_confirm_real_run(self) -> None:
-        with self.make_temp_target() as dirname:
-            target = Path(dirname)
-            self.write_default_config(target)
-            with (target / "FORGIS_CONFIG.yml").open("a", encoding="utf-8") as file:
-                file.write("dry_run: false\n")
-                file.write("run_aider: true\n")
-
-            with self.assertRaisesRegex(
-                ValueError,
-                "Real AI migration requires confirm_real_run: true in FORGIS_CONFIG.yml.",
-            ):
-                resolve_config(
-                    target_root=target,
-                    target_repo="owner/target-repo",
-                    config_path="FORGIS_CONFIG.yml",
-                )
-
-    def test_real_ai_migration_requires_all_three_config_flags(self) -> None:
-        with self.make_temp_target() as dirname:
-            target = Path(dirname)
-            self.write_default_config(target)
-            with (target / "FORGIS_CONFIG.yml").open("a", encoding="utf-8") as file:
-                file.write("dry_run: false\n")
-                file.write("run_aider: true\n")
-                file.write("confirm_real_run: true\n")
-
-            resolved = resolve_config(
-                target_root=target,
-                target_repo="owner/target-repo",
-                config_path="FORGIS_CONFIG.yml",
-            )
-
-            self.assertFalse(resolved.dry_run)
-            self.assertTrue(resolved.run_aider_config)
-            self.assertTrue(resolved.confirm_real_run)
-            self.assertTrue(resolved.real_run_allowed)
-            self.assertTrue(resolved.run_aider)
-
-    def test_missing_config_fails_clearly(self) -> None:
-        with self.make_temp_target() as dirname:
-            target = Path(dirname)
-
-            with self.assertRaisesRegex(FileNotFoundError, "Config file not found"):
-                resolve_config(
-                    target_root=target,
-                    target_repo="owner/target",
-                    config_path="FORGIS_CONFIG.yml",
-                )
-
-    def test_resolve_config_cli_has_no_source_repo_override_argument(self) -> None:
-        resolver_text = (AGENT_DIR / "resolve_config.py").read_text(encoding="utf-8")
-
-        self.assertNotIn("--source-repo", resolver_text)
-
-    def test_run_log_must_be_inside_target_subdir(self) -> None:
-        with self.make_temp_target() as dirname:
-            target = Path(dirname)
-            self.write_default_config(target)
-            with (target / "FORGIS_CONFIG.yml").open("a", encoding="utf-8") as file:
-                file.write("run_log_path: FORGIS_LOG.md\n")
-
-            with self.assertRaisesRegex(ValueError, "run_log_path must be located inside target_subdir"):
-                resolve_config(
-                    target_root=target,
-                    target_repo="owner/target-repo",
-                    config_path="FORGIS_CONFIG.yml",
-                )
-
-    def test_empty_and_invalid_config_fail_clearly(self) -> None:
-        with self.make_temp_target() as dirname:
-            target = Path(dirname)
-            (target / "FORGIS_CONFIG.yml").write_text("", encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "empty"):
-                resolve_config(
-                    target_root=target,
-                    target_repo="owner/target",
-                    config_path="FORGIS_CONFIG.yml",
-                )
-
-            (target / "FORGIS_CONFIG.yml").write_text("source_repo: [", encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "invalid YAML"):
-                resolve_config(
-                    target_root=target,
-                    target_repo="owner/target",
-                    config_path="FORGIS_CONFIG.yml",
-                )
-
-    def test_guardrails_detect_readonly_file_changes(self) -> None:
-        with self.make_temp_target() as dirname:
-            target = Path(dirname)
-            self.write_default_config(target)
-            snapshot = snapshot_paths(target, ["FORGIS_CONFIG.yml", "FORGIS_TASK.md"])
-
-            (target / "FORGIS_TASK.md").write_text("Changed task.", encoding="utf-8")
-
-            self.assertEqual(changed_read_only_paths(target, snapshot), ["FORGIS_TASK.md"])
-
-    def test_guardrails_reject_target_changes_outside_subdir(self) -> None:
-        changed = [
-            "sample-output/app/src/main/MainActivity.kt",
-            "README.md",
-            "FORGIS_TASK.md",
-            "OtherProject/build.gradle.kts",
+    def test_main_workflow_exposes_only_target_repo(self) -> None:
+        workflow = (REPO_ROOT / ".github/workflows/migrate.yml").read_text(encoding="utf-8")
+        self.assertIn("target_repo:", workflow)
+        forbidden_inputs = [
+            "config_path:",
+            "source_repo:",
+            "target_subdir:",
+            "task_prompt_path:",
+            "dry_run:",
+            "run_agent:",
+            "run_aider:",
+            "model:",
         ]
+        inputs_block = workflow.split("inputs:", 1)[1].split("permissions:", 1)[0]
+        for forbidden in forbidden_inputs:
+            self.assertNotIn(forbidden, inputs_block)
 
-        violations = target_scope_violations(
-            changed,
-            "sample-output",
-            ["FORGIS_CONFIG.yml", "FORGIS_TASK.md"],
-        )
+    def test_forgis_config_is_required_and_only_config_source(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            target = Path(dirname)
+            with self.assertRaises(FileNotFoundError):
+                resolve_config(target_root=target, target_repo="owner/target-repo")
 
-        self.assertEqual(
-            violations,
-            ["FORGIS_TASK.md", "OtherProject/build.gradle.kts", "README.md"],
-        )
+            self.write_default_config(target)
+            resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
+            self.assertEqual(resolved.source_repo, "owner/source-repo")
+            self.assertEqual(resolved.target_repo, "owner/target-repo")
+            self.assertEqual(resolved.target_subdir, "target-output")
+            self.assertFalse(resolved.run_agent)
 
-    def test_generated_prompt_uses_config_task_and_target_subdir_without_example_prompt(self) -> None:
-        with self.make_temp_target() as dirname:
+    def test_defaults_and_legacy_run_aider_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            target = Path(dirname)
+            self.write_default_config(
+                target,
+                extra="run_agent:\nrun_aider: true\ndry_run: true\nconfirm_real_run: false\n",
+            )
+            resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
+            self.assertTrue(resolved.run_agent_config)
+            self.assertFalse(resolved.run_agent)
+            self.assertTrue(resolved.dry_run)
+
+    def test_real_run_requires_confirm_real_run(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            target = Path(dirname)
+            self.write_default_config(
+                target,
+                extra="dry_run: false\nrun_agent: true\nconfirm_real_run: false\n",
+            )
+            with self.assertRaisesRegex(ValueError, "confirm_real_run"):
+                resolve_config(target_root=target, target_repo="owner/target-repo")
+
+    def test_run_log_path_must_be_inside_target_subdir(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            target = Path(dirname)
+            self.write_default_config(target, extra="run_log_path: FORGIS_LOG.md\n")
+            with self.assertRaisesRegex(ValueError, "run_log_path"):
+                resolve_config(target_root=target, target_repo="owner/target-repo")
+
+    def test_target_stack_and_migration_profile_are_passthrough_only(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
             target = Path(dirname)
             source = target / "source"
             source.mkdir()
-            (source / "README.md").write_text("Source fixture.", encoding="utf-8")
-            self.write_default_config(target)
-            output = target / "forgis_prompt.md"
-
-            subprocess.run(
+            self.write_default_config(
+                target,
+                extra="target_stack: arbitrary-user-value\nmigration_profile: another-user-value\n",
+            )
+            resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
+            self.assertEqual(
+                dict(resolved.passthrough_config),
+                {
+                    "target_stack": "arbitrary-user-value",
+                    "migration_profile": "another-user-value",
+                },
+            )
+            output = target / "message.md"
+            self.run_cmd(
                 [
                     sys.executable,
                     str(AGENT_DIR / "build_prompt.py"),
@@ -475,586 +243,357 @@ class ForgisConfigTests(unittest.TestCase):
                     str(source),
                     "--target",
                     str(target),
-                    "--rules",
-                    str(REPO_ROOT / "rules"),
-                    "--prompts",
-                    str(REPO_ROOT / "prompts"),
-                    "--source-repo",
-                    "owner/source-repo",
-                    "--target-repo",
-                    "owner/target-repo",
-                    "--platform",
-                    "android",
-                    "--target-stack",
-                    "kotlin-compose",
-                    "--migration-profile",
-                    "pixel-clone-app",
                     "--config-path",
                     "FORGIS_CONFIG.yml",
                     "--task-prompt-path",
                     "FORGIS_TASK.md",
-                    "--require-task-prompt",
                     "--target-subdir",
-                    "sample-output",
+                    "target-output",
+                    "--run-log-path",
+                    "target-output/FORGIS_LOG.md",
+                    "--require-task-prompt",
                     "--output",
                     str(output),
-                ],
-                cwd=REPO_ROOT,
-                check=True,
-                text=True,
+                ]
             )
+            message = output.read_text(encoding="utf-8")
+            self.assertNotIn("arbitrary-user-value", message)
+            self.assertNotIn("another-user-value", message)
 
-            prompt = output.read_text(encoding="utf-8")
-            self.assertIn("Build the Android target project.", prompt)
-            self.assertIn("Task prompt sha256:", prompt)
-            self.assertIn("Source repository: owner/source-repo", prompt)
-            self.assertIn("Target repository: owner/target-repo", prompt)
-            self.assertIn("Target output directory relative to target repository root: sample-output", prompt)
-            self.assertIn("Config file path relative to target repository root: FORGIS_CONFIG.yml", prompt)
-            self.assertIn("Forgis will append the long-term run log at `sample-output/FORGIS_LOG.md`", prompt)
-            self.assertNotIn(" ".join(("make", "the", "greeting", "more", "casual")), prompt)
-
-    def test_build_prompt_fails_when_task_prompt_missing_or_empty(self) -> None:
-        with self.make_temp_target() as dirname:
-            target = Path(dirname)
-            source = target / "source"
+    def test_aider_message_is_thin_paths_and_boundaries_only(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source = root / "source"
+            target = root / "target"
             source.mkdir()
-            (source / "README.md").write_text("Source fixture.", encoding="utf-8")
-
-            base_command = [
-                sys.executable,
-                str(AGENT_DIR / "build_prompt.py"),
-                "--source",
-                str(source),
-                "--target",
-                str(target),
-                "--rules",
-                str(REPO_ROOT / "rules"),
-                "--prompts",
-                str(REPO_ROOT / "prompts"),
-                "--platform",
-                "android",
-                "--target-stack",
-                "kotlin-compose",
-                "--migration-profile",
-                "pixel-clone-app",
-                "--task-prompt-path",
-                "FORGIS_TASK.md",
-                "--require-task-prompt",
-                "--target-subdir",
-                "sample-output",
-                "--output",
-                str(target / "forgis_prompt.md"),
-            ]
-
-            with self.assertRaises(subprocess.CalledProcessError):
-                subprocess.run(base_command, cwd=REPO_ROOT, check=True, text=True)
-
-            (target / "FORGIS_TASK.md").write_text("", encoding="utf-8")
-            with self.assertRaises(subprocess.CalledProcessError):
-                subprocess.run(base_command, cwd=REPO_ROOT, check=True, text=True)
-
-    def test_prompt_diagnostics_accepts_generic_prompt_without_required_markers(self) -> None:
-        with self.make_temp_target() as dirname:
-            target = Path(dirname)
-            task = target / "FORGIS_TASK.md"
-            task_text = "# Forgis Validation Smoke Task\n\nBuild the target."
-            task.write_text(task_text, encoding="utf-8")
-            prompt = target / "forgis_prompt.md"
-            prompt.write_text(self.prompt_with_task(task_text), encoding="utf-8")
-
-            subprocess.run(
+            target.mkdir()
+            self.write_default_config(target)
+            output = root / "message.md"
+            self.run_cmd(
                 [
                     sys.executable,
-                    str(AGENT_DIR / "prompt_diagnostics.py"),
-                    "--file",
-                    str(prompt),
-                    "--label",
-                    "Aider Message File",
-                    "--task-prompt-file",
-                    str(task),
+                    str(AGENT_DIR / "build_prompt.py"),
+                    "--source",
+                    str(source),
+                    "--target",
+                    str(target),
+                    "--config-path",
+                    "FORGIS_CONFIG.yml",
                     "--task-prompt-path",
                     "FORGIS_TASK.md",
-                    "--expected-same-as",
-                    str(prompt),
-                ],
-                cwd=REPO_ROOT,
-                check=True,
-                text=True,
+                    "--target-subdir",
+                    "target-output",
+                    "--run-log-path",
+                    "target-output/FORGIS_LOG.md",
+                    "--require-task-prompt",
+                    "--output",
+                    str(output),
+                ]
             )
+            message = output.read_text(encoding="utf-8")
+            self.assertIn("You are running through Forgis.", message)
+            self.assertIn(f"Source repository path: {source.resolve()}", message)
+            self.assertIn(f"Target repository path: {target.resolve()}", message)
+            self.assertIn("Task file path:", message)
+            self.assertIn("Create or modify files only under the writable target path.", message)
+            self.assertNotIn("Create the requested output from the mock source.", message)
+            self.assertNotIn("Source Bundle", message)
+            self.assertNotIn("scaffold", message.casefold())
 
-    def test_prompt_diagnostics_required_markers_are_configurable(self) -> None:
-        with self.make_temp_target() as dirname:
+    def test_write_scope_marker_is_not_in_production_code_or_aider_chat(self) -> None:
+        production_files = [
+            path
+            for path in (REPO_ROOT / "agent").glob("*")
+            if path.is_file()
+        ]
+        for path in production_files:
+            self.assertNotIn(".forgis-write-scope.md", path.read_text(encoding="utf-8"))
+
+    def test_no_platform_scaffold_or_output_judgment_in_agent_code(self) -> None:
+        files = [
+            AGENT_DIR / "build_target.sh",
+            AGENT_DIR / "validate_target_output.py",
+            AGENT_DIR / "build_prompt.py",
+            AGENT_DIR / "run_aider.sh",
+        ]
+        banned = (
+            "AndroidManifest",
+            "MainActivity",
+            "com.android",
+            "Gradle settings",
+            "kotlin-compose",
+            "package.json",
+            "Cargo.toml",
+            "pyproject.toml",
+        )
+        for path in files:
+            text = path.read_text(encoding="utf-8")
+            for marker in banned:
+                self.assertNotIn(marker, text)
+
+    def test_target_scope_outside_subdir_fails(self) -> None:
+        changed = ["target-output/file.txt", "README.md", "FORGIS_TASK.md"]
+        violations = target_scope_violations(
+            changed,
+            "target-output",
+            read_only_paths=["FORGIS_TASK.md"],
+        )
+        self.assertEqual(violations, ["FORGIS_TASK.md", "README.md"])
+
+    def test_config_and_task_hash_changes_fail(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
             target = Path(dirname)
-            task = target / "FORGIS_TASK.md"
-            task_text = "# Forgis Validation Smoke Task\n\nBuild the target."
-            task.write_text(task_text, encoding="utf-8")
-            prompt = target / "forgis_prompt.md"
-            prompt.write_text(self.prompt_with_task(task_text), encoding="utf-8")
+            self.write_default_config(target)
+            snapshot = snapshot_paths(target, ["FORGIS_CONFIG.yml", "FORGIS_TASK.md"])
+            (target / "FORGIS_TASK.md").write_text("changed", encoding="utf-8")
+            self.assertEqual(changed_read_only_paths(target, snapshot), ["FORGIS_TASK.md"])
 
-            subprocess.run(
-                [
-                    sys.executable,
-                    str(AGENT_DIR / "prompt_diagnostics.py"),
-                    "--file",
-                    str(prompt),
-                    "--task-prompt-file",
-                    str(task),
-                    "--task-prompt-path",
-                    "FORGIS_TASK.md",
-                    "--required-marker",
-                    "Forgis Validation Smoke Task",
-                ],
-                cwd=REPO_ROOT,
-                check=True,
-                text=True,
-            )
-
-            with self.assertRaises(subprocess.CalledProcessError):
-                subprocess.run(
-                    [
-                        sys.executable,
-                        str(AGENT_DIR / "prompt_diagnostics.py"),
-                        "--file",
-                        str(prompt),
-                        "--task-prompt-file",
-                        str(task),
-                        "--task-prompt-path",
-                        "FORGIS_TASK.md",
-                        "--required-marker",
-                        "Missing Marker",
-                    ],
-                    cwd=REPO_ROOT,
-                    check=True,
-                    text=True,
-                )
-
-    def test_prompt_diagnostics_blocks_default_forbidden_greeting_marker(self) -> None:
-        with self.make_temp_target() as dirname:
-            target = Path(dirname)
-            task = target / "FORGIS_TASK.md"
-            task_text = "# Forgis Validation Smoke Task\n\nBuild the target."
-            task.write_text(task_text, encoding="utf-8")
-            prompt = target / "forgis_prompt.md"
-            prompt.write_text(
-                self.prompt_with_task(
-                    task_text,
-                    ["make the greeting more casual"],
-                ),
-                encoding="utf-8",
-            )
-
-            with self.assertRaises(subprocess.CalledProcessError):
-                subprocess.run(
-                    [
-                        sys.executable,
-                        str(AGENT_DIR / "prompt_diagnostics.py"),
-                        "--file",
-                        str(prompt),
-                        "--task-prompt-file",
-                        str(task),
-                        "--task-prompt-path",
-                        "FORGIS_TASK.md",
-                    ],
-                    cwd=REPO_ROOT,
-                    check=True,
-                    text=True,
-                )
-
-    def test_prompt_diagnostics_requires_message_file_to_match_final_prompt_hash(self) -> None:
-        with self.make_temp_target() as dirname:
-            target = Path(dirname)
-            task = target / "FORGIS_TASK.md"
-            task_text = "# Forgis Validation Smoke Task\n\nBuild the target."
-            task.write_text(task_text, encoding="utf-8")
-            final_prompt = target / "forgis_prompt.md"
-            message_file = target / "aider_message.md"
-            final_prompt.write_text(self.prompt_with_task(task_text), encoding="utf-8")
-            message_file.write_text(self.prompt_with_task(task_text, ["Different message body."]), encoding="utf-8")
-
-            with self.assertRaises(subprocess.CalledProcessError):
-                subprocess.run(
-                    [
-                        sys.executable,
-                        str(AGENT_DIR / "prompt_diagnostics.py"),
-                        "--file",
-                        str(message_file),
-                        "--task-prompt-file",
-                        str(task),
-                        "--task-prompt-path",
-                        "FORGIS_TASK.md",
-                        "--expected-same-as",
-                        str(final_prompt),
-                    ],
-                    cwd=REPO_ROOT,
-                    check=True,
-                    text=True,
-                )
-
-    def test_prompt_diagnostics_requires_task_prompt_hash_marker(self) -> None:
-        with self.make_temp_target() as dirname:
-            target = Path(dirname)
-            task = target / "FORGIS_TASK.md"
-            task_text = "# Forgis Validation Smoke Task\n\nBuild the target."
-            task.write_text(task_text, encoding="utf-8")
-            prompt = target / "forgis_prompt.md"
-            prompt.write_text(
-                "# Forgis Generated Migration Task\nLoaded file: FORGIS_TASK.md\n# Forgis Validation Smoke Task\n",
-                encoding="utf-8",
-            )
-
-            with self.assertRaises(subprocess.CalledProcessError):
-                subprocess.run(
-                    [
-                        sys.executable,
-                        str(AGENT_DIR / "prompt_diagnostics.py"),
-                        "--file",
-                        str(prompt),
-                        "--task-prompt-file",
-                        str(task),
-                        "--task-prompt-path",
-                        "FORGIS_TASK.md",
-                    ],
-                    cwd=REPO_ROOT,
-                    check=True,
-                    text=True,
-                )
-
-    def test_aider_capability_detection_selects_read_context_when_read_is_supported(self) -> None:
-        help_text = "Usage: aider [OPTIONS]\n  --read FILE\n  --subtree-only\n  --no-gitignore\n"
-        capabilities = analyze_help(help_text)
-
-        self.assertTrue(supports_flag(help_text, "--read"))
-        self.assertTrue(capabilities["supports_read"])
-        self.assertTrue(capabilities["supports_subtree_only"])
-        self.assertEqual(capabilities["context_mode"], "read-context")
-
-    def test_aider_capability_detection_falls_back_without_read(self) -> None:
-        help_text = "Usage: aider [OPTIONS]\n  --subtree-only\n  --no-gitignore\n" * 2000
-        capabilities = analyze_help(help_text)
-
-        self.assertFalse(supports_flag(help_text, "--read"))
-        self.assertTrue(capabilities["supports_subtree_only"])
-        self.assertEqual(capabilities["context_mode"], "message-file-only")
-
-    def test_run_aider_uses_read_context_when_supported_by_fake_aider(self) -> None:
-        with self.make_temp_target() as dirname:
-            root = Path(dirname)
-            target, runtime, prompt, args_file, fake_bin = self.make_run_aider_fixture(
-                root,
-                fake_help="Usage: aider\n  --read FILE\n  --subtree-only\n  --no-gitignore\n",
-            )
-
-            result = self.run_fake_aider(target, runtime, prompt, args_file, fake_bin)
-            args_text = args_file.read_text(encoding="utf-8")
-
-            self.assertIn("Aider supports --read: yes", result.stdout)
-            self.assertIn("selected Aider context mode: read-context", result.stdout)
-            self.assertIn("--read\n", args_text)
-            self.assertIn(str(target / "FORGIS_TASK.md"), args_text)
-            self.assertIn("Target writable scope verification passed.", result.stdout)
-            self.assertEqual((target / "FORGIS_TASK.md").read_text(encoding="utf-8"), "# Forgis Validation Smoke Task\n\nBuild the target.")
-            self.assertTrue((target / "sample-output" / "generated.txt").is_file())
-
-    def test_run_aider_falls_back_to_message_file_only_without_read(self) -> None:
-        with self.make_temp_target() as dirname:
-            root = Path(dirname)
-            target, runtime, prompt, args_file, fake_bin = self.make_run_aider_fixture(
-                root,
-                fake_help="Usage: aider\n  --subtree-only\n  --no-gitignore\n",
-            )
-
-            result = self.run_fake_aider(target, runtime, prompt, args_file, fake_bin)
-            args_text = args_file.read_text(encoding="utf-8")
-
-            self.assertIn("Aider supports --read: no", result.stdout)
-            self.assertIn("selected Aider context mode: message-file-only", result.stdout)
-            self.assertIn("Aider does not support --read; using message-file-only mode.", result.stdout)
-            self.assertNotIn("--read\n", args_text)
-            self.assertIn("--message-file\n", args_text)
-            self.assertIn("Read-only input hash verification passed.", result.stdout)
-            self.assertIn("Target writable scope verification passed.", result.stdout)
-            self.assertEqual((target / "FORGIS_CONFIG.yml").read_text(encoding="utf-8").splitlines()[0], "source_repo: owner/source-repo")
-            self.assertEqual((target / "FORGIS_TASK.md").read_text(encoding="utf-8"), "# Forgis Validation Smoke Task\n\nBuild the target.")
-            self.assertTrue((target / "sample-output" / "generated.txt").is_file())
-
-    def test_run_aider_maps_model_env_without_logging_secret_value(self) -> None:
-        with self.make_temp_target() as dirname:
-            root = Path(dirname)
-            target, runtime, prompt, args_file, fake_bin = self.make_run_aider_fixture(
-                root,
-                fake_help="Usage: aider\n  --subtree-only\n  --no-gitignore\n",
-            )
-            env_file = runtime / "fake-aider-env.txt"
-            secret_value = "unit-test-secret-value"
-
-            result = self.run_fake_aider(
-                target,
-                runtime,
-                prompt,
-                args_file,
-                fake_bin,
-                extra_env={
-                    "MODEL_ENV_JSON": '{"PROVIDER_API_KEY": "FORGIS_MODEL_API_KEY"}',
-                    "FORGIS_MODEL_API_KEY": secret_value,
-                    "REQUIRE_PROVIDER_ENV": "yes",
-                    "EXPECTED_PROVIDER_VALUE": secret_value,
-                    "FAKE_AIDER_ENV_FILE": str(env_file),
-                },
-            )
-
-            self.assertEqual(env_file.read_text(encoding="utf-8").strip(), "PROVIDER_API_KEY=present")
-            self.assertIn("PROVIDER_API_KEY <- FORGIS_MODEL_API_KEY: present", result.stdout)
-            self.assertNotIn(secret_value, result.stdout)
-            self.assertNotIn(secret_value, (runtime / "aider_command_summary.md").read_text(encoding="utf-8"))
-            self.assertNotIn(secret_value, (runtime / "aider_message_diagnostics.md").read_text(encoding="utf-8"))
-            self.assertNotIn(secret_value, prompt.read_text(encoding="utf-8"))
-
-    def test_run_aider_fails_before_model_call_when_required_secret_is_missing(self) -> None:
-        with self.make_temp_target() as dirname:
-            root = Path(dirname)
-            target, runtime, prompt, args_file, fake_bin = self.make_run_aider_fixture(
-                root,
-                fake_help="Usage: aider\n  --subtree-only\n  --no-gitignore\n",
-            )
-
-            result = self.run_fake_aider(
-                target,
-                runtime,
-                prompt,
-                args_file,
-                fake_bin,
-                extra_env={"MODEL_ENV_JSON": '{"PROVIDER_API_KEY": "FORGIS_MODEL_API_KEY"}'},
-                check=False,
-            )
-
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("Required model secret env `FORGIS_MODEL_API_KEY` is not available", result.stdout)
-            self.assertFalse(args_file.exists())
-
-    def test_run_aider_cleans_new_root_tags_cache_even_when_aider_fails(self) -> None:
-        with self.make_temp_target() as dirname:
-            root = Path(dirname)
-            target, runtime, prompt, args_file, fake_bin = self.make_run_aider_fixture(
-                root,
-                fake_help="Usage: aider\n  --subtree-only\n  --no-gitignore\n",
-            )
-
-            result = self.run_fake_aider(
-                target,
-                runtime,
-                prompt,
-                args_file,
-                fake_bin,
-                extra_env={
-                    "CREATE_AIDER_TAGS_CACHE": "yes",
-                    "FAKE_AIDER_EXIT": "42",
-                },
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 42)
-            self.assertIn("Root Aider tags cache cleanup removed: .aider.tags.cache.v4", result.stdout)
-            self.assertIn("Target writable scope verification passed.", result.stdout)
-            self.assertFalse((target / ".aider.tags.cache.v4").exists())
-            self.assertIn("Aider exited with status 42.", result.stdout)
-
-    def test_validate_workflow_uses_generic_validation_marker(self) -> None:
-        workflow_text = (REPO_ROOT / ".github/workflows/validate-forgis.yml").read_text(encoding="utf-8")
-
-        self.assertIn("Forgis Validation Smoke Task", workflow_text)
-        self.assertNotIn("Sample App Migration Task", workflow_text)
-
-    def test_root_gitignore_violation_and_safe_aider_cleanup(self) -> None:
-        with self.make_temp_target() as dirname:
-            target = Path(dirname)
-            subprocess.run(["git", "init"], cwd=target, check=True, stdout=subprocess.PIPE, text=True)
-            (target / "sample-output").mkdir()
-
-            snapshot = root_gitignore_snapshot(target)
-            self.assertFalse(snapshot["exists"])
-            self.assertIsNone(snapshot["sha256"])
-            self.assertEqual(root_gitignore_state_text(snapshot), "exists=false sha256=null")
-
-            snapshot_output = target / "snapshot.json"
-            snapshot_result = subprocess.run(
+    def test_source_repo_readonly_guardrail(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            source = Path(dirname)
+            source.mkdir(exist_ok=True)
+            self.init_git_repo(source)
+            (source / "tracked.txt").write_text("clean", encoding="utf-8")
+            self.commit_all(source)
+            (source / "tracked.txt").write_text("dirty", encoding="utf-8")
+            result = self.run_cmd(
                 [
                     sys.executable,
                     str(AGENT_DIR / "guardrails.py"),
-                    "snapshot-root-gitignore",
-                    "--target",
-                    str(target),
-                    "--output",
-                    str(snapshot_output),
+                    "check-source-clean",
+                    "--source",
+                    str(source),
                 ],
-                cwd=REPO_ROOT,
-                check=True,
-                stdout=subprocess.PIPE,
-                text=True,
+                check=False,
             )
-            self.assertIn("exists=false sha256=null", snapshot_result.stdout)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("source repository was modified", result.stdout)
 
-            (target / ".gitignore").write_text(".aider*\n.aider.chat.history.md\n", encoding="utf-8")
-            self.assertTrue(cleanup_aider_root_gitignore(target, snapshot))
-            self.assertFalse((target / ".gitignore").exists())
-
-            (target / ".gitignore").write_text("user-rule\n", encoding="utf-8")
-            snapshot = root_gitignore_snapshot(target)
-            (target / ".gitignore").write_text("user-rule\n.aider*\n", encoding="utf-8")
-            self.assertFalse(cleanup_aider_root_gitignore(target, snapshot))
-            self.assertTrue((target / ".gitignore").exists())
-
-            violations = target_scope_violations([".gitignore"], "sample-output", [])
-            self.assertEqual(violations, [".gitignore"])
-
-    def test_root_aider_tags_cache_violation_and_safe_cleanup(self) -> None:
-        with self.make_temp_target() as dirname:
-            target = Path(dirname)
-            subprocess.run(["git", "init"], cwd=target, check=True, stdout=subprocess.PIPE, text=True)
-            (target / "sample-output").mkdir()
-
-            snapshot = root_tags_cache_snapshot(target)
-            self.assertEqual(root_tags_cache_state_text(snapshot), "none")
-
-            cache_dir = target / ".aider.tags.cache.v4"
-            cache_dir.mkdir()
-            (cache_dir / "cache.db").write_text("sqlite cache", encoding="utf-8")
-            self.assertEqual(cleanup_aider_tags_cache(target, snapshot), [".aider.tags.cache.v4"])
-            self.assertFalse(cache_dir.exists())
-
-            cache_dir.mkdir()
-            (cache_dir / "cache.db").write_text("existing cache", encoding="utf-8")
-            snapshot = root_tags_cache_snapshot(target)
-            (cache_dir / "cache.db").write_text("changed cache", encoding="utf-8")
-            self.assertEqual(cleanup_aider_tags_cache(target, snapshot), [])
-            self.assertTrue(cache_dir.exists())
-
-            violations = target_scope_violations([".aider.tags.cache.v4/cache.db"], "sample-output", [])
-            self.assertEqual(violations, [".aider.tags.cache.v4/cache.db"])
-
-    def test_main_workflow_ui_only_exposes_target_repo(self) -> None:
-        workflow = yaml.load(
-            (REPO_ROOT / ".github/workflows/migrate.yml").read_text(encoding="utf-8"),
-            Loader=yaml.BaseLoader,
+    def test_model_env_does_not_print_secret_value(self) -> None:
+        secret = "super-secret-value"
+        result = self.run_cmd(
+            [
+                sys.executable,
+                str(AGENT_DIR / "model_env.py"),
+                "--json",
+                json.dumps({"PROVIDER_API_KEY": "PROVIDER_API_KEY"}),
+            ],
+            env={**os.environ, "PROVIDER_API_KEY": secret},
         )
+        self.assertIn("PROVIDER_API_KEY\tPROVIDER_API_KEY", result.stdout)
+        self.assertNotIn(secret, result.stdout)
 
-        inputs = workflow["on"]["workflow_dispatch"]["inputs"]
-
-        self.assertEqual(list(inputs.keys()), ["target_repo"])
-        self.assertEqual(inputs["target_repo"]["required"], "true")
-        for hidden_input in [
-            "source_repo",
-            "config_path",
-            "source_ref",
-            "dry_run",
-            "run_aider",
-            "target_platform",
-            "target_stack",
-            "migration_profile",
-            "target_subdir",
-            "task_prompt_path",
-            "run_log_path",
-            "model",
-            "target_branch",
-            "target_base_branch",
-            "target_prompt_file",
-            "task_prompt_file",
-            "aider_model",
-            "base_branch",
-        ]:
-            self.assertNotIn(hidden_input, inputs)
-
-    def test_main_workflow_uses_fixed_config_path(self) -> None:
-        workflow_text = (REPO_ROOT / ".github/workflows/migrate.yml").read_text(encoding="utf-8")
-
-        self.assertIn("FORGIS_CONFIG.yml", workflow_text)
-        self.assertNotIn("${{ inputs.config_path }}", workflow_text)
-
-    def test_dry_run_log_is_preview_only_and_does_not_modify_target_repo(self) -> None:
-        with self.make_temp_target() as dirname:
+    def test_run_aider_false_and_dry_run_do_not_call_aider(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
             target = Path(dirname)
-            preview = target / "preview.md"
+            self.write_default_config(
+                target,
+                extra="run_agent: false\ndry_run: false\nconfirm_real_run: true\n",
+            )
+            resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
+            self.assertFalse(resolved.run_agent)
 
-            subprocess.run(
+            self.write_default_config(
+                target,
+                extra="run_agent: true\ndry_run: true\nconfirm_real_run: false\n",
+            )
+            resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
+            self.assertFalse(resolved.run_agent)
+
+    def test_run_aider_invocation_uses_no_marker_file_and_creates_output(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target, runtime, fake_bin, message, args_file = self.make_run_aider_fixture(root)
+            env = {
+                **os.environ,
+                "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
+                "RUNNER_TEMP": str(runtime / "runner-temp"),
+                "FAKE_AIDER_ARGS": str(args_file),
+                "SOURCE_REPO_DIR": str(source),
+                "TARGET_REPO_DIR": str(target),
+                "FORGIS_PROMPT_FILE": str(message),
+                "AIDER_MODEL": "provider/model-name",
+                "TARGET_SUBDIR": "target-output",
+                "CONFIG_PATH": "FORGIS_CONFIG.yml",
+                "TASK_PROMPT_PATH": "FORGIS_TASK.md",
+                "RUN_LOG_PATH": "target-output/FORGIS_LOG.md",
+                "DRY_RUN": "false",
+                "RUN_AGENT": "true",
+                "MODEL_ENV_JSON": "{}",
+                "SUCCESS_CHECKS_JSON": json.dumps([{"path_exists": "result/output.txt"}]),
+            }
+            result = self.run_cmd(["bash", str(AGENT_DIR / "run_aider.sh")], env=env)
+            self.assertEqual(result.returncode, 0)
+            args_text = args_file.read_text(encoding="utf-8")
+            self.assertIn("--message-file", args_text)
+            self.assertIn("--read", args_text)
+            self.assertNotIn(".forgis-write-scope.md", args_text)
+            self.assertTrue((target / "target-output/result/output.txt").is_file())
+
+    def test_aider_root_cache_is_cleaned(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target, runtime, fake_bin, message, args_file = self.make_run_aider_fixture(root)
+            env = {
+                **os.environ,
+                "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
+                "RUNNER_TEMP": str(runtime / "runner-temp"),
+                "FAKE_AIDER_ARGS": str(args_file),
+                "FAKE_AIDER_ROOT_CACHE": "yes",
+                "SOURCE_REPO_DIR": str(source),
+                "TARGET_REPO_DIR": str(target),
+                "FORGIS_PROMPT_FILE": str(message),
+                "AIDER_MODEL": "provider/model-name",
+                "TARGET_SUBDIR": "target-output",
+                "CONFIG_PATH": "FORGIS_CONFIG.yml",
+                "TASK_PROMPT_PATH": "FORGIS_TASK.md",
+                "RUN_LOG_PATH": "target-output/FORGIS_LOG.md",
+                "DRY_RUN": "false",
+                "RUN_AGENT": "true",
+                "MODEL_ENV_JSON": "{}",
+                "SUCCESS_CHECKS_JSON": json.dumps([{"path_exists": "result/output.txt"}]),
+            }
+            self.run_cmd(["bash", str(AGENT_DIR / "run_aider.sh")], env=env)
+            self.assertFalse((target / ".aider.tags.cache.v4").exists())
+
+    def test_log_only_aider_output_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target, runtime, fake_bin, message, args_file = self.make_run_aider_fixture(root)
+            env = {
+                **os.environ,
+                "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
+                "RUNNER_TEMP": str(runtime / "runner-temp"),
+                "FAKE_AIDER_ARGS": str(args_file),
+                "FAKE_AIDER_LOG_ONLY": "yes",
+                "SOURCE_REPO_DIR": str(source),
+                "TARGET_REPO_DIR": str(target),
+                "FORGIS_PROMPT_FILE": str(message),
+                "AIDER_MODEL": "provider/model-name",
+                "TARGET_SUBDIR": "target-output",
+                "CONFIG_PATH": "FORGIS_CONFIG.yml",
+                "TASK_PROMPT_PATH": "FORGIS_TASK.md",
+                "RUN_LOG_PATH": "target-output/FORGIS_LOG.md",
+                "DRY_RUN": "false",
+                "RUN_AGENT": "true",
+                "MODEL_ENV_JSON": "{}",
+                "SUCCESS_CHECKS_JSON": "[]",
+            }
+            result = self.run_cmd(["bash", str(AGENT_DIR / "run_aider.sh")], env=env, check=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("no non-log, non-cache changes", result.stdout)
+
+    def test_validation_commands_are_config_only(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            target = Path(dirname)
+            self.write_default_config(
+                target,
+                extra='validation_commands:\n  - "test -f result/output.txt"\n',
+            )
+            (target / "target-output/result").mkdir(parents=True)
+            (target / "target-output/result/output.txt").write_text("ok", encoding="utf-8")
+            resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
+            env = {
+                **os.environ,
+                "TARGET_REPO_DIR": str(target),
+                "TARGET_SUBDIR": "target-output",
+                "VALIDATION_COMMANDS_JSON": json.dumps(list(resolved.validation_commands)),
+            }
+            result = self.run_cmd(["bash", str(AGENT_DIR / "build_target.sh")], env=env)
+            self.assertIn("Configured validation_commands completed successfully.", result.stdout)
+
+    def test_success_checks_are_config_only(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            target = Path(dirname)
+            output = target / "target-output/result/output.txt"
+            output.parent.mkdir(parents=True)
+            output.write_text("ok", encoding="utf-8")
+            snapshot = target / "before.json"
+            snapshot.write_text("{}\n", encoding="utf-8")
+            result = self.run_cmd(
                 [
                     sys.executable,
-                    str(AGENT_DIR / "write_run_log.py"),
+                    str(AGENT_DIR / "validate_target_output.py"),
+                    "validate",
                     "--target",
                     str(target),
-                    "--source-repo",
-                    "owner/source",
-                    "--source-ref",
-                    "main",
-                    "--target-repo",
-                    "owner/target",
-                    "--target-base-branch",
-                    "main",
-                    "--target-branch",
-                    "forgis/test",
-                    "--target-platform",
-                    "android",
-                    "--target-stack",
-                    "kotlin-compose",
-                    "--migration-profile",
-                    "default",
                     "--target-subdir",
-                    "sample-output",
-                    "--task-prompt-path",
-                    "FORGIS_TASK.md",
-                    "--config-path",
-                    "FORGIS_CONFIG.yml",
-                    "--model",
-                    "provider/model-name",
-                    "--dry-run",
-                    "true",
-                    "--run-aider",
-                    "false",
-                    "--run-aider-config",
-                    "true",
-                    "--confirm-real-run",
-                    "false",
-                    "--append-target-log",
-                    "true",
-                    "--preview-output",
-                    str(preview),
-                ],
-                cwd=REPO_ROOT,
-                check=True,
-                text=True,
+                    "target-output",
+                    "--run-log-path",
+                    "target-output/FORGIS_LOG.md",
+                    "--snapshot",
+                    str(snapshot),
+                    "--success-checks-json",
+                    json.dumps([{"path_exists": "result/output.txt"}]),
+                ]
             )
+            self.assertIn("Generic target output validation passed.", result.stdout)
 
-            self.assertTrue(preview.is_file())
-            self.assertIn("dry_run=true, Aider execution is disabled.", preview.read_text(encoding="utf-8"))
-            self.assertFalse((target / "sample-output" / "FORGIS_LOG.md").exists())
+    def test_no_success_or_validation_checks_means_no_platform_assumption(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            target = Path(dirname)
+            subdir = target / "target-output"
+            subdir.mkdir()
+            before = files_snapshot(subdir)
+            (subdir / "plain.txt").write_text("ok", encoding="utf-8")
+            changed = meaningful_changes(
+                sorted(set(before) | set(files_snapshot(subdir))),
+                "FORGIS_LOG.md",
+            )
+            self.assertEqual(changed, ["plain.txt"])
 
-    def test_forgis_tree_has_no_real_project_hardcoding(self) -> None:
-        forbidden_fragments = [
-            "Vita" + "0818",
-            "Kika" + "ria",
-            "Out" + "posts",
+    def test_source_context_selected_files_uses_only_config_patterns(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source = root / "source"
+            source.mkdir()
+            (source / "include.txt").write_text("include me", encoding="utf-8")
+            (source / "skip.txt").write_text("skip me", encoding="utf-8")
+            (source / "nested").mkdir()
+            (source / "nested/include.md").write_text("include nested", encoding="utf-8")
+            output = root / "source_context.md"
+            self.run_cmd(
+                [
+                    sys.executable,
+                    str(AGENT_DIR / "collect_source.py"),
+                    "--source",
+                    str(source),
+                    "--mode",
+                    "selected_files",
+                    "--max-chars",
+                    "100000",
+                    "--include-json",
+                    json.dumps(["include.txt", "nested/*.md"]),
+                    "--exclude-json",
+                    json.dumps(["skip.txt"]),
+                    "--output",
+                    str(output),
+                ]
+            )
+            text = output.read_text(encoding="utf-8")
+            self.assertIn("include.txt", text)
+            self.assertIn("nested/include.md", text)
+            self.assertNotIn("skip.txt", text)
+
+    def test_no_real_business_hardcoding(self) -> None:
+        banned = (
+            "Sample App",
+            "sample-output",
+            "pixel-clone",
+            "deepseek/deepseek",
+        )
+        files = [
+            path
+            for path in REPO_ROOT.rglob("*")
+            if path.is_file()
+            and ".git" not in path.parts
+            and "__pycache__" not in path.parts
+            and path.relative_to(REPO_ROOT).parts[0] not in {"tmp", "temp", "tests"}
         ]
-        scan_roots = [
-            REPO_ROOT / ".github",
-            REPO_ROOT / "agent",
-            REPO_ROOT / "prompts",
-            REPO_ROOT / "rules",
-            REPO_ROOT / "tests",
-            REPO_ROOT / "README.md",
-        ]
-        scanned_suffixes = {".md", ".py", ".sh", ".yml", ".yaml", ".txt"}
-        hits: list[str] = []
-
-        for root in scan_roots:
-            paths = [root] if root.is_file() else sorted(root.rglob("*"))
-            for path in paths:
-                if not path.is_file() or path.suffix not in scanned_suffixes:
-                    continue
-                text = path.read_text(encoding="utf-8", errors="replace")
-                for fragment in forbidden_fragments:
-                    if fragment in text:
-                        hits.append(f"{path.relative_to(REPO_ROOT)}: {fragment}")
-
-        self.assertEqual(hits, [])
+        for path in files:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            for marker in banned:
+                self.assertNotIn(marker, text, f"{marker} found in {path}")
 
 
 if __name__ == "__main__":
