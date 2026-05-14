@@ -12,4 +12,4 @@ Use this stack for HarmonyOS applications.
 
 - Preserve product behavior before visual perfection.
 - Do not invent signing or distribution settings.
-- Record unsupported platform APIs in `MIGRATION_REPORT.md`.
+- Record unsupported platform APIs in notes under the target output directory.

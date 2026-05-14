@@ -36,6 +36,12 @@ if [[ -z "${DRY_RUN:-}" ]]; then
   exit 1
 fi
 
+TARGET_SUBDIR="${TARGET_SUBDIR:-forgis-output}"
+RUN_LOG_PATH="${RUN_LOG_PATH:-$TARGET_SUBDIR/FORGIS_LOG.md}"
+CONFIG_PATH="${CONFIG_PATH:-FORGIS_CONFIG.yml}"
+TASK_PROMPT_PATH="${TASK_PROMPT_PATH:-FORGIS_TASK.md}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 if [[ ! -d "$TARGET_REPO_DIR" ]]; then
   echo "Target repository directory does not exist: $TARGET_REPO_DIR" >&2
   exit 1
@@ -66,6 +72,12 @@ BASE_REF="origin/$TARGET_BASE_BRANCH"
 
 git checkout -B "$TARGET_BRANCH"
 
+python3 "$SCRIPT_DIR/guardrails.py" check-target-scope \
+  --target "$TARGET_REPO_DIR" \
+  --target-subdir "$TARGET_SUBDIR" \
+  --read-only-path "$CONFIG_PATH" \
+  --read-only-path "$TASK_PROMPT_PATH"
+
 if [[ -n "$(git status --porcelain)" ]]; then
   git add .
 
@@ -89,7 +101,7 @@ if [[ "$DRY_RUN_NORMALIZED" == "true" ]]; then
 fi
 
 echo "Pushing branch: $TARGET_BRANCH"
-git push --force-with-lease origin "$TARGET_BRANCH"
+git push -u origin "$TARGET_BRANCH"
 
 echo "Creating pull request..."
 
@@ -101,5 +113,5 @@ else
     --base "$TARGET_BASE_BRANCH" \
     --head "$TARGET_BRANCH" \
     --title "Forgis sync: source to $TARGET_PLATFORM" \
-    --body-file MIGRATION_REPORT.md
+    --body-file "$RUN_LOG_PATH"
 fi

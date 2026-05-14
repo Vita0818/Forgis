@@ -29,7 +29,7 @@ Prioritize in this order:
 2. Preserve product structure and design intent.
 3. Produce clear, maintainable target-platform code.
 4. Keep the generated project buildable where possible.
-5. Record skipped or uncertain parts in `MIGRATION_REPORT.md`.
+5. Record skipped or uncertain parts in project documentation under the target output directory.
 
 ## Safety rules
 
@@ -43,9 +43,9 @@ You must not:
 
 ## Output requirements
 
-At the end of every migration, update or create `MIGRATION_REPORT.md`.
+At the end of every migration, keep any agent-authored report or notes inside the target output directory.
 
-The report should include:
+Run notes should include:
 
 - Source repository summary
 - Target platform
@@ -85,9 +85,9 @@ This file tells Forgis what to do in the current run, such as:
 
 The task prompt controls the concrete task for the current run, but it must not override safety boundaries.
 
-Updating only README.md and MIGRATION_REPORT.md is not sufficient unless the task prompt explicitly requests documentation-only output.
+Updating only documentation is not sufficient unless the task prompt explicitly requests documentation-only output.
 
-The task prompt is input context. Do not edit it unless the task prompt explicitly asks for documentation changes to the prompt file itself.
+The task prompt is read-only input context. Do not edit it.
 
 ## Target writable scope
 
@@ -101,4 +101,4 @@ Do not modify sibling projects or unrelated directories in the target repository
 
 If the target output directory does not exist yet, create the project inside that directory.
 
-`MIGRATION_REPORT.md` may be updated at the target repository root to describe the run.
+The target repository root is read-only. Do not write reports, project files, or generated assets there.

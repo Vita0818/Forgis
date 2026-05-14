@@ -10,7 +10,9 @@ from pathlib import Path
 
 DEFAULT_MAX_SOURCE_BUNDLE_CHARS = 900_000
 DEFAULT_TARGET_SUBDIR = "forgis-output"
-GREETING_EXAMPLE = "make the greeting more casual"
+DEFAULT_CONFIG_PATH = "FORGIS_CONFIG.yml"
+DEFAULT_RUN_LOG_FILENAME = "FORGIS_LOG.md"
+GREETING_EXAMPLE = " ".join(("make", "the", "greeting", "more", "casual"))
 
 
 def read_text(path: Path) -> str:
@@ -41,6 +43,28 @@ def resolve_inside_root(root: Path, relative_path: str, label: str, allow_root: 
 
     resolved_relative = resolved.relative_to(root_resolved).as_posix()
     return resolved, resolved_relative
+
+
+def require_path_inside_directory(
+    root: Path,
+    directory_relative: str,
+    file_relative: str,
+    label: str,
+) -> tuple[Path, str]:
+    directory_path, directory_normalized = resolve_inside_root(
+        root,
+        directory_relative,
+        "Target output directory",
+    )
+    file_path, file_normalized = resolve_inside_root(root, file_relative, label)
+
+    if file_path == directory_path or not file_path.is_relative_to(directory_path):
+        raise ValueError(
+            f"{label} must be located inside target_subdir "
+            f"'{directory_normalized}/': {file_relative}"
+        )
+
+    return file_path, file_normalized
 
 
 def read_target_prompt(path: Path) -> str:
@@ -126,6 +150,12 @@ def main() -> None:
     parser.add_argument("--task-prompt-path", required=False, help="Task prompt path relative to the target repository root")
     parser.add_argument("--target-prompt-file", required=False, help="Deprecated alias for --task-prompt-path")
     parser.add_argument(
+        "--config-path",
+        required=False,
+        default=DEFAULT_CONFIG_PATH,
+        help="Config path relative to the target repository root.",
+    )
+    parser.add_argument(
         "--require-task-prompt",
         action="store_true",
         help="Fail if the target repository task prompt is missing or empty.",
@@ -135,6 +165,11 @@ def main() -> None:
         required=False,
         default=DEFAULT_TARGET_SUBDIR,
         help="Target output directory relative to the target repository root.",
+    )
+    parser.add_argument(
+        "--run-log-path",
+        required=False,
+        help="Long-term run log path relative to the target repository root. Must be inside target_subdir.",
     )
     parser.add_argument(
         "--max-source-bundle-chars",
@@ -172,10 +207,18 @@ def main() -> None:
         source_manifest_text = read_text(source_manifest_path)
 
     task_prompt_input = args.task_prompt_path or args.target_prompt_file
+    config_input = args.config_path or DEFAULT_CONFIG_PATH
     target_prompt_text = "[No target repository task prompt provided.]"
     target_prompt_path: Path | None = None
     target_prompt_relative = "[not provided]"
     target_prompt_found = False
+
+    config_path, config_relative = resolve_inside_root(
+        target,
+        config_input,
+        "Config path",
+    )
+    config_found = config_path.is_file()
 
     if task_prompt_input:
         target_prompt_path, target_prompt_relative = resolve_inside_root(
@@ -194,6 +237,14 @@ def main() -> None:
         "Target output directory",
     )
 
+    run_log_input = args.run_log_path or f"{target_subdir_relative}/{DEFAULT_RUN_LOG_FILENAME}"
+    run_log_path, run_log_relative = require_path_inside_directory(
+        target,
+        target_subdir_relative,
+        run_log_input,
+        "Run log path",
+    )
+
     print("Forgis migration prompt inputs:")
     print(f"  source path: {source}")
     print(f"  target path: {target}")
@@ -206,8 +257,13 @@ def main() -> None:
     print(f"  task prompt found: {'yes' if target_prompt_found else 'no'}")
     print(f"  task prompt character count: {len(target_prompt_text)}")
     print_preview("  task prompt preview", target_prompt_text, max_lines=10)
+    print(f"  config resolved relative path: {config_relative}")
+    print(f"  config resolved absolute path: {config_path}")
+    print(f"  config found: {'yes' if config_found else 'no'}")
     print(f"  target writable scope relative path: {target_subdir_relative}")
     print(f"  target writable scope absolute path: {target_subdir_path}")
+    print(f"  long-term run log relative path: {run_log_relative}")
+    print(f"  long-term run log absolute path: {run_log_path}")
 
     if args.require_task_prompt and not target_prompt_found:
         raise FileNotFoundError(f"Target repository task prompt does not exist: {target_prompt_path}")
@@ -333,6 +389,18 @@ It must be followed unless it conflicts with:
 
 ---
 
+# Target Repository Config
+
+Config file path relative to target repository root: {config_relative}
+
+Config file found: {'yes' if config_found else 'no'}
+
+The config file is machine-readable input context. It is read-only.
+
+Do not edit the config file `{config_relative}`.
+
+---
+
 # Target Writable Scope
 
 Target output directory relative to target repository root: {target_subdir_relative}
@@ -341,9 +409,15 @@ Write generated or modified project files only under this target output director
 
 Do not edit the task prompt file `{target_prompt_relative}`.
 
+Do not edit the config file `{config_relative}`.
+
 Do not scatter target project files into the target repository root.
 
-`MIGRATION_REPORT.md` may be updated at the target repository root for run reporting.
+Do not modify sibling project directories or any file outside `{target_subdir_relative}/`.
+
+Forgis will append the long-term run log at `{run_log_relative}`.
+
+This run log is inside the writable target output directory.
 
 ---
 
@@ -359,9 +433,9 @@ Target path: {target}
 
 Update the target repository according to the selected platform, stack, and migration profile.
 
-Always create or update MIGRATION_REPORT.md.
+Write all generated source, resources, build files, and project documentation inside `{target_subdir_relative}/`.
 
-If the migration cannot be completed safely, write the reason into MIGRATION_REPORT.md and stop.
+If the migration cannot be completed safely, write a short note inside `{target_subdir_relative}/` and stop.
 """
 
     if GREETING_EXAMPLE in target_prompt_text.casefold():
