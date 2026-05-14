@@ -141,7 +141,7 @@ def main() -> None:
     parser.add_argument("--task-prompt-path", required=False, default="FORGIS_TASK.md")
     parser.add_argument("--target-subdir", required=False, default="forgis-output")
     parser.add_argument("--run-log-path", required=False, default="")
-    parser.add_argument("--model", required=False, default="deepseek/deepseek-v4-pro")
+    parser.add_argument("--model", required=False, default="provider/model-name")
     parser.add_argument("--dry-run", required=True, help="Whether to avoid pushing changes")
     parser.add_argument("--run-ai", required=True, help="Whether Aider migration is enabled")
     parser.add_argument("--confirm-real-run", required=False, default="false")

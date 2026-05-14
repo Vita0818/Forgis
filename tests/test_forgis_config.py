@@ -34,15 +34,15 @@ class ForgisConfigTests(unittest.TestCase):
         (target / "FORGIS_CONFIG.yml").write_text(
             "\n".join(
                 [
-                    "source_repo: Vita0818/Kikaria",
+                    "source_repo: owner/source-repo",
                     "source_ref: main",
                     "target_platform: android",
                     "target_stack: kotlin-compose",
                     "migration_profile: pixel-clone-app",
-                    "target_subdir: Kikaria-Android",
+                    "target_subdir: sample-output",
                     "task_prompt_path: FORGIS_TASK.md",
-                    "model: deepseek/deepseek-v4-pro",
-                    "target_branch: forgis/kikaria-android-pixel-2",
+                    "model: provider/model-name",
+                    "target_branch: forgis/migration-output",
                     "target_base_branch: main",
                     "dry_run: true",
                     "run_aider: false",
@@ -74,15 +74,14 @@ class ForgisConfigTests(unittest.TestCase):
 
             resolved = resolve_config(
                 target_root=target,
-                target_repo="Vita0818/Outposts",
+                target_repo="owner/target-repo",
                 config_path="FORGIS_CONFIG.yml",
-                explicit_inputs={},
             )
 
-            self.assertEqual(resolved.source_repo, "Vita0818/Kikaria")
+            self.assertEqual(resolved.source_repo, "owner/source-repo")
             self.assertEqual(resolved.task_prompt_path, "FORGIS_TASK.md")
-            self.assertEqual(resolved.target_subdir, "Kikaria-Android")
-            self.assertEqual(resolved.run_log_path, "Kikaria-Android/FORGIS_LOG.md")
+            self.assertEqual(resolved.target_subdir, "sample-output")
+            self.assertEqual(resolved.run_log_path, "sample-output/FORGIS_LOG.md")
             self.assertTrue(resolved.dry_run)
             self.assertFalse(resolved.run_aider_config)
             self.assertFalse(resolved.confirm_real_run)
@@ -97,9 +96,8 @@ class ForgisConfigTests(unittest.TestCase):
 
             resolved = resolve_config(
                 target_root=target,
-                target_repo="Vita0818/Outposts",
+                target_repo="owner/target-repo",
                 config_path="FORGIS_CONFIG.yml",
-                explicit_inputs={},
             )
 
             self.assertTrue(resolved.dry_run)
@@ -113,26 +111,25 @@ class ForgisConfigTests(unittest.TestCase):
             self.write_default_config(target)
             with (target / "FORGIS_CONFIG.yml").open("a", encoding="utf-8") as file:
                 file.write("required_prompt_markers:\n")
-                file.write("  - Kikaria Android Migration Task\n")
-                file.write("  - Kikaria-Android\n")
+                file.write("  - Sample App Migration Task\n")
+                file.write("  - sample-output\n")
                 file.write("forbidden_prompt_markers:\n")
                 file.write("  - Deprecated fallback prompt\n")
 
             resolved = resolve_config(
                 target_root=target,
-                target_repo="Vita0818/Outposts",
+                target_repo="owner/target-repo",
                 config_path="FORGIS_CONFIG.yml",
-                explicit_inputs={},
             )
 
             self.assertEqual(
                 resolved.required_prompt_markers,
-                ("Kikaria Android Migration Task", "Kikaria-Android"),
+                ("Sample App Migration Task", "sample-output"),
             )
             self.assertIn("make the greeting more casual", resolved.forbidden_prompt_markers)
             self.assertIn("Deprecated fallback prompt", resolved.forbidden_prompt_markers)
             self.assertIn(
-                '"Kikaria Android Migration Task"',
+                '"Sample App Migration Task"',
                 resolved.env()["REQUIRED_PROMPT_MARKERS_JSON"],
             )
 
@@ -141,14 +138,13 @@ class ForgisConfigTests(unittest.TestCase):
             target = Path(dirname)
             self.write_default_config(target)
             with (target / "FORGIS_CONFIG.yml").open("a", encoding="utf-8") as file:
-                file.write("required_prompt_markers: Kikaria Android Migration Task\n")
+                file.write("required_prompt_markers: Sample App Migration Task\n")
 
             with self.assertRaisesRegex(ValueError, "required_prompt_markers must be a YAML list"):
                 resolve_config(
                     target_root=target,
-                    target_repo="Vita0818/Outposts",
+                    target_repo="owner/target-repo",
                     config_path="FORGIS_CONFIG.yml",
-                    explicit_inputs={},
                 )
 
     def test_dry_run_false_requires_confirm_real_run(self) -> None:
@@ -165,9 +161,8 @@ class ForgisConfigTests(unittest.TestCase):
             ):
                 resolve_config(
                     target_root=target,
-                    target_repo="Vita0818/Outposts",
+                    target_repo="owner/target-repo",
                     config_path="FORGIS_CONFIG.yml",
-                    explicit_inputs={},
                 )
 
     def test_real_ai_migration_requires_all_three_config_flags(self) -> None:
@@ -181,9 +176,8 @@ class ForgisConfigTests(unittest.TestCase):
 
             resolved = resolve_config(
                 target_root=target,
-                target_repo="Vita0818/Outposts",
+                target_repo="owner/target-repo",
                 config_path="FORGIS_CONFIG.yml",
-                explicit_inputs={},
             )
 
             self.assertFalse(resolved.dry_run)
@@ -192,37 +186,21 @@ class ForgisConfigTests(unittest.TestCase):
             self.assertTrue(resolved.real_run_allowed)
             self.assertTrue(resolved.run_aider)
 
-    def test_missing_config_requires_configured_fields(self) -> None:
+    def test_missing_config_fails_clearly(self) -> None:
         with self.make_temp_target() as dirname:
             target = Path(dirname)
 
-            with self.assertRaisesRegex(ValueError, "Missing required Forgis migration parameters"):
+            with self.assertRaisesRegex(FileNotFoundError, "Config file not found"):
                 resolve_config(
                     target_root=target,
                     target_repo="owner/target",
                     config_path="FORGIS_CONFIG.yml",
-                    explicit_inputs={"source_repo": "owner/source"},
                 )
 
-    def test_source_repo_workflow_override_is_the_only_config_override(self) -> None:
-        with self.make_temp_target() as dirname:
-            target = Path(dirname)
-            self.write_default_config(target)
+    def test_resolve_config_cli_has_no_source_repo_override_argument(self) -> None:
+        resolver_text = (AGENT_DIR / "resolve_config.py").read_text(encoding="utf-8")
 
-            resolved = resolve_config(
-                target_root=target,
-                target_repo="Vita0818/Outposts",
-                config_path="FORGIS_CONFIG.yml",
-                explicit_inputs={
-                    "source_repo": "Override/Source",
-                    "target_stack": "ignored-stack",
-                    "target_branch": "ignored-branch",
-                },
-            )
-
-            self.assertEqual(resolved.source_repo, "Override/Source")
-            self.assertEqual(resolved.target_stack, "kotlin-compose")
-            self.assertEqual(resolved.target_branch, "forgis/kikaria-android-pixel-2")
+        self.assertNotIn("--source-repo", resolver_text)
 
     def test_run_log_must_be_inside_target_subdir(self) -> None:
         with self.make_temp_target() as dirname:
@@ -234,9 +212,8 @@ class ForgisConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "run_log_path must be located inside target_subdir"):
                 resolve_config(
                     target_root=target,
-                    target_repo="Vita0818/Outposts",
+                    target_repo="owner/target-repo",
                     config_path="FORGIS_CONFIG.yml",
-                    explicit_inputs={},
                 )
 
     def test_empty_and_invalid_config_fail_clearly(self) -> None:
@@ -248,7 +225,6 @@ class ForgisConfigTests(unittest.TestCase):
                     target_root=target,
                     target_repo="owner/target",
                     config_path="FORGIS_CONFIG.yml",
-                    explicit_inputs={},
                 )
 
             (target / "FORGIS_CONFIG.yml").write_text("source_repo: [", encoding="utf-8")
@@ -257,7 +233,6 @@ class ForgisConfigTests(unittest.TestCase):
                     target_root=target,
                     target_repo="owner/target",
                     config_path="FORGIS_CONFIG.yml",
-                    explicit_inputs={},
                 )
 
     def test_guardrails_detect_readonly_file_changes(self) -> None:
@@ -272,7 +247,7 @@ class ForgisConfigTests(unittest.TestCase):
 
     def test_guardrails_reject_target_changes_outside_subdir(self) -> None:
         changed = [
-            "Kikaria-Android/app/src/main/MainActivity.kt",
+            "sample-output/app/src/main/MainActivity.kt",
             "README.md",
             "FORGIS_TASK.md",
             "OtherProject/build.gradle.kts",
@@ -280,7 +255,7 @@ class ForgisConfigTests(unittest.TestCase):
 
         violations = target_scope_violations(
             changed,
-            "Kikaria-Android",
+            "sample-output",
             ["FORGIS_CONFIG.yml", "FORGIS_TASK.md"],
         )
 
@@ -311,9 +286,9 @@ class ForgisConfigTests(unittest.TestCase):
                     "--prompts",
                     str(REPO_ROOT / "prompts"),
                     "--source-repo",
-                    "Vita0818/Kikaria",
+                    "owner/source-repo",
                     "--target-repo",
-                    "Vita0818/Outposts",
+                    "owner/target-repo",
                     "--platform",
                     "android",
                     "--target-stack",
@@ -326,7 +301,7 @@ class ForgisConfigTests(unittest.TestCase):
                     "FORGIS_TASK.md",
                     "--require-task-prompt",
                     "--target-subdir",
-                    "Kikaria-Android",
+                    "sample-output",
                     "--output",
                     str(output),
                 ],
@@ -338,11 +313,11 @@ class ForgisConfigTests(unittest.TestCase):
             prompt = output.read_text(encoding="utf-8")
             self.assertIn("Build the Android target project.", prompt)
             self.assertIn("Task prompt sha256:", prompt)
-            self.assertIn("Source repository: Vita0818/Kikaria", prompt)
-            self.assertIn("Target repository: Vita0818/Outposts", prompt)
-            self.assertIn("Target output directory relative to target repository root: Kikaria-Android", prompt)
+            self.assertIn("Source repository: owner/source-repo", prompt)
+            self.assertIn("Target repository: owner/target-repo", prompt)
+            self.assertIn("Target output directory relative to target repository root: sample-output", prompt)
             self.assertIn("Config file path relative to target repository root: FORGIS_CONFIG.yml", prompt)
-            self.assertIn("Forgis will append the long-term run log at `Kikaria-Android/FORGIS_LOG.md`", prompt)
+            self.assertIn("Forgis will append the long-term run log at `sample-output/FORGIS_LOG.md`", prompt)
             self.assertNotIn(" ".join(("make", "the", "greeting", "more", "casual")), prompt)
 
     def test_build_prompt_fails_when_task_prompt_missing_or_empty(self) -> None:
@@ -373,7 +348,7 @@ class ForgisConfigTests(unittest.TestCase):
                 "FORGIS_TASK.md",
                 "--require-task-prompt",
                 "--target-subdir",
-                "Kikaria-Android",
+                "sample-output",
                 "--output",
                 str(target / "forgis_prompt.md"),
             ]
@@ -551,17 +526,17 @@ class ForgisConfigTests(unittest.TestCase):
                     text=True,
                 )
 
-    def test_validate_workflow_uses_generic_validation_marker_not_kikaria(self) -> None:
+    def test_validate_workflow_uses_generic_validation_marker(self) -> None:
         workflow_text = (REPO_ROOT / ".github/workflows/validate-forgis.yml").read_text(encoding="utf-8")
 
         self.assertIn("Forgis Validation Smoke Task", workflow_text)
-        self.assertNotIn("Kikaria Android Migration Task", workflow_text)
+        self.assertNotIn("Sample App Migration Task", workflow_text)
 
     def test_root_gitignore_violation_and_safe_aider_cleanup(self) -> None:
         with self.make_temp_target() as dirname:
             target = Path(dirname)
             subprocess.run(["git", "init"], cwd=target, check=True, stdout=subprocess.PIPE, text=True)
-            (target / "Kikaria-Android").mkdir()
+            (target / "sample-output").mkdir()
 
             snapshot = root_gitignore_snapshot(target)
             (target / ".gitignore").write_text(".aider*\n.aider.chat.history.md\n", encoding="utf-8")
@@ -574,10 +549,10 @@ class ForgisConfigTests(unittest.TestCase):
             self.assertFalse(cleanup_aider_root_gitignore(target, snapshot))
             self.assertTrue((target / ".gitignore").exists())
 
-            violations = target_scope_violations([".gitignore"], "Kikaria-Android", [])
+            violations = target_scope_violations([".gitignore"], "sample-output", [])
             self.assertEqual(violations, [".gitignore"])
 
-    def test_main_workflow_ui_only_exposes_target_and_source_repo(self) -> None:
+    def test_main_workflow_ui_only_exposes_target_repo(self) -> None:
         workflow = yaml.load(
             (REPO_ROOT / ".github/workflows/migrate.yml").read_text(encoding="utf-8"),
             Loader=yaml.BaseLoader,
@@ -585,10 +560,10 @@ class ForgisConfigTests(unittest.TestCase):
 
         inputs = workflow["on"]["workflow_dispatch"]["inputs"]
 
-        self.assertEqual(list(inputs.keys()), ["target_repo", "source_repo"])
+        self.assertEqual(list(inputs.keys()), ["target_repo"])
         self.assertEqual(inputs["target_repo"]["required"], "true")
-        self.assertEqual(inputs["source_repo"]["required"], "false")
         for hidden_input in [
+            "source_repo",
             "config_path",
             "source_ref",
             "dry_run",
@@ -643,13 +618,13 @@ class ForgisConfigTests(unittest.TestCase):
                     "--migration-profile",
                     "default",
                     "--target-subdir",
-                    "Kikaria-Android",
+                    "sample-output",
                     "--task-prompt-path",
                     "FORGIS_TASK.md",
                     "--config-path",
                     "FORGIS_CONFIG.yml",
                     "--model",
-                    "deepseek/deepseek-v4-pro",
+                    "provider/model-name",
                     "--dry-run",
                     "true",
                     "--run-aider",
@@ -670,7 +645,38 @@ class ForgisConfigTests(unittest.TestCase):
 
             self.assertTrue(preview.is_file())
             self.assertIn("dry_run=true, Aider execution is disabled.", preview.read_text(encoding="utf-8"))
-            self.assertFalse((target / "Kikaria-Android" / "FORGIS_LOG.md").exists())
+            self.assertFalse((target / "sample-output" / "FORGIS_LOG.md").exists())
+
+    def test_forgis_tree_has_no_real_project_hardcoding(self) -> None:
+        forbidden_fragments = [
+            "Vita" + "0818",
+            "Kika" + "ria",
+            "Out" + "posts",
+            "Deep" + "Seek",
+            "deep" + "seek",
+        ]
+        scan_roots = [
+            REPO_ROOT / ".github",
+            REPO_ROOT / "agent",
+            REPO_ROOT / "prompts",
+            REPO_ROOT / "rules",
+            REPO_ROOT / "tests",
+            REPO_ROOT / "README.md",
+        ]
+        scanned_suffixes = {".md", ".py", ".sh", ".yml", ".yaml", ".txt"}
+        hits: list[str] = []
+
+        for root in scan_roots:
+            paths = [root] if root.is_file() else sorted(root.rglob("*"))
+            for path in paths:
+                if not path.is_file() or path.suffix not in scanned_suffixes:
+                    continue
+                text = path.read_text(encoding="utf-8", errors="replace")
+                for fragment in forbidden_fragments:
+                    if fragment in text:
+                        hits.append(f"{path.relative_to(REPO_ROOT)}: {fragment}")
+
+        self.assertEqual(hits, [])
 
 
 if __name__ == "__main__":

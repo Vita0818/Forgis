@@ -14,7 +14,7 @@ DEFAULT_TARGET_BASE_BRANCH = "main"
 DEFAULT_MIGRATION_PROFILE = "default"
 DEFAULT_TASK_PROMPT_PATH = "FORGIS_TASK.md"
 DEFAULT_TARGET_SUBDIR = "forgis-output"
-DEFAULT_MODEL = "deepseek/deepseek-v4-pro"
+DEFAULT_MODEL = "provider/model-name"
 DEFAULT_RUN_LOG_FILENAME = "FORGIS_LOG.md"
 DEFAULT_FORBIDDEN_PROMPT_MARKERS = (
     "make the greeting more casual",
@@ -277,7 +277,6 @@ def resolve_config(
     target_root: Path,
     target_repo: str | None,
     config_path: str | None = DEFAULT_CONFIG_PATH,
-    explicit_inputs: dict[str, Any],
 ) -> ResolvedConfig:
     target_root = target_root.resolve()
     if not target_root.exists() or not target_root.is_dir():
@@ -285,21 +284,17 @@ def resolve_config(
 
     config_path_input = non_empty(config_path) or DEFAULT_CONFIG_PATH
     config_found, config, resolved_config_path = load_config_file(target_root, config_path_input)
+    if not config_found:
+        raise FileNotFoundError(f"Config file not found: {resolved_config_path}")
 
-    merged_inputs = dict(explicit_inputs)
-    merged_inputs["target_repo"] = non_empty(target_repo) or merged_inputs.get("target_repo")
-
-    source_repo_override = non_empty(merged_inputs.get("source_repo"))
-    source_repo_value = (
-        clean_single_line(source_repo_override, "source_repo")
-        if source_repo_override is not None
-        else select_value("source_repo", {}, config)
-    )
+    target_repo_value = non_empty(target_repo)
+    if target_repo_value is not None:
+        target_repo_value = clean_single_line(target_repo_value, "target_repo")
 
     values: dict[str, str | None] = {
-        "source_repo": source_repo_value,
+        "source_repo": select_value("source_repo", {}, config),
         "source_ref": select_value("source_ref", {}, config, DEFAULT_SOURCE_REF),
-        "target_repo": select_value("target_repo", merged_inputs, config),
+        "target_repo": target_repo_value,
         "target_platform": select_value("target_platform", {}, config),
         "target_stack": select_value("target_stack", {}, config),
         "migration_profile": select_value(
@@ -328,11 +323,10 @@ def resolve_config(
 
     missing = sorted(field for field in REQUIRED_FIELDS if not values.get(field))
     if missing:
-        source = f"{resolved_config_path} was not found" if not config_found else f"{resolved_config_path} is incomplete"
         raise ValueError(
             "Missing required Forgis migration parameters: "
             + ", ".join(missing)
-            + f". Provide them in FORGIS_CONFIG.yml; only source_repo can be overridden by workflow input. {source}."
+            + f". Provide them in FORGIS_CONFIG.yml; target_repo is supplied by the workflow input. {resolved_config_path} is incomplete."
         )
 
     target_subdir = values["target_subdir"] or DEFAULT_TARGET_SUBDIR
