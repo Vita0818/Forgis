@@ -129,38 +129,57 @@ EOF
   WRITABLE_SEED_CREATED="yes"
 fi
 
-AIDER_HELP="$(aider --help 2>/dev/null || true)"
+AIDER_RUNTIME_DIR="${RUNNER_TEMP:-$TARGET_SUBDIR_ABS/.forgis-aider-runtime}/aider"
+mkdir -p "$AIDER_RUNTIME_DIR"
 
-if ! printf '%s\n' "$AIDER_HELP" | grep -q -- "--subtree-only"; then
+AIDER_HELP_FILE="$AIDER_RUNTIME_DIR/aider-help.txt"
+AIDER_VERSION="$(aider --version 2>&1 || true)"
+AIDER_VERSION="${AIDER_VERSION%%$'\n'*}"
+aider --help > "$AIDER_HELP_FILE" 2>&1 || true
+
+CAPABILITY_INFO="$(
+  python3 "$SCRIPT_DIR/aider_compat.py" \
+    --help-file "$AIDER_HELP_FILE" \
+    --shell-output
+)"
+eval "$CAPABILITY_INFO"
+
+if [[ "$AIDER_SUPPORTS_SUBTREE_ONLY" != "yes" ]]; then
   echo "Aider does not support --subtree-only; refusing to run without subtree write isolation." >&2
   exit 1
 fi
 
-if ! printf '%s\n' "$AIDER_HELP" | grep -q -- "--read"; then
-  echo "Aider does not support --read; refusing to run without read-only task prompt context." >&2
-  exit 1
-fi
-
-AIDER_RUNTIME_DIR="${RUNNER_TEMP:-$TARGET_SUBDIR_ABS/.forgis-aider-runtime}/aider"
-mkdir -p "$AIDER_RUNTIME_DIR"
-
 AIDER_SAFETY_ARGS=()
-if printf '%s\n' "$AIDER_HELP" | grep -q -- "--no-gitignore"; then
+if [[ "$AIDER_SUPPORTS_NO_GITIGNORE" == "yes" ]]; then
   AIDER_SAFETY_ARGS+=(--no-gitignore)
 else
   echo "Aider does not advertise --no-gitignore; root .gitignore will be snapshotted and checked." >&2
 fi
 
-if printf '%s\n' "$AIDER_HELP" | grep -q -- "--input-history-file"; then
+if [[ "$AIDER_SUPPORTS_INPUT_HISTORY_FILE" == "yes" ]]; then
   AIDER_SAFETY_ARGS+=(--input-history-file "$AIDER_RUNTIME_DIR/input.history")
 fi
 
-if printf '%s\n' "$AIDER_HELP" | grep -q -- "--chat-history-file"; then
+if [[ "$AIDER_SUPPORTS_CHAT_HISTORY_FILE" == "yes" ]]; then
   AIDER_SAFETY_ARGS+=(--chat-history-file "$AIDER_RUNTIME_DIR/chat.history.md")
 fi
 
-if printf '%s\n' "$AIDER_HELP" | grep -q -- "--llm-history-file"; then
+if [[ "$AIDER_SUPPORTS_LLM_HISTORY_FILE" == "yes" ]]; then
   AIDER_SAFETY_ARGS+=(--llm-history-file "$AIDER_RUNTIME_DIR/llm.history")
+fi
+
+AIDER_READ_ARGS=()
+READ_CONTEXT_SUMMARY="message-file-only"
+if [[ "$AIDER_SUPPORTS_READ" == "yes" ]]; then
+  AIDER_READ_ARGS+=(--read "$TASK_PROMPT_ABS")
+  if [[ "$CONFIG_FOUND" == "yes" ]]; then
+    AIDER_READ_ARGS+=(--read "$CONFIG_ABS")
+  fi
+  READ_CONTEXT_SUMMARY="--read <task_prompt> --read <config_if_present>"
+else
+  echo "Aider does not support --read; using message-file-only mode." >&2
+  echo "The final prompt already embeds the task prompt content, task prompt sha256, resolved configuration summary, writable scope, and read-only boundaries." >&2
+  echo "Config and task prompt files remain protected by pre/post hash checks; target root remains read-only and writable scope remains $TARGET_SUBDIR_REL/." >&2
 fi
 
 python3 "$SCRIPT_DIR/prompt_diagnostics.py" \
@@ -192,9 +211,13 @@ echo "  final prompt contains task prompt path: $(grep -Fq "$TASK_PROMPT_REL" "$
 echo "  required prompt markers json: ${REQUIRED_PROMPT_MARKERS_JSON:-[]}"
 echo "  forbidden prompt markers json: ${FORBIDDEN_PROMPT_MARKERS_JSON:-[]}"
 echo "  Aider --message-file path: $FORGIS_PROMPT_FILE"
+echo "  Aider version: ${AIDER_VERSION:-[unknown]}"
+echo "  Aider supports --read: $AIDER_SUPPORTS_READ"
+echo "  Aider supports --subtree-only: $AIDER_SUPPORTS_SUBTREE_ONLY"
+echo "  selected Aider context mode: $AIDER_CONTEXT_MODE"
 echo "  Aider model: $AIDER_MODEL"
 echo "  Aider runtime dir: $AIDER_RUNTIME_DIR"
-echo "  Aider command summary: aider --model <model> --message-file <forgis_prompt> --read <task_prompt> --read <config_if_present> ${AIDER_SAFETY_ARGS[*]} --subtree-only --yes-always --no-auto-commits --no-show-release-notes <writable_scope_seed>"
+echo "  Aider command summary: aider --model <model> --message-file <forgis_prompt> $READ_CONTEXT_SUMMARY ${AIDER_SAFETY_ARGS[*]} --subtree-only --yes-always --no-auto-commits --no-show-release-notes <writable_scope_seed>"
 
 if [[ -n "${FORGIS_AIDER_COMMAND_SUMMARY_FILE:-}" ]]; then
   mkdir -p "$(dirname "$FORGIS_AIDER_COMMAND_SUMMARY_FILE")"
@@ -207,24 +230,23 @@ if [[ -n "${FORGIS_AIDER_COMMAND_SUMMARY_FILE:-}" ]]; then
 - Read-only config: \`$CONFIG_REL\`
 - Message file: \`$FORGIS_PROMPT_FILE\`
 - Message file sha256: \`$(shasum -a 256 "$FORGIS_PROMPT_FILE" | awk '{print $1}')\`
+- Aider version: \`${AIDER_VERSION:-[unknown]}\`
+- Supports --read: \`$AIDER_SUPPORTS_READ\`
+- Supports --subtree-only: \`$AIDER_SUPPORTS_SUBTREE_ONLY\`
+- Selected context mode: \`$AIDER_CONTEXT_MODE\`
 - Runtime dir: \`$AIDER_RUNTIME_DIR\`
-- Command: \`aider --model <model> --message-file <forgis_prompt> --read <task_prompt> --read <config_if_present> ${AIDER_SAFETY_ARGS[*]} --subtree-only --yes-always --no-auto-commits --no-show-release-notes <writable_scope_seed>\`
+- Command: \`aider --model <model> --message-file <forgis_prompt> $READ_CONTEXT_SUMMARY ${AIDER_SAFETY_ARGS[*]} --subtree-only --yes-always --no-auto-commits --no-show-release-notes <writable_scope_seed>\`
 EOF
 fi
 
 cd "$TARGET_SUBDIR_ABS"
 
-AIDER_READ_ARGS=(--read "$TASK_PROMPT_ABS")
-if [[ "$CONFIG_FOUND" == "yes" ]]; then
-  AIDER_READ_ARGS+=(--read "$CONFIG_ABS")
-fi
-
 set +e
 aider \
   --model "$AIDER_MODEL" \
   --message-file "$FORGIS_PROMPT_FILE" \
-  "${AIDER_READ_ARGS[@]}" \
-  "${AIDER_SAFETY_ARGS[@]}" \
+  ${AIDER_READ_ARGS[@]+"${AIDER_READ_ARGS[@]}"} \
+  ${AIDER_SAFETY_ARGS[@]+"${AIDER_SAFETY_ARGS[@]}"} \
   --subtree-only \
   --yes-always \
   --no-auto-commits \

@@ -119,7 +119,7 @@ Required config fields are:
 FORGIS_TASK.md
 ```
 
-Forgis reads this file after checking out the target repository and embeds it into the generated final prompt. Aider receives it through read-only context and must not edit it.
+Forgis reads this file after checking out the target repository and embeds it into the generated final prompt. When the installed Aider supports read-only context flags, Forgis also passes the task and config files as read-only inputs. If that Aider version does not support those flags, Forgis falls back to message-file-only mode and relies on the generated prompt plus post-run hash and scope guardrails.
 
 If the task prompt file is missing or empty, the migration workflow fails instead of falling back to an example task.
 
