@@ -99,6 +99,7 @@ jobs:
             --target-stack kotlin-compose \
             --migration-profile default \
             --source-bundle "$GITHUB_WORKSPACE/tmp/source_bundle.md" \
+            --source-manifest "$GITHUB_WORKSPACE/tmp/source_manifest.md" \
             --output "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
 
           test -f "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
@@ -107,3 +108,4 @@ jobs:
           grep -q "Target stack: kotlin-compose" "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
           grep -q "Migration profile: default" "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
           grep -q "Source Bundle" "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
+          grep -q "Source Manifest" "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
