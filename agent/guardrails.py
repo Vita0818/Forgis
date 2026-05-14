@@ -204,6 +204,17 @@ def scan_secret_leaks(root: Path, secret_values: list[str]) -> list[str]:
     return leaks
 
 
+def report_guardrail_failure(title: str, lines: list[str], *, warning_only: bool) -> None:
+    label = "WARNING" if warning_only else "ERROR"
+    print(f"{label}: {title}", file=sys.stderr)
+    for line in lines:
+        print(line, file=sys.stderr)
+    if warning_only:
+        print("Continuing because strict_mode=false.", file=sys.stderr)
+        return
+    sys.exit(1)
+
+
 def command_snapshot_readonly(args: argparse.Namespace) -> None:
     target = Path(args.target).resolve()
     paths = [args.config_path, args.task_prompt_path]
@@ -229,10 +240,13 @@ def command_check_readonly(args: argparse.Namespace) -> None:
     changed = changed_read_only_paths(target, snapshot)
 
     if changed:
-        print("ERROR: read-only target input files were modified:", file=sys.stderr)
-        for path in changed:
-            print(f"  {path}", file=sys.stderr)
-        sys.exit(1)
+        report_guardrail_failure(
+            "read-only target input files were modified:",
+            [f"  {path}" for path in changed],
+            warning_only=args.warning_only,
+        )
+        if args.warning_only:
+            return
 
     print("Read-only input hash verification passed.")
 
@@ -254,20 +268,23 @@ def command_check_target_scope(args: argparse.Namespace) -> None:
 
     if violations:
         entry_by_path = {entry["path"]: entry for entry in entries}
-        print("ERROR: target repository has changes outside the allowed writable scope:", file=sys.stderr)
+        lines: list[str] = []
         for path in violations:
             entry = entry_by_path.get(path, {"kind": "changed", "status": "??"})
-            print(
-                f"  {path} ({entry['kind']}, status={entry['status']})",
-                file=sys.stderr,
-            )
-        print(f"Allowed writable scope: {target_subdir}/", file=sys.stderr)
+            lines.append(f"  {path} ({entry['kind']}, status={entry['status']})")
+        lines.append(f"Allowed writable scope: {target_subdir}/")
         if read_only_paths:
-            print("Explicit read-only target inputs:", file=sys.stderr)
+            lines.append("Explicit read-only target inputs:")
             for path in sorted(set(read_only_paths)):
-                print(f"  {path}", file=sys.stderr)
-        print("Fix suggestion: keep generated files inside the configured target_subdir.", file=sys.stderr)
-        sys.exit(1)
+                lines.append(f"  {path}")
+        lines.append("Fix suggestion: review these target-side changes in the PR.")
+        report_guardrail_failure(
+            "target repository has changes outside the allowed writable scope:",
+            lines,
+            warning_only=args.warning_only,
+        )
+        if args.warning_only:
+            return
 
     print("Target writable scope verification passed.")
     print(f"  allowed writable scope: {target_subdir}/")
@@ -291,10 +308,13 @@ def command_check_dry_run_clean(args: argparse.Namespace) -> None:
     target = Path(args.target).resolve()
     status = git_status_lines(target)
     if status:
-        print("ERROR: dry_run modified the target repository:", file=sys.stderr)
-        for line in status:
-            print(f"  {line}", file=sys.stderr)
-        sys.exit(1)
+        report_guardrail_failure(
+            "dry_run modified the target repository:",
+            [f"  {line}" for line in status],
+            warning_only=args.warning_only,
+        )
+        if args.warning_only:
+            return
     print("Dry run target write verification passed.")
 
 
@@ -325,12 +345,14 @@ def main() -> None:
     check_readonly = subparsers.add_parser("check-readonly")
     check_readonly.add_argument("--target", required=True)
     check_readonly.add_argument("--snapshot", required=True)
+    check_readonly.add_argument("--warning-only", action="store_true")
     check_readonly.set_defaults(func=command_check_readonly)
 
     check_scope = subparsers.add_parser("check-target-scope")
     check_scope.add_argument("--target", required=True)
     check_scope.add_argument("--target-subdir", required=True)
     check_scope.add_argument("--read-only-path", action="append", default=[])
+    check_scope.add_argument("--warning-only", action="store_true")
     check_scope.set_defaults(func=command_check_target_scope)
 
     source_clean = subparsers.add_parser("check-source-clean")
@@ -339,6 +361,7 @@ def main() -> None:
 
     dry_run_clean = subparsers.add_parser("check-dry-run-clean")
     dry_run_clean.add_argument("--target", required=True)
+    dry_run_clean.add_argument("--warning-only", action="store_true")
     dry_run_clean.set_defaults(func=command_check_dry_run_clean)
 
     secret_leaks = subparsers.add_parser("check-secret-leaks")

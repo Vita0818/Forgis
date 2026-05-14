@@ -6,6 +6,7 @@ import argparse
 import dataclasses
 import json
 import os
+import re
 import shlex
 import sys
 from pathlib import Path
@@ -17,6 +18,7 @@ from forgis_config import ResolvedConfig, resolve_config
 
 
 ClientFactory = Callable[[ResolvedConfig, dict[str, str]], Any]
+SECRET_PATH_WORDS = re.compile(r"(secret|token|credential|password|api[_-]?key|private)", re.IGNORECASE)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -96,6 +98,66 @@ def format_tool_result(result: dict[str, Any], max_chars: int) -> str:
     return text[:keep] + note
 
 
+def safe_log(message: str) -> None:
+    print(f"[forgis] {message}", flush=True)
+
+
+def sanitize_log_path(value: Any) -> str:
+    text = str(value if value is not None else "").strip().replace("\\", "/")
+    if not text:
+        return "[none]"
+    parts: list[str] = []
+    for part in text.split("/"):
+        if not part:
+            continue
+        parts.append("[redacted]" if SECRET_PATH_WORDS.search(part) else part)
+    sanitized = "/".join(parts) or "[root]"
+    if len(sanitized) <= 160:
+        return sanitized
+    return sanitized[:80] + ".../" + sanitized[-60:]
+
+
+def tool_call_log_details(name: str, arguments: dict[str, Any] | None) -> str:
+    if not arguments:
+        return "path=[unavailable]"
+    parts: list[str] = []
+    if "path" in arguments:
+        parts.append(f"path={sanitize_log_path(arguments.get('path'))}")
+    for key in ("start_line", "max_lines", "max_depth"):
+        if key in arguments and arguments[key] is not None:
+            parts.append(f"{key}={arguments[key]}")
+    if name in WRITE_TOOLS and "path" not in arguments:
+        parts.append("path=[unavailable]")
+    return " ".join(parts) if parts else "path=[none]"
+
+
+def changed_paths_from_operations(operation_log: list[dict[str, Any]]) -> list[str]:
+    return sorted(
+        {
+            str(item.get("path", ""))
+            for item in operation_log
+            if item.get("path")
+        }
+    )
+
+
+def log_tool_loop_finished(
+    *,
+    iterations: int,
+    tool_call_count: int,
+    sandbox: FileToolSandbox,
+) -> None:
+    changed_paths = changed_paths_from_operations(sandbox.operation_log())
+    safe_log(
+        "tool loop finished: "
+        f"iterations={iterations} "
+        f"tool_calls={tool_call_count} "
+        f"reads={sandbox.read_count} "
+        f"writes={sandbox.write_count} "
+        f"changed_paths={len(changed_paths)}"
+    )
+
+
 def run_tool_loop(
     *,
     config: ResolvedConfig,
@@ -106,6 +168,7 @@ def run_tool_loop(
 ) -> ToolLoopResult:
     env = dict(os.environ if environ is None else environ)
     if config.dry_run:
+        safe_log("dry_run=true; skipping DeepSeek tool loop")
         return ToolLoopResult(
             executed=False,
             status="skipped-dry-run",
@@ -117,6 +180,7 @@ def run_tool_loop(
             operation_log=[],
         )
     if not config.run_agent:
+        safe_log("run_agent=false; skipping DeepSeek tool loop")
         return ToolLoopResult(
             executed=False,
             status="skipped-run-agent-false",
@@ -140,15 +204,30 @@ def run_tool_loop(
     client = factory(config, env)
     messages: list[dict[str, Any]] = initial_messages(config)
     tool_call_count = 0
+    safe_log(f"tool loop started: max_iterations={config.max_iterations}")
 
     for iteration in range(1, config.max_iterations + 1):
+        safe_log(f"iteration {iteration}/{config.max_iterations}: requesting model")
         response = client.chat(messages, TOOL_DEFINITIONS)
         message = message_from_response(response)
         tool_calls = message.get("tool_calls") or []
         content = message.get("content") or ""
+        has_assistant_message = "yes" if message else "no"
 
         if not tool_calls:
             summary = extract_final_summary(str(content))
+            safe_log(
+                f"iteration {iteration}/{config.max_iterations}: "
+                f"assistant_message={has_assistant_message} tool_calls=0 "
+                f"final_summary={'yes' if summary else 'no'}"
+            )
+            if summary:
+                safe_log("final_summary received")
+            log_tool_loop_finished(
+                iterations=iteration,
+                tool_call_count=tool_call_count,
+                sandbox=sandbox,
+            )
             return ToolLoopResult(
                 executed=True,
                 status="completed",
@@ -161,26 +240,74 @@ def run_tool_loop(
             )
 
         messages.append(assistant_tool_call_message(message, tool_calls))
+        safe_log(
+            f"iteration {iteration}/{config.max_iterations}: "
+            f"assistant_message={has_assistant_message} "
+            f"model returned {len(tool_calls)} tool calls "
+            "final_summary=no"
+        )
 
         for call in tool_calls:
             function = call.get("function") or {}
             name = function.get("name", "")
             raw_arguments = function.get("arguments", "{}")
             tool_call_count += 1
+            arguments: dict[str, Any] | None = None
+            status = "error"
             try:
                 arguments = parse_tool_arguments(raw_arguments)
+                safe_log(
+                    f"tool call {tool_call_count}: iteration={iteration} "
+                    f"{name or '[unknown]'} {tool_call_log_details(name, arguments)}"
+                )
                 result = sandbox.invoke(name, arguments)
-            except Exception as exc:
+                status = "ok" if result.get("ok") else "error"
+            except ToolError as exc:
+                if arguments is None:
+                    safe_log(
+                        f"tool call {tool_call_count}: iteration={iteration} "
+                        f"{name or '[unknown]'} path=[unavailable]"
+                    )
                 result = {"ok": False, "error": str(exc)}
+                status = "blocked"
+            except Exception as exc:
+                if arguments is None:
+                    safe_log(
+                        f"tool call {tool_call_count}: iteration={iteration} "
+                        f"{name or '[unknown]'} path=[unavailable]"
+                    )
+                result = {"ok": False, "error": str(exc)}
+                status = "error"
+            full_result_text = json.dumps(result, ensure_ascii=False, sort_keys=True)
+            formatted_result = format_tool_result(result, config.max_tool_result_chars)
+            result_truncated = bool(result.get("truncated")) or len(full_result_text) > config.max_tool_result_chars
+            changed_paths = changed_paths_from_operations(sandbox.operation_log())
+            safe_log(
+                f"tool call {tool_call_count} result: {status} "
+                f"chars={len(formatted_result)} "
+                f"truncated={str(result_truncated).lower()} "
+                f"total_tool_calls={tool_call_count} "
+                f"reads={sandbox.read_count} "
+                f"writes={sandbox.write_count} "
+                f"changed_paths={len(changed_paths)}"
+            )
+            if name in WRITE_TOOLS and result.get("ok") and result.get("path"):
+                safe_log(f"tool call {tool_call_count} changed_path={sanitize_log_path(result.get('path'))}")
             messages.append(
                 {
                     "role": "tool",
                     "tool_call_id": call.get("id", f"tool-{tool_call_count}"),
                     "name": name,
-                    "content": format_tool_result(result, config.max_tool_result_chars),
+                    "content": formatted_result,
                 }
             )
 
+    safe_log(f"max_iterations reached: {config.max_iterations}")
+    log_tool_loop_finished(
+        iterations=config.max_iterations,
+        tool_call_count=tool_call_count,
+        sandbox=sandbox,
+    )
     return ToolLoopResult(
         executed=True,
         status="max-iterations",

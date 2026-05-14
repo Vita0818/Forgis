@@ -110,11 +110,35 @@ def run_command(command: str, cwd: Path) -> tuple[int, str]:
     return result.returncode, result.stdout
 
 
+def resolve_success_check_path(
+    *,
+    target: Path,
+    target_subdir_path: Path,
+    target_subdir_relative: str,
+    value: str,
+    label: str,
+) -> tuple[Path, str]:
+    text = value.strip()
+    if not text:
+        raise ValueError(f"{label} must be a non-empty path.")
+
+    target_subdir_prefix = target_subdir_relative.rstrip("/")
+    if text == target_subdir_prefix or text.startswith(target_subdir_prefix + "/"):
+        path, relative = resolve_inside_root(target, text, label)
+        if path != target_subdir_path and not path.is_relative_to(target_subdir_path):
+            raise ValueError(f"{label} must stay inside target_subdir: {text}")
+        return path, relative
+
+    path, relative_to_subdir = resolve_inside_root(target_subdir_path, text, label)
+    return path, f"{target_subdir_prefix}/{relative_to_subdir}"
+
+
 def validate_success_checks(
     *,
     checks: list[Any],
     target: Path,
     target_subdir_path: Path,
+    target_subdir_relative: str,
 ) -> list[str]:
     failures: list[str] = []
     for index, item in enumerate(checks):
@@ -125,11 +149,17 @@ def validate_success_checks(
         if "path_exists" in item:
             value = str(item["path_exists"]).strip()
             try:
-                path, relative = resolve_inside_root(target_subdir_path, value, f"success_checks[{index}].path_exists")
+                path, relative = resolve_success_check_path(
+                    target=target,
+                    target_subdir_path=target_subdir_path,
+                    target_subdir_relative=target_subdir_relative,
+                    value=value,
+                    label=f"success_checks[{index}].path_exists",
+                )
             except Exception as exc:
                 failures.append(str(exc))
                 continue
-            if not path.exists():
+            if path_kind_no_follow(path) == "missing":
                 failures.append(f"success_checks[{index}] path does not exist: {relative}")
             continue
 
@@ -177,6 +207,7 @@ def validate(
     before_snapshot_path: Path,
     require_meaningful_change: bool,
     success_checks_json: str,
+    warning_only: bool = False,
 ) -> None:
     target = target.resolve()
     target_subdir_path, target_subdir_relative = resolve_target_subdir(target, target_subdir)
@@ -200,6 +231,7 @@ def validate(
         checks=success_checks,
         target=target,
         target_subdir_path=target_subdir_path,
+        target_subdir_relative=target_subdir_relative,
     )
 
     failures: list[str] = []
@@ -218,9 +250,13 @@ def validate(
     )
 
     if failures:
-        print("ERROR: generic target output validation failed:", file=sys.stderr)
+        label = "WARNING" if warning_only else "ERROR"
+        print(f"{label}: generic target output validation failed:", file=sys.stderr)
         for failure in failures:
             print(f"  {failure}", file=sys.stderr)
+        if warning_only:
+            print("Continuing because strict_mode=false.", file=sys.stderr)
+            return
         sys.exit(1)
 
     print("Generic target output validation passed.")
@@ -244,6 +280,7 @@ def command_validate(args: argparse.Namespace) -> None:
         before_snapshot_path=Path(args.snapshot),
         require_meaningful_change=args.require_meaningful_change,
         success_checks_json=args.success_checks_json,
+        warning_only=args.warning_only,
     )
 
 
@@ -264,6 +301,7 @@ def main() -> None:
     validate_parser.add_argument("--snapshot", required=True)
     validate_parser.add_argument("--require-meaningful-change", action="store_true")
     validate_parser.add_argument("--success-checks-json", default="[]")
+    validate_parser.add_argument("--warning-only", action="store_true")
     validate_parser.set_defaults(func=command_validate)
 
     args = parser.parse_args()

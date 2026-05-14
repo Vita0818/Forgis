@@ -148,13 +148,26 @@ jobs:
             --operation-log-output "$GITHUB_WORKSPACE/forgis-runtime/tool_operations.json" \
             --summary-output "$GITHUB_WORKSPACE/forgis-runtime/tool_loop_summary.json"
 
+      - name: Verify source repository stayed read-only
+        id: check_source_clean
+        if: ${{ steps.checkout_source.outcome == 'success' && steps.run_controller.outcome == 'success' && steps.tool_loop.outcome == 'success' }}
+        run: |
+          python forgis/agent/guardrails.py check-source-clean \
+            --source "$GITHUB_WORKSPACE/source-repo"
+
       - name: Validate DeepSeek target changes
         id: validate_target_output
-        if: ${{ steps.run_controller.outcome == 'success' && steps.snapshot_target_output.outcome == 'success' && steps.tool_loop.outcome == 'success' }}
+        if: ${{ steps.run_controller.outcome == 'success' && steps.snapshot_target_output.outcome == 'success' && steps.tool_loop.outcome == 'success' && steps.check_source_clean.outcome == 'success' }}
         run: |
           if [[ "$RUN_AGENT" != "true" ]]; then
             echo "RUN_AGENT is false. Skipping target output validation."
             exit 0
+          fi
+
+          VALIDATE_ARGS=()
+          if [[ "$STRICT_MODE" != "true" ]]; then
+            echo "::warning::strict_mode=false; target output validation failures will be reported as warnings."
+            VALIDATE_ARGS+=(--warning-only)
           fi
 
           python forgis/agent/validate_target_output.py validate \
@@ -163,11 +176,12 @@ jobs:
             --run-log-path "$RUN_LOG_PATH" \
             --snapshot "$GITHUB_WORKSPACE/forgis-runtime/target_output_before.json" \
             --require-meaningful-change \
-            --success-checks-json "$SUCCESS_CHECKS_JSON"
+            --success-checks-json "$SUCCESS_CHECKS_JSON" \
+            "${VALIDATE_ARGS[@]}"
 
       - name: Run configured validation commands
         id: validation_commands
-        if: ${{ steps.run_controller.outcome == 'success' && steps.tool_loop.outcome == 'success' && steps.validate_target_output.outcome == 'success' }}
+        if: ${{ steps.run_controller.outcome == 'success' && steps.tool_loop.outcome == 'success' && steps.check_source_clean.outcome == 'success' && steps.validate_target_output.outcome == 'success' }}
         env:
           TARGET_REPO_DIR: ${{ github.workspace }}/target-repo
         run: |
@@ -176,11 +190,22 @@ jobs:
             exit 0
           fi
 
+          set +e
           bash forgis/agent/build_target.sh
+          VALIDATION_STATUS=$?
+          set -e
+
+          if [[ "$VALIDATION_STATUS" -ne 0 ]]; then
+            if [[ "$STRICT_MODE" == "true" ]]; then
+              echo "validation_commands failed and strict_mode=true; failing the run." >&2
+              exit "$VALIDATION_STATUS"
+            fi
+            echo "::warning::validation_commands failed with exit $VALIDATION_STATUS; continuing because strict_mode=false."
+          fi
 
       - name: Append long-term Forgis log
         id: append_log
-        if: ${{ steps.run_controller.outcome == 'success' && steps.tool_loop.outcome == 'success' && steps.validate_target_output.outcome == 'success' && steps.validation_commands.outcome == 'success' }}
+        if: ${{ steps.run_controller.outcome == 'success' && steps.tool_loop.outcome == 'success' && steps.check_source_clean.outcome == 'success' && steps.validate_target_output.outcome == 'success' && steps.validation_commands.outcome == 'success' }}
         env:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
@@ -232,38 +257,52 @@ jobs:
             --final-summary "$FINAL_SUMMARY" \
             --preview-output "$GITHUB_WORKSPACE/forgis-runtime/forgis_log_entry.md"
 
-      - name: Verify source repository stayed read-only
-        id: check_source_clean
-        if: ${{ steps.checkout_source.outcome == 'success' && steps.run_controller.outcome == 'success' && steps.tool_loop.outcome == 'success' && steps.append_log.outcome == 'success' }}
-        run: |
-          python forgis/agent/guardrails.py check-source-clean \
-            --source "$GITHUB_WORKSPACE/source-repo"
-
       - name: Verify read-only target inputs
         id: check_readonly
         if: ${{ steps.snapshot_readonly.outcome == 'success' && steps.run_controller.outcome == 'success' && steps.tool_loop.outcome == 'success' && steps.append_log.outcome == 'success' }}
         run: |
+          READONLY_ARGS=()
+          if [[ "$STRICT_MODE" != "true" ]]; then
+            echo "::warning::strict_mode=false; target config/task modifications will be reported as warnings."
+            READONLY_ARGS+=(--warning-only)
+          fi
+
           python forgis/agent/guardrails.py check-readonly \
             --target "$GITHUB_WORKSPACE/target-repo" \
-            --snapshot "$GITHUB_WORKSPACE/forgis-runtime/read_only_snapshot.json"
+            --snapshot "$GITHUB_WORKSPACE/forgis-runtime/read_only_snapshot.json" \
+            "${READONLY_ARGS[@]}"
 
       - name: Verify target writable scope
         id: check_target_scope
         if: ${{ steps.run_controller.outcome == 'success' && steps.tool_loop.outcome == 'success' && steps.append_log.outcome == 'success' }}
         run: |
+          TARGET_SCOPE_ARGS=()
+          if [[ "$STRICT_MODE" != "true" ]]; then
+            echo "::warning::strict_mode=false; target writable scope violations will be reported as warnings."
+            TARGET_SCOPE_ARGS+=(--warning-only)
+          fi
+
           python forgis/agent/guardrails.py check-target-scope \
             --target "$GITHUB_WORKSPACE/target-repo" \
             --target-subdir "$TARGET_SUBDIR" \
             --read-only-path "$CONFIG_PATH" \
-            --read-only-path "$TASK_PROMPT_PATH"
+            --read-only-path "$TASK_PROMPT_PATH" \
+            "${TARGET_SCOPE_ARGS[@]}"
 
       - name: Verify dry run did not write target
         id: check_dry_run_clean
         if: ${{ steps.run_controller.outcome == 'success' && steps.tool_loop.outcome == 'success' && steps.append_log.outcome == 'success' }}
         run: |
           if [[ "$DRY_RUN" == "true" ]]; then
+            DRY_RUN_ARGS=()
+            if [[ "$STRICT_MODE" != "true" ]]; then
+              echo "::warning::strict_mode=false; dry-run target changes will be reported as warnings."
+              DRY_RUN_ARGS+=(--warning-only)
+            fi
+
             python forgis/agent/guardrails.py check-dry-run-clean \
-              --target "$GITHUB_WORKSPACE/target-repo"
+              --target "$GITHUB_WORKSPACE/target-repo" \
+              "${DRY_RUN_ARGS[@]}"
           else
             echo "DRY_RUN is false. Skipping dry-run clean check."
           fi
