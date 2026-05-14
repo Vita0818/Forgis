@@ -62,6 +62,8 @@ def write_report(
     target_stack: str,
     migration_profile: str,
     target_branch: str,
+    task_prompt_path: str,
+    target_subdir: str,
     dry_run: bool,
     run_ai: bool,
     source_files: list[str],
@@ -86,8 +88,10 @@ Generated at: {now}
 - Target stack: {target_stack}
 - Migration profile: {migration_profile}
 - Target branch: {target_branch}
+- Task prompt path: {task_prompt_path}
+- Target output directory: {target_subdir}
 - Dry run: {dry_run}
-- Run AI: {run_ai}
+- Run Aider: {run_ai}
 
 ## Status
 
@@ -114,8 +118,10 @@ def main() -> None:
     parser.add_argument("--target-stack", required=True, help="Target technical stack")
     parser.add_argument("--migration-profile", required=True, help="Migration profile name")
     parser.add_argument("--target-branch", required=True, help="Target migration branch")
+    parser.add_argument("--task-prompt-path", required=False, default="FORGIS_TASK.md", help="Task prompt path relative to target root")
+    parser.add_argument("--target-subdir", required=False, default="forgis-output", help="Target output directory relative to target root")
     parser.add_argument("--dry-run", required=True, type=parse_bool, help="Whether to avoid pushing changes")
-    parser.add_argument("--run-ai", required=True, type=parse_bool, help="Whether AI migration is enabled")
+    parser.add_argument("--run-ai", required=True, type=parse_bool, help="Whether Aider migration is enabled")
 
     args = parser.parse_args()
 
@@ -136,6 +142,8 @@ def main() -> None:
         target_stack=args.target_stack,
         migration_profile=args.migration_profile,
         target_branch=args.target_branch,
+        task_prompt_path=args.task_prompt_path,
+        target_subdir=args.target_subdir,
         dry_run=args.dry_run,
         run_ai=args.run_ai,
         source_files=source_files,

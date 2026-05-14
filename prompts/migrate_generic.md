@@ -86,3 +86,19 @@ This file tells Forgis what to do in the current run, such as:
 The task prompt controls the concrete task for the current run, but it must not override safety boundaries.
 
 Updating only README.md and MIGRATION_REPORT.md is not sufficient unless the task prompt explicitly requests documentation-only output.
+
+The task prompt is input context. Do not edit it unless the task prompt explicitly asks for documentation changes to the prompt file itself.
+
+## Target writable scope
+
+Forgis can provide a target output directory relative to the target repository root.
+
+All generated or modified project files must stay inside that target output directory.
+
+Do not scatter generated project files into the target repository root.
+
+Do not modify sibling projects or unrelated directories in the target repository.
+
+If the target output directory does not exist yet, create the project inside that directory.
+
+`MIGRATION_REPORT.md` may be updated at the target repository root to describe the run.

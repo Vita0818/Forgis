@@ -56,6 +56,12 @@ on:
         default: "main"
         type: string
 
+      base_branch:
+        description: "Deprecated alias for target_base_branch"
+        required: false
+        default: ""
+        type: string
+
       dry_run:
         description: "Run without pushing changes or creating pull requests"
         required: true
@@ -63,21 +69,45 @@ on:
         type: boolean
 
       run_ai:
+        description: "Deprecated alias for run_aider"
+        required: true
+        default: false
+        type: boolean
+
+      run_aider:
         description: "Actually run Aider with the configured AI model"
         required: true
         default: false
         type: boolean
 
-      target_prompt_file:
+      task_prompt_path:
         description: "Markdown task prompt file path relative to target repository root"
         required: true
         default: "FORGIS_TASK.md"
         type: string
 
+      target_prompt_file:
+        description: "Deprecated alias for task_prompt_path"
+        required: false
+        default: ""
+        type: string
+
+      target_subdir:
+        description: "Target output directory relative to target repository root"
+        required: true
+        default: "forgis-output"
+        type: string
+
       aider_model:
-        description: "Aider model name. Use DeepSeek Pro by default."
+        description: "Deprecated alias for model"
         required: true
         default: "deepseek/deepseek-v4-pro"
+        type: string
+
+      model:
+        description: "Aider model name. Use DeepSeek Pro by default."
+        required: false
+        default: ""
         type: string
 
 permissions:
@@ -96,11 +126,13 @@ jobs:
       TARGET_STACK: ${{ inputs.target_stack }}
       MIGRATION_PROFILE: ${{ inputs.migration_profile }}
       TARGET_BRANCH: ${{ inputs.target_branch }}
-      TARGET_BASE_BRANCH: ${{ inputs.target_base_branch }}
+      TARGET_BASE_BRANCH: ${{ inputs.base_branch || inputs.target_base_branch }}
       DRY_RUN: ${{ inputs.dry_run }}
-      RUN_AI: ${{ inputs.run_ai }}
-      TARGET_PROMPT_FILE: ${{ inputs.target_prompt_file }}
-      AIDER_MODEL: ${{ inputs.aider_model }}
+      RUN_AIDER: ${{ inputs.run_aider || inputs.run_ai }}
+      RUN_AI: ${{ inputs.run_aider || inputs.run_ai }}
+      TASK_PROMPT_PATH: ${{ inputs.task_prompt_path != 'FORGIS_TASK.md' && inputs.task_prompt_path || inputs.target_prompt_file || inputs.task_prompt_path }}
+      TARGET_SUBDIR: ${{ inputs.target_subdir }}
+      AIDER_MODEL: ${{ inputs.model || inputs.aider_model }}
 
     steps:
       - name: Checkout Forgis
@@ -120,9 +152,27 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ env.TARGET_REPO }}
+          ref: ${{ env.TARGET_BASE_BRANCH }}
           token: ${{ secrets.FORGIS_TARGET_TOKEN }}
           path: target-output
           fetch-depth: 0
+
+      - name: Log Forgis migration configuration
+        run: |
+          echo "Forgis migration configuration:"
+          echo "  source_repo: $SOURCE_REPO"
+          echo "  source_ref: $SOURCE_REF"
+          echo "  target_repo: $TARGET_REPO"
+          echo "  target_base_branch: $TARGET_BASE_BRANCH"
+          echo "  target_branch: $TARGET_BRANCH"
+          echo "  target_platform: $TARGET_PLATFORM"
+          echo "  target_stack: $TARGET_STACK"
+          echo "  migration_profile: $MIGRATION_PROFILE"
+          echo "  task_prompt_path: $TASK_PROMPT_PATH"
+          echo "  target_subdir: $TARGET_SUBDIR"
+          echo "  aider_model: $AIDER_MODEL"
+          echo "  dry_run: $DRY_RUN"
+          echo "  run_aider: $RUN_AIDER"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -149,6 +199,8 @@ jobs:
             --target-stack "$TARGET_STACK" \
             --migration-profile "$MIGRATION_PROFILE" \
             --target-branch "$TARGET_BRANCH" \
+            --task-prompt-path "$TASK_PROMPT_PATH" \
+            --target-subdir "$TARGET_SUBDIR" \
             --dry-run "$DRY_RUN" \
             --run-ai "$RUN_AI"
 
@@ -175,7 +227,9 @@ jobs:
             --migration-profile "$MIGRATION_PROFILE" \
             --source-bundle "$GITHUB_WORKSPACE/forgis-runtime/source_bundle.md" \
             --source-manifest "$GITHUB_WORKSPACE/forgis-runtime/source_manifest.md" \
-            --target-prompt-file "$GITHUB_WORKSPACE/target-output/$TARGET_PROMPT_FILE" \
+            --task-prompt-path "$TASK_PROMPT_PATH" \
+            --require-task-prompt \
+            --target-subdir "$TARGET_SUBDIR" \
             --output "$GITHUB_WORKSPACE/forgis-runtime/forgis_prompt.md"
 
           test -f "$GITHUB_WORKSPACE/forgis-runtime/forgis_prompt.md"
@@ -187,31 +241,36 @@ jobs:
           bash -n forgis/agent/create_pr.sh
 
       - name: Check target repository task prompt
-        if: ${{ inputs.run_ai == true || inputs.run_ai == 'true' }}
+        if: ${{ inputs.run_aider == true || inputs.run_aider == 'true' || inputs.run_ai == true || inputs.run_ai == 'true' }}
         run: |
-          TARGET_PROMPT_PATH="$GITHUB_WORKSPACE/target-output/$TARGET_PROMPT_FILE"
+          TARGET_PROMPT_PATH="$GITHUB_WORKSPACE/target-output/$TASK_PROMPT_PATH"
 
           if [ ! -f "$TARGET_PROMPT_PATH" ] || [ ! -s "$TARGET_PROMPT_PATH" ]; then
-            echo "Target repository task prompt is required when run_ai is true."
-            echo "Create a non-empty $TARGET_PROMPT_FILE file in the target repository root."
+            echo "Target repository task prompt is required when run_aider is true."
+            echo "Create a non-empty $TASK_PROMPT_PATH file in the target repository root."
             exit 1
           fi
 
       - name: Run Aider with configured model
-        if: ${{ inputs.run_ai == true || inputs.run_ai == 'true' }}
+        if: ${{ inputs.run_aider == true || inputs.run_aider == 'true' || inputs.run_ai == true || inputs.run_ai == 'true' }}
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           TARGET_REPO_DIR: ${{ github.workspace }}/target-output
           FORGIS_PROMPT_FILE: ${{ github.workspace }}/forgis-runtime/forgis_prompt.md
-          AIDER_MODEL: ${{ inputs.aider_model }}
+          TASK_PROMPT_PATH: ${{ env.TASK_PROMPT_PATH }}
+          TARGET_SUBDIR: ${{ env.TARGET_SUBDIR }}
+          AIDER_MODEL: ${{ env.AIDER_MODEL }}
         run: |
           bash forgis/agent/run_aider.sh
 
       - name: Build target repository
-        if: ${{ inputs.run_ai == true || inputs.run_ai == 'true' }}
+        if: ${{ inputs.run_aider == true || inputs.run_aider == 'true' || inputs.run_ai == true || inputs.run_ai == 'true' }}
         env:
           TARGET_REPO_DIR: ${{ github.workspace }}/target-output
-          TARGET_PLATFORM: ${{ inputs.target_platform }}
+          TARGET_PLATFORM: ${{ env.TARGET_PLATFORM }}
+          TARGET_SUBDIR: ${{ env.TARGET_SUBDIR }}
+          RUN_AIDER: ${{ env.RUN_AIDER }}
+          DRY_RUN: ${{ env.DRY_RUN }}
         run: |
           bash forgis/agent/build_target.sh
 
@@ -226,16 +285,16 @@ jobs:
 
 
       - name: Create pull request
-        if: ${{ (inputs.run_ai == true || inputs.run_ai == 'true') && (inputs.dry_run != true && inputs.dry_run != 'true') }}
+        if: ${{ (inputs.run_aider == true || inputs.run_aider == 'true' || inputs.run_ai == true || inputs.run_ai == 'true') && (inputs.dry_run != true && inputs.dry_run != 'true') }}
         env:
           GH_TOKEN: ${{ secrets.FORGIS_TARGET_TOKEN }}
           TARGET_REPO_DIR: ${{ github.workspace }}/target-output
-          TARGET_REPO: ${{ inputs.target_repo }}
-          TARGET_BRANCH: ${{ inputs.target_branch }}
-          TARGET_BASE_BRANCH: ${{ inputs.target_base_branch }}
-          TARGET_PLATFORM: ${{ inputs.target_platform }}
-          TARGET_STACK: ${{ inputs.target_stack }}
-          DRY_RUN: ${{ inputs.dry_run }}
+          TARGET_REPO: ${{ env.TARGET_REPO }}
+          TARGET_BRANCH: ${{ env.TARGET_BRANCH }}
+          TARGET_BASE_BRANCH: ${{ env.TARGET_BASE_BRANCH }}
+          TARGET_PLATFORM: ${{ env.TARGET_PLATFORM }}
+          TARGET_STACK: ${{ env.TARGET_STACK }}
+          DRY_RUN: ${{ env.DRY_RUN }}
         run: |
           bash forgis/agent/create_pr.sh
 
