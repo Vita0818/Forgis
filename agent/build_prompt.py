@@ -16,6 +16,12 @@ def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
+def read_target_prompt(path: Path | None) -> str:
+    if path is None or not path.is_file():
+        return "[No target repository task prompt provided.]"
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
 def read_text_limited(path: Path, max_chars: int) -> str:
     text = read_text(path)
 
@@ -74,6 +80,7 @@ def main() -> None:
     parser.add_argument("--migration-profile", required=True, help="Migration profile name")
     parser.add_argument("--source-bundle", required=False, help="Optional source bundle markdown file")
     parser.add_argument("--source-manifest", required=False, help="Optional source manifest markdown file")
+    parser.add_argument("--target-prompt-file", required=False, help="Optional task prompt file from the target repository root")
     parser.add_argument(
         "--max-source-bundle-chars",
         required=False,
@@ -108,6 +115,9 @@ def main() -> None:
     if args.source_manifest:
         source_manifest_path = Path(args.source_manifest).resolve()
         source_manifest_text = read_text(source_manifest_path)
+
+    target_prompt_path = Path(args.target_prompt_file).resolve() if args.target_prompt_file else None
+    target_prompt_text = read_target_prompt(target_prompt_path)
 
     content = f"""# Forgis Generated Migration Task
 
@@ -198,6 +208,27 @@ Use the current source repository tree, source manifest, and source bundle as th
 Do not rely on stale target repository code as a substitute for the current source repository.
 
 If the target repository contains older generated code, update it according to the current source state.
+
+---
+
+# Target Repository Task Prompt
+
+This section is loaded from the target repository root.
+
+Default file: FORGIS_TASK.md
+
+It is the human instruction for the current Forgis run.
+
+It defines the concrete migration task for this run.
+
+It must be followed unless it conflicts with:
+- project boundary rules
+- source repository read-only rules
+- target repository write restrictions
+- secret-safety rules
+- GitHub token permission boundaries
+
+{target_prompt_text}
 
 ---
 

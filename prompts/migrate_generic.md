@@ -67,3 +67,22 @@ The agent should preserve source behavior, source data model semantics, and sour
 The target repository may contain older generated output, but older generated output is not authoritative.
 
 The current source repository state is authoritative.
+
+## Target repository task prompt
+
+Forgis supports a per-run task prompt stored in the target repository root.
+
+The default file is `FORGIS_TASK.md`.
+
+This file tells Forgis what to do in the current run, such as:
+
+- create a minimal target project skeleton
+- migrate a specific screen
+- repair build errors
+- translate source models
+- sync target repo with the latest source repo
+- improve visual fidelity
+
+The task prompt controls the concrete task for the current run, but it must not override safety boundaries.
+
+Updating only README.md and MIGRATION_REPORT.md is not sufficient unless the task prompt explicitly requests documentation-only output.

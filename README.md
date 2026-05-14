@@ -20,9 +20,9 @@ Forgis is organized around five parts:
 
 A Forgis run is configured by workflow inputs:
 
-- `source_repo`: source repository, for example `owner/apple-source-repo`
+- `source_repo`: source repository, for example `owner/source-repo`
 - `source_ref`: source branch, tag, or commit
-- `target_repo`: target output repository, for example `owner/target-output-repo`
+- `target_repo`: target output repository, for example `owner/target-repo`
 - `target_platform`: broad target platform, for example `android`, `windows`, `harmonyos`, or `web`
 - `target_stack`: concrete target technology stack, for example `kotlin-compose`, `csharp-avalonia`, `arkts`, or `web-react`
 - `migration_profile`: migration strategy profile, for example `default` or `local-first-app`
@@ -30,6 +30,30 @@ A Forgis run is configured by workflow inputs:
 - `target_base_branch`: target repository base branch for pull requests
 - `dry_run`: whether to skip push and pull request creation
 - `run_ai`: whether to actually call the configured AI model
+- `target_prompt_file`: Markdown task prompt file path relative to the target repository root. Defaults to `FORGIS_TASK.md`.
+
+## Per-run task prompt
+
+Forgis itself stays generic and does not need to be edited for each migration phase.
+
+Before each run, create or update a Markdown task prompt in the target repository root. The default file is:
+
+```text
+FORGIS_TASK.md
+```
+
+GitHub Actions checks out the target repository, reads `target_prompt_file` from that target repository root, and embeds the file contents in the final prompt sent to the configured AI model.
+
+For example, a run can use:
+
+- `source_repo`: `owner/source-repo`
+- `target_repo`: `owner/target-repo`
+- `target_stack`: `kotlin-compose`
+- `target_prompt_file`: `FORGIS_TASK.md`
+
+Long task instructions should be written into a `.md` file in the target repository root instead of being pasted into a workflow input box. You may choose another filename by changing `target_prompt_file`, but the path is always resolved relative to the target repository root.
+
+Do not put API keys, tokens, certificates, signing material, or private information in `FORGIS_TASK.md` or any other task prompt file.
 
 ## Safety
 
