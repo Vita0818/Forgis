@@ -6,6 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import yaml
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 AGENT_DIR = REPO_ROOT / "agent"
@@ -35,6 +37,9 @@ class ForgisConfigTests(unittest.TestCase):
                     "model: deepseek/deepseek-v4-pro",
                     "target_branch: forgis/kikaria-android-pixel-2",
                     "target_base_branch: main",
+                    "dry_run: true",
+                    "run_aider: false",
+                    "confirm_real_run: false",
                     "",
                 ]
             ),
@@ -52,8 +57,6 @@ class ForgisConfigTests(unittest.TestCase):
                 target_repo="Vita0818/Outposts",
                 config_path="FORGIS_CONFIG.yml",
                 explicit_inputs={},
-                dry_run=True,
-                run_aider=True,
             )
 
             self.assertEqual(resolved.source_repo, "Vita0818/Kikaria")
@@ -61,10 +64,30 @@ class ForgisConfigTests(unittest.TestCase):
             self.assertEqual(resolved.target_subdir, "Kikaria-Android")
             self.assertEqual(resolved.run_log_path, "Kikaria-Android/FORGIS_LOG.md")
             self.assertTrue(resolved.dry_run)
-            self.assertTrue(resolved.run_aider_requested)
+            self.assertFalse(resolved.run_aider_config)
+            self.assertFalse(resolved.confirm_real_run)
             self.assertFalse(resolved.run_aider)
 
-    def test_workflow_input_overrides_config_but_booleans_do_not_come_from_config(self) -> None:
+    def test_config_drives_dry_run_run_aider_and_confirm_real_run(self) -> None:
+        with self.make_temp_target() as dirname:
+            target = Path(dirname)
+            self.write_default_config(target)
+            with (target / "FORGIS_CONFIG.yml").open("a", encoding="utf-8") as file:
+                file.write("run_aider: true\n")
+
+            resolved = resolve_config(
+                target_root=target,
+                target_repo="Vita0818/Outposts",
+                config_path="FORGIS_CONFIG.yml",
+                explicit_inputs={},
+            )
+
+            self.assertTrue(resolved.dry_run)
+            self.assertTrue(resolved.run_aider_config)
+            self.assertFalse(resolved.run_aider)
+            self.assertFalse(resolved.real_run_allowed)
+
+    def test_dry_run_false_requires_confirm_real_run(self) -> None:
         with self.make_temp_target() as dirname:
             target = Path(dirname)
             self.write_default_config(target)
@@ -72,42 +95,70 @@ class ForgisConfigTests(unittest.TestCase):
                 file.write("dry_run: false\n")
                 file.write("run_aider: true\n")
 
+            with self.assertRaisesRegex(
+                ValueError,
+                "Real AI migration requires confirm_real_run: true in FORGIS_CONFIG.yml.",
+            ):
+                resolve_config(
+                    target_root=target,
+                    target_repo="Vita0818/Outposts",
+                    config_path="FORGIS_CONFIG.yml",
+                    explicit_inputs={},
+                )
+
+    def test_real_ai_migration_requires_all_three_config_flags(self) -> None:
+        with self.make_temp_target() as dirname:
+            target = Path(dirname)
+            self.write_default_config(target)
+            with (target / "FORGIS_CONFIG.yml").open("a", encoding="utf-8") as file:
+                file.write("dry_run: false\n")
+                file.write("run_aider: true\n")
+                file.write("confirm_real_run: true\n")
+
             resolved = resolve_config(
                 target_root=target,
                 target_repo="Vita0818/Outposts",
                 config_path="FORGIS_CONFIG.yml",
-                explicit_inputs={"target_stack": "custom-stack"},
-                dry_run=True,
-                run_aider=False,
+                explicit_inputs={},
             )
 
-            self.assertEqual(resolved.target_stack, "custom-stack")
-            self.assertTrue(resolved.dry_run)
-            self.assertFalse(resolved.run_aider_requested)
-            self.assertFalse(resolved.run_aider)
+            self.assertFalse(resolved.dry_run)
+            self.assertTrue(resolved.run_aider_config)
+            self.assertTrue(resolved.confirm_real_run)
+            self.assertTrue(resolved.real_run_allowed)
+            self.assertTrue(resolved.run_aider)
 
-    def test_legacy_inputs_work_without_config_file(self) -> None:
+    def test_missing_config_requires_configured_fields(self) -> None:
         with self.make_temp_target() as dirname:
             target = Path(dirname)
 
+            with self.assertRaisesRegex(ValueError, "Missing required Forgis migration parameters"):
+                resolve_config(
+                    target_root=target,
+                    target_repo="owner/target",
+                    config_path="FORGIS_CONFIG.yml",
+                    explicit_inputs={"source_repo": "owner/source"},
+                )
+
+    def test_source_repo_workflow_override_is_the_only_config_override(self) -> None:
+        with self.make_temp_target() as dirname:
+            target = Path(dirname)
+            self.write_default_config(target)
+
             resolved = resolve_config(
                 target_root=target,
-                target_repo="owner/target",
+                target_repo="Vita0818/Outposts",
                 config_path="FORGIS_CONFIG.yml",
                 explicit_inputs={
-                    "source_repo": "owner/source",
-                    "target_platform": "android",
-                    "target_stack": "kotlin-compose",
-                    "target_branch": "forgis/android",
+                    "source_repo": "Override/Source",
+                    "target_stack": "ignored-stack",
+                    "target_branch": "ignored-branch",
                 },
-                dry_run=True,
-                run_aider=False,
             )
 
-            self.assertFalse(resolved.config_found)
-            self.assertEqual(resolved.source_ref, "main")
-            self.assertEqual(resolved.task_prompt_path, "FORGIS_TASK.md")
-            self.assertEqual(resolved.run_log_path, "forgis-output/FORGIS_LOG.md")
+            self.assertEqual(resolved.source_repo, "Override/Source")
+            self.assertEqual(resolved.target_stack, "kotlin-compose")
+            self.assertEqual(resolved.target_branch, "forgis/kikaria-android-pixel-2")
 
     def test_run_log_must_be_inside_target_subdir(self) -> None:
         with self.make_temp_target() as dirname:
@@ -122,8 +173,6 @@ class ForgisConfigTests(unittest.TestCase):
                     target_repo="Vita0818/Outposts",
                     config_path="FORGIS_CONFIG.yml",
                     explicit_inputs={},
-                    dry_run=True,
-                    run_aider=False,
                 )
 
     def test_empty_and_invalid_config_fail_clearly(self) -> None:
@@ -136,8 +185,6 @@ class ForgisConfigTests(unittest.TestCase):
                     target_repo="owner/target",
                     config_path="FORGIS_CONFIG.yml",
                     explicit_inputs={},
-                    dry_run=True,
-                    run_aider=False,
                 )
 
             (target / "FORGIS_CONFIG.yml").write_text("source_repo: [", encoding="utf-8")
@@ -147,8 +194,6 @@ class ForgisConfigTests(unittest.TestCase):
                     target_repo="owner/target",
                     config_path="FORGIS_CONFIG.yml",
                     explicit_inputs={},
-                    dry_run=True,
-                    run_aider=False,
                 )
 
     def test_guardrails_detect_readonly_file_changes(self) -> None:
@@ -228,6 +273,101 @@ class ForgisConfigTests(unittest.TestCase):
             self.assertIn("Config file path relative to target repository root: FORGIS_CONFIG.yml", prompt)
             self.assertIn("Forgis will append the long-term run log at `Kikaria-Android/FORGIS_LOG.md`", prompt)
             self.assertNotIn(" ".join(("make", "the", "greeting", "more", "casual")), prompt)
+
+    def test_main_workflow_ui_only_exposes_target_and_source_repo(self) -> None:
+        workflow = yaml.load(
+            (REPO_ROOT / ".github/workflows/migrate.yml").read_text(encoding="utf-8"),
+            Loader=yaml.BaseLoader,
+        )
+
+        inputs = workflow["on"]["workflow_dispatch"]["inputs"]
+
+        self.assertEqual(list(inputs.keys()), ["target_repo", "source_repo"])
+        self.assertEqual(inputs["target_repo"]["required"], "true")
+        self.assertEqual(inputs["source_repo"]["required"], "false")
+        for hidden_input in [
+            "config_path",
+            "source_ref",
+            "dry_run",
+            "run_aider",
+            "target_platform",
+            "target_stack",
+            "migration_profile",
+            "target_subdir",
+            "task_prompt_path",
+            "run_log_path",
+            "model",
+            "target_branch",
+            "target_base_branch",
+            "target_prompt_file",
+            "task_prompt_file",
+            "aider_model",
+            "base_branch",
+        ]:
+            self.assertNotIn(hidden_input, inputs)
+
+    def test_main_workflow_uses_fixed_config_path(self) -> None:
+        workflow_text = (REPO_ROOT / ".github/workflows/migrate.yml").read_text(encoding="utf-8")
+
+        self.assertIn("FORGIS_CONFIG.yml", workflow_text)
+        self.assertNotIn("${{ inputs.config_path }}", workflow_text)
+
+    def test_dry_run_log_is_preview_only_and_does_not_modify_target_repo(self) -> None:
+        with self.make_temp_target() as dirname:
+            target = Path(dirname)
+            preview = target / "preview.md"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(AGENT_DIR / "write_run_log.py"),
+                    "--target",
+                    str(target),
+                    "--source-repo",
+                    "owner/source",
+                    "--source-ref",
+                    "main",
+                    "--target-repo",
+                    "owner/target",
+                    "--target-base-branch",
+                    "main",
+                    "--target-branch",
+                    "forgis/test",
+                    "--target-platform",
+                    "android",
+                    "--target-stack",
+                    "kotlin-compose",
+                    "--migration-profile",
+                    "default",
+                    "--target-subdir",
+                    "Kikaria-Android",
+                    "--task-prompt-path",
+                    "FORGIS_TASK.md",
+                    "--config-path",
+                    "FORGIS_CONFIG.yml",
+                    "--model",
+                    "deepseek/deepseek-v4-pro",
+                    "--dry-run",
+                    "true",
+                    "--run-aider",
+                    "false",
+                    "--run-aider-config",
+                    "true",
+                    "--confirm-real-run",
+                    "false",
+                    "--append-target-log",
+                    "true",
+                    "--preview-output",
+                    str(preview),
+                ],
+                cwd=REPO_ROOT,
+                check=True,
+                text=True,
+            )
+
+            self.assertTrue(preview.is_file())
+            self.assertIn("dry_run=true, Aider execution is disabled.", preview.read_text(encoding="utf-8"))
+            self.assertFalse((target / "Kikaria-Android" / "FORGIS_LOG.md").exists())
 
 
 if __name__ == "__main__":

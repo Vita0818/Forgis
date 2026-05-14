@@ -28,6 +28,9 @@ CONFIG_FIELDS = {
     "target_branch",
     "target_base_branch",
     "run_log_path",
+    "dry_run",
+    "run_aider",
+    "confirm_real_run",
 }
 
 REQUIRED_FIELDS = {
@@ -57,7 +60,9 @@ class ResolvedConfig:
     config_found: bool
     config_keys: tuple[str, ...]
     dry_run: bool
-    run_aider_requested: bool
+    run_aider_config: bool
+    confirm_real_run: bool
+    real_run_allowed: bool
     run_aider: bool
 
     def env(self) -> dict[str, str]:
@@ -78,7 +83,11 @@ class ResolvedConfig:
             "CONFIG_FOUND": "true" if self.config_found else "false",
             "CONFIG_KEYS": ",".join(self.config_keys),
             "DRY_RUN": "true" if self.dry_run else "false",
-            "RUN_AIDER_REQUESTED": "true" if self.run_aider_requested else "false",
+            "DRY_RUN_CONFIG": "true" if self.dry_run else "false",
+            "RUN_AIDER_CONFIG": "true" if self.run_aider_config else "false",
+            "RUN_AIDER_REQUESTED": "true" if self.run_aider_config else "false",
+            "CONFIRM_REAL_RUN": "true" if self.confirm_real_run else "false",
+            "REAL_RUN_ALLOWED": "true" if self.real_run_allowed else "false",
             "RUN_AIDER": "true" if self.run_aider else "false",
             "RUN_AI": "true" if self.run_aider else "false",
         }
@@ -208,14 +217,19 @@ def select_value(
     return default
 
 
+def select_config_bool(config: dict[str, Any], field: str, default: bool) -> bool:
+    if field not in config or config[field] is None:
+        return default
+
+    return parse_bool(config[field], field)
+
+
 def resolve_config(
     *,
     target_root: Path,
     target_repo: str | None,
-    config_path: str | None,
+    config_path: str | None = DEFAULT_CONFIG_PATH,
     explicit_inputs: dict[str, Any],
-    dry_run: str | bool,
-    run_aider: str | bool,
 ) -> ResolvedConfig:
     target_root = target_root.resolve()
     if not target_root.exists() or not target_root.is_dir():
@@ -227,34 +241,41 @@ def resolve_config(
     merged_inputs = dict(explicit_inputs)
     merged_inputs["target_repo"] = non_empty(target_repo) or merged_inputs.get("target_repo")
 
+    source_repo_override = non_empty(merged_inputs.get("source_repo"))
+    source_repo_value = (
+        clean_single_line(source_repo_override, "source_repo")
+        if source_repo_override is not None
+        else select_value("source_repo", {}, config)
+    )
+
     values: dict[str, str | None] = {
-        "source_repo": select_value("source_repo", merged_inputs, config),
-        "source_ref": select_value("source_ref", merged_inputs, config, DEFAULT_SOURCE_REF),
+        "source_repo": source_repo_value,
+        "source_ref": select_value("source_ref", {}, config, DEFAULT_SOURCE_REF),
         "target_repo": select_value("target_repo", merged_inputs, config),
-        "target_platform": select_value("target_platform", merged_inputs, config),
-        "target_stack": select_value("target_stack", merged_inputs, config),
+        "target_platform": select_value("target_platform", {}, config),
+        "target_stack": select_value("target_stack", {}, config),
         "migration_profile": select_value(
             "migration_profile",
-            merged_inputs,
+            {},
             config,
             DEFAULT_MIGRATION_PROFILE,
         ),
-        "target_subdir": select_value("target_subdir", merged_inputs, config, DEFAULT_TARGET_SUBDIR),
+        "target_subdir": select_value("target_subdir", {}, config, DEFAULT_TARGET_SUBDIR),
         "task_prompt_path": select_value(
             "task_prompt_path",
-            merged_inputs,
+            {},
             config,
             DEFAULT_TASK_PROMPT_PATH,
         ),
-        "model": select_value("model", merged_inputs, config, DEFAULT_MODEL),
-        "target_branch": select_value("target_branch", merged_inputs, config),
+        "model": select_value("model", {}, config, DEFAULT_MODEL),
+        "target_branch": select_value("target_branch", {}, config),
         "target_base_branch": select_value(
             "target_base_branch",
-            merged_inputs,
+            {},
             config,
             DEFAULT_TARGET_BASE_BRANCH,
         ),
-        "run_log_path": select_value("run_log_path", merged_inputs, config),
+        "run_log_path": select_value("run_log_path", {}, config),
     }
 
     missing = sorted(field for field in REQUIRED_FIELDS if not values.get(field))
@@ -263,7 +284,7 @@ def resolve_config(
         raise ValueError(
             "Missing required Forgis migration parameters: "
             + ", ".join(missing)
-            + f". Provide them in FORGIS_CONFIG.yml or explicit workflow inputs; {source}."
+            + f". Provide them in FORGIS_CONFIG.yml; only source_repo can be overridden by workflow input. {source}."
         )
 
     target_subdir = values["target_subdir"] or DEFAULT_TARGET_SUBDIR
@@ -283,9 +304,15 @@ def resolve_config(
         "run_log_path",
     )
 
-    dry_run_value = parse_bool(dry_run, "dry_run")
-    run_aider_requested = parse_bool(run_aider, "run_aider")
-    run_aider_effective = run_aider_requested and not dry_run_value
+    dry_run_value = select_config_bool(config, "dry_run", True)
+    run_aider_config = select_config_bool(config, "run_aider", False)
+    confirm_real_run = select_config_bool(config, "confirm_real_run", False)
+
+    if not dry_run_value and not confirm_real_run:
+        raise ValueError("Real AI migration requires confirm_real_run: true in FORGIS_CONFIG.yml.")
+
+    real_run_allowed = not dry_run_value and confirm_real_run
+    run_aider_effective = run_aider_config and real_run_allowed
 
     return ResolvedConfig(
         source_repo=values["source_repo"] or "",
@@ -304,7 +331,9 @@ def resolve_config(
         config_found=config_found,
         config_keys=tuple(sorted(str(key) for key in config.keys())),
         dry_run=dry_run_value,
-        run_aider_requested=run_aider_requested,
+        run_aider_config=run_aider_config,
+        confirm_real_run=confirm_real_run,
+        real_run_allowed=real_run_allowed,
         run_aider=run_aider_effective,
     )
 
@@ -312,8 +341,8 @@ def resolve_config(
 def markdown_summary(resolved: ResolvedConfig) -> str:
     config_keys = ", ".join(resolved.config_keys) if resolved.config_keys else "[none]"
     run_aider_note = ""
-    if resolved.run_aider_requested and not resolved.run_aider:
-        run_aider_note = " (requested, but disabled because dry_run is true)"
+    if resolved.dry_run and resolved.run_aider_config:
+        run_aider_note = " (dry_run=true, Aider execution is disabled.)"
 
     return "\n".join(
         [
@@ -336,9 +365,16 @@ def markdown_summary(resolved: ResolvedConfig) -> str:
             f"| Target subdir | `{resolved.target_subdir}` |",
             f"| Run log path | `{resolved.run_log_path}` |",
             f"| Model | `{resolved.model}` |",
-            f"| Dry run | `{str(resolved.dry_run).lower()}` |",
-            f"| Run Aider | `{str(resolved.run_aider).lower()}`{run_aider_note} |",
+            f"| dry_run config value | `{str(resolved.dry_run).lower()}` |",
+            f"| run_aider config value | `{str(resolved.run_aider_config).lower()}` |",
+            f"| confirm_real_run config value | `{str(resolved.confirm_real_run).lower()}` |",
+            f"| Effective dry_run | `{str(resolved.dry_run).lower()}` |",
+            f"| Effective run_aider | `{str(resolved.run_aider).lower()}`{run_aider_note} |",
+            f"| Writable scope | `{resolved.target_subdir}/` |",
+            f"| Read-only files | `{resolved.config_path}`, `{resolved.task_prompt_path}`, source repository, target paths outside `{resolved.target_subdir}/` |",
+            f"| Real migration allowed | `{str(resolved.real_run_allowed and resolved.run_aider).lower()}` |",
             "",
-            "Boolean run switches are controlled only by workflow inputs. The target repository config cannot enable AI calls or live pushes.",
+            "Config path is fixed to FORGIS_CONFIG.yml in the main workflow.",
+            "Real AI migration is allowed only when dry_run=false, run_aider=true, and confirm_real_run=true.",
         ]
     )
