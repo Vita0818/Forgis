@@ -10,28 +10,28 @@ Forgis is not tied to any single project.
 
 Put these two files in the target repository root:
 
-- `FORGIS_CONFIG.yml`: machine-readable migration parameters
+- `FORGIS_CONFIG.yml`: machine-readable migration parameters and run switches
 - `FORGIS_TASK.md`: long-form human task prompt for the current run
 
-Then run the GitHub Action with only the common inputs:
+Then run the main GitHub Action with only:
 
 ```text
-target_repo: owner/target-repo
-config_path: FORGIS_CONFIG.yml
-dry_run: true
-run_aider: false
+target_repo: Vita0818/Outposts
 ```
 
-For a live AI migration run:
+Optionally override only the source repository:
 
 ```text
-target_repo: owner/target-repo
-config_path: FORGIS_CONFIG.yml
-dry_run: false
-run_aider: true
+source_repo: Vita0818/Kikaria
 ```
 
-`dry_run: true` is the safe default and does not call Aider, push, or create a pull request. `run_aider` must be explicitly enabled, and it only takes effect when `dry_run` is false.
+All other migration parameters come from the target repository root file:
+
+```text
+FORGIS_CONFIG.yml
+```
+
+The main workflow fixes the config path to `FORGIS_CONFIG.yml`. It does not expose `config_path`, `dry_run`, `run_aider`, model, branch, prompt, log, or target directory fields in the manual UI.
 
 ## Example Config
 
@@ -51,6 +51,10 @@ target_branch: forgis/kikaria-android-pixel-2
 target_base_branch: main
 
 run_log_path: Kikaria-Android/FORGIS_LOG.md
+
+dry_run: true
+run_aider: false
+confirm_real_run: false
 ```
 
 If `run_log_path` is omitted, Forgis uses:
@@ -65,15 +69,48 @@ For example:
 Kikaria-Android/FORGIS_LOG.md
 ```
 
+## Run Switches
+
+Safe dry run configuration:
+
+```yaml
+dry_run: true
+run_aider: false
+confirm_real_run: false
+```
+
+Formal AI migration configuration:
+
+```yaml
+dry_run: false
+run_aider: true
+confirm_real_run: true
+```
+
+Rules:
+
+- Missing fields default to `dry_run: true`, `run_aider: false`, and `confirm_real_run: false`.
+- When `dry_run: true`, Forgis does not call AI, push, create a PR, or modify the target repository.
+- When `dry_run: true` and `run_aider: true`, Forgis forces effective Aider execution to false and logs `dry_run=true, Aider execution is disabled.`
+- When `dry_run: false`, `confirm_real_run: true` is required.
+- Real AI migration only happens when `dry_run: false`, `run_aider: true`, and `confirm_real_run: true`.
+
 ## Configuration Priority
 
-For migration parameters, Forgis resolves values in this order:
+Forgis resolves values in this order:
 
-1. Non-empty workflow input override
+1. Non-empty `source_repo` workflow input, only for `source_repo`
 2. `FORGIS_CONFIG.yml`
 3. Safe default, where one exists
 
-`dry_run` and `run_aider` are different: they are controlled only by workflow inputs. The target repository config cannot silently enable AI execution, pushes, or pull request creation.
+`target_repo` always comes from the workflow input. Every other migration parameter comes from `FORGIS_CONFIG.yml`.
+
+Required config fields are:
+
+- `source_repo`, unless provided as the workflow override
+- `target_platform`
+- `target_stack`
+- `target_branch`
 
 ## Target Task Prompt
 
@@ -102,8 +139,8 @@ Forgis enforces these runtime boundaries:
 - Aider writable scope is `target_subdir`, not the config file or task prompt file.
 - The target repository root must not be polluted with generated project files.
 - Sibling project directories must not be modified.
-- Dry runs do not call AI, push, or create pull requests.
-- `run_aider` requires explicit workflow confirmation.
+- Dry runs do not call AI, push, create PRs, or modify the target repository.
+- Real migration must explicitly set `confirm_real_run: true`.
 
 Before Aider runs, Forgis records hashes for the configured config and task prompt files. After Aider returns, Forgis checks the hashes again and fails the workflow if either read-only file changed.
 
@@ -111,7 +148,7 @@ Forgis also checks target git status and fails if any changed file is outside `t
 
 ## Long-Term Log
 
-Each run appends a Markdown entry to the long-term log file:
+Real migration runs append a Markdown entry to the long-term log file:
 
 ```text
 {target_subdir}/FORGIS_LOG.md
@@ -119,39 +156,16 @@ Each run appends a Markdown entry to the long-term log file:
 
 This file is intentionally inside the writable target output directory, so it can be committed with the migration branch.
 
-In dry run mode, Forgis still prints the proposed log entry to the workflow log and uploads it as an artifact. In live mode, the log file is part of the target repository changes that are pushed and included in the pull request.
+In dry run mode, Forgis prints the proposed log entry to the workflow log and uploads it as an artifact, but does not write it into the target repository. In live mode, the log file is part of the target repository changes that are pushed and included in the pull request.
 
 ## Workflow Inputs
 
-Common inputs:
+The main workflow exposes only:
 
-- `target_repo`
-- `config_path`
-- `dry_run`
-- `run_aider`
+- `target_repo`: required target repository containing `FORGIS_CONFIG.yml` and `FORGIS_TASK.md`
+- `source_repo`: optional source repository override
 
-Advanced override inputs remain available for compatibility:
-
-- `source_repo`
-- `source_ref`
-- `target_platform`
-- `target_stack`
-- `migration_profile`
-- `target_subdir`
-- `task_prompt_path`
-- `run_log_path`
-- `target_branch`
-- `target_base_branch`
-- `model`
-
-Deprecated aliases are still accepted:
-
-- `run_ai` for `run_aider`
-- `target_prompt_file` for `task_prompt_path`
-- `aider_model` for `model`
-- `base_branch` for `target_base_branch`
-
-If `config_path` is missing from the target repository, Forgis can still run in the old parameter mode, but all required migration fields must be supplied through workflow inputs.
+No deprecated alias or advanced override inputs are shown in the main manual run UI.
 
 ## Required Secrets
 
@@ -160,7 +174,7 @@ API keys must be stored in GitHub Actions Secrets, not in repository files.
 Required GitHub Actions secrets:
 
 - `DEEPSEEK_API_KEY`
-  - Used only for DeepSeek API access when `run_aider` is effective.
+  - Used only for DeepSeek API access when effective `run_aider` is true.
 - `FORGIS_SOURCE_TOKEN`
   - Used only to check out the source repository.
   - Should have source repository Contents read and Metadata read permissions.

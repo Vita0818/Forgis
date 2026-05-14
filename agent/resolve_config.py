@@ -28,21 +28,6 @@ def main() -> None:
     parser.add_argument("--config-path", default="FORGIS_CONFIG.yml", help="Config path relative to target root")
 
     parser.add_argument("--source-repo", default="")
-    parser.add_argument("--source-ref", default="")
-    parser.add_argument("--target-platform", default="")
-    parser.add_argument("--target-stack", default="")
-    parser.add_argument("--migration-profile", default="")
-    parser.add_argument("--target-subdir", default="")
-    parser.add_argument("--task-prompt-path", default="")
-    parser.add_argument("--target-prompt-file", default="")
-    parser.add_argument("--model", default="")
-    parser.add_argument("--aider-model", default="")
-    parser.add_argument("--target-branch", default="")
-    parser.add_argument("--target-base-branch", default="")
-    parser.add_argument("--base-branch", default="")
-    parser.add_argument("--run-log-path", default="")
-    parser.add_argument("--dry-run", required=True)
-    parser.add_argument("--run-aider", required=True)
 
     parser.add_argument("--github-env", default="", help="Optional $GITHUB_ENV path to append resolved env vars")
     parser.add_argument("--github-output", default="", help="Optional $GITHUB_OUTPUT path to append resolved outputs")
@@ -52,16 +37,6 @@ def main() -> None:
 
     explicit_inputs = {
         "source_repo": args.source_repo,
-        "source_ref": args.source_ref,
-        "target_platform": args.target_platform,
-        "target_stack": args.target_stack,
-        "migration_profile": args.migration_profile,
-        "target_subdir": args.target_subdir,
-        "task_prompt_path": args.task_prompt_path or args.target_prompt_file,
-        "model": args.model or args.aider_model,
-        "target_branch": args.target_branch,
-        "target_base_branch": args.target_base_branch or args.base_branch,
-        "run_log_path": args.run_log_path,
     }
 
     resolved = resolve_config(
@@ -69,8 +44,6 @@ def main() -> None:
         target_repo=args.target_repo,
         config_path=args.config_path,
         explicit_inputs=explicit_inputs,
-        dry_run=args.dry_run,
-        run_aider=args.run_aider,
     )
 
     summary = markdown_summary(resolved)

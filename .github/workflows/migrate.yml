@@ -8,110 +8,8 @@ on:
         required: true
         type: string
 
-      config_path:
-        description: "Config file path relative to the target repository root"
-        required: false
-        default: "FORGIS_CONFIG.yml"
-        type: string
-
-      dry_run:
-        description: "Run without AI execution, push, or pull request creation"
-        required: true
-        default: true
-        type: boolean
-
-      run_aider:
-        description: "Allow Aider/AI execution when dry_run is false"
-        required: true
-        default: false
-        type: boolean
-
       source_repo:
-        description: "Advanced override: source repository, for example owner/source-repo"
-        required: false
-        default: ""
-        type: string
-
-      source_ref:
-        description: "Advanced override: source branch, tag, or commit"
-        required: false
-        default: ""
-        type: string
-
-      target_platform:
-        description: "Advanced override: target platform, for example android"
-        required: false
-        default: ""
-        type: string
-
-      target_stack:
-        description: "Advanced override: target technical stack, for example kotlin-compose"
-        required: false
-        default: ""
-        type: string
-
-      migration_profile:
-        description: "Advanced override: migration profile, for example default or pixel-clone-app"
-        required: false
-        default: ""
-        type: string
-
-      target_subdir:
-        description: "Advanced override: only writable target output directory"
-        required: false
-        default: ""
-        type: string
-
-      task_prompt_path:
-        description: "Advanced override: read-only task prompt path relative to target root"
-        required: false
-        default: ""
-        type: string
-
-      run_log_path:
-        description: "Advanced override: long-term log path; must be inside target_subdir"
-        required: false
-        default: ""
-        type: string
-
-      target_branch:
-        description: "Advanced override: target migration branch"
-        required: false
-        default: ""
-        type: string
-
-      target_base_branch:
-        description: "Advanced override: target repository base branch for pull requests"
-        required: false
-        default: ""
-        type: string
-
-      model:
-        description: "Advanced override: Aider model name"
-        required: false
-        default: ""
-        type: string
-
-      run_ai:
-        description: "Deprecated alias for run_aider"
-        required: false
-        default: false
-        type: boolean
-
-      target_prompt_file:
-        description: "Deprecated alias for task_prompt_path"
-        required: false
-        default: ""
-        type: string
-
-      aider_model:
-        description: "Deprecated alias for model"
-        required: false
-        default: ""
-        type: string
-
-      base_branch:
-        description: "Deprecated alias for target_base_branch"
+        description: "Optional override: source repository, for example owner/source-repo"
         required: false
         default: ""
         type: string
@@ -150,32 +48,13 @@ jobs:
 
       - name: Resolve Forgis config
         id: resolve
-        env:
-          DRY_RUN_INPUT: ${{ inputs.dry_run }}
-          RUN_AIDER_INPUT: ${{ inputs.run_aider || inputs.run_ai }}
         run: |
           mkdir -p "$GITHUB_WORKSPACE/forgis-runtime"
 
           python forgis/agent/resolve_config.py \
             --target "$GITHUB_WORKSPACE/target-output" \
             --target-repo "${{ inputs.target_repo }}" \
-            --config-path "${{ inputs.config_path }}" \
             --source-repo "${{ inputs.source_repo }}" \
-            --source-ref "${{ inputs.source_ref }}" \
-            --target-platform "${{ inputs.target_platform }}" \
-            --target-stack "${{ inputs.target_stack }}" \
-            --migration-profile "${{ inputs.migration_profile }}" \
-            --target-subdir "${{ inputs.target_subdir }}" \
-            --task-prompt-path "${{ inputs.task_prompt_path }}" \
-            --target-prompt-file "${{ inputs.target_prompt_file }}" \
-            --run-log-path "${{ inputs.run_log_path }}" \
-            --target-branch "${{ inputs.target_branch }}" \
-            --target-base-branch "${{ inputs.target_base_branch }}" \
-            --base-branch "${{ inputs.base_branch }}" \
-            --model "${{ inputs.model }}" \
-            --aider-model "${{ inputs.aider_model }}" \
-            --dry-run "$DRY_RUN_INPUT" \
-            --run-aider "$RUN_AIDER_INPUT" \
             --github-env "$GITHUB_ENV" \
             --github-output "$GITHUB_OUTPUT" \
             --summary-output "$GITHUB_WORKSPACE/forgis-runtime/resolved_config.md"
@@ -188,30 +67,11 @@ jobs:
 
       - name: Resolve Forgis config from base branch
         id: resolve_base
-        env:
-          DRY_RUN_INPUT: ${{ inputs.dry_run }}
-          RUN_AIDER_INPUT: ${{ inputs.run_aider || inputs.run_ai }}
         run: |
           python forgis/agent/resolve_config.py \
             --target "$GITHUB_WORKSPACE/target-output" \
             --target-repo "${{ inputs.target_repo }}" \
-            --config-path "${{ inputs.config_path }}" \
             --source-repo "${{ inputs.source_repo }}" \
-            --source-ref "${{ inputs.source_ref }}" \
-            --target-platform "${{ inputs.target_platform }}" \
-            --target-stack "${{ inputs.target_stack }}" \
-            --migration-profile "${{ inputs.migration_profile }}" \
-            --target-subdir "${{ inputs.target_subdir }}" \
-            --task-prompt-path "${{ inputs.task_prompt_path }}" \
-            --target-prompt-file "${{ inputs.target_prompt_file }}" \
-            --run-log-path "${{ inputs.run_log_path }}" \
-            --target-branch "${{ inputs.target_branch }}" \
-            --target-base-branch "${{ inputs.target_base_branch }}" \
-            --base-branch "${{ inputs.base_branch }}" \
-            --model "${{ inputs.model }}" \
-            --aider-model "${{ inputs.aider_model }}" \
-            --dry-run "$DRY_RUN_INPUT" \
-            --run-aider "$RUN_AIDER_INPUT" \
             --github-env "$GITHUB_ENV" \
             --github-output "$GITHUB_OUTPUT" \
             --summary-output "$GITHUB_WORKSPACE/forgis-runtime/resolved_config.md"
@@ -246,6 +106,7 @@ jobs:
             --model "$AIDER_MODEL" \
             --dry-run "$DRY_RUN" \
             --run-ai "$RUN_AIDER" \
+            --confirm-real-run "$CONFIRM_REAL_RUN" \
             --summary-output "$GITHUB_WORKSPACE/forgis-runtime/run_summary.md"
 
       - name: Collect source bundle and manifest
@@ -338,7 +199,9 @@ jobs:
             --run-log-path "$RUN_LOG_PATH" \
             --dry-run "$DRY_RUN" \
             --run-aider "$RUN_AIDER" \
-            --run-aider-requested "$RUN_AIDER_REQUESTED" \
+            --run-aider-config "$RUN_AIDER_CONFIG" \
+            --confirm-real-run "$CONFIRM_REAL_RUN" \
+            --append-target-log "$RUN_AIDER" \
             --run-url "$RUN_URL" \
             --build-result "See workflow logs for build and guardrail checks." \
             --summary "Forgis resolved config, built the final prompt, and ran the enabled migration steps." \
@@ -382,6 +245,11 @@ jobs:
           if [[ "$DRY_RUN" == "true" ]]; then
             echo "DRY_RUN is true. Skipping push and pull request creation."
             exit 0
+          fi
+
+          if [[ "$CONFIRM_REAL_RUN" != "true" ]]; then
+            echo "Real AI migration requires confirm_real_run: true in FORGIS_CONFIG.yml."
+            exit 1
           fi
 
           bash forgis/agent/create_pr.sh

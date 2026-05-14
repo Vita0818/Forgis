@@ -72,6 +72,7 @@ def build_summary(
     model: str,
     dry_run: bool,
     run_aider: bool,
+    confirm_real_run: bool,
     source_files: list[str],
 ) -> str:
     now = datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
@@ -100,6 +101,7 @@ Generated at: {now}
 - Aider model: {model}
 - Dry run: {dry_run}
 - Run Aider: {run_aider}
+- Confirm real run: {confirm_real_run}
 
 ## Safety Boundaries
 
@@ -142,6 +144,7 @@ def main() -> None:
     parser.add_argument("--model", required=False, default="deepseek/deepseek-v4-pro")
     parser.add_argument("--dry-run", required=True, help="Whether to avoid pushing changes")
     parser.add_argument("--run-ai", required=True, help="Whether Aider migration is enabled")
+    parser.add_argument("--confirm-real-run", required=False, default="false")
     parser.add_argument("--summary-output", required=False, default="", help="Optional run summary artifact path")
 
     args = parser.parse_args()
@@ -156,6 +159,7 @@ def main() -> None:
 
     dry_run = parse_bool(args.dry_run, "dry_run")
     run_ai = parse_bool(args.run_ai, "run_ai")
+    confirm_real_run = parse_bool(args.confirm_real_run, "confirm_real_run")
 
     run_log_path = args.run_log_path.strip() or f"{args.target_subdir.rstrip('/')}/{DEFAULT_RUN_LOG_FILENAME}"
     _, run_log_relative = require_path_inside_subdir(
@@ -185,6 +189,7 @@ def main() -> None:
         model=args.model,
         dry_run=dry_run,
         run_aider=run_ai,
+        confirm_real_run=confirm_real_run,
         source_files=source_files,
     )
 

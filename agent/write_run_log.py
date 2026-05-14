@@ -17,6 +17,7 @@ def append_run_log(
     run_log_path: str,
     entry: str,
     preview_output: str | None,
+    append_target_log: bool,
 ) -> Path:
     log_path, _ = require_path_inside_subdir(
         target,
@@ -24,11 +25,12 @@ def append_run_log(
         run_log_path,
         "run_log_path",
     )
-    log_path.parent.mkdir(parents=True, exist_ok=True)
+    if append_target_log:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
 
-    existing = log_path.read_text(encoding="utf-8", errors="replace") if log_path.exists() else ""
-    separator = "\n\n" if existing and not existing.endswith("\n\n") else ""
-    log_path.write_text(existing + separator + entry, encoding="utf-8")
+        existing = log_path.read_text(encoding="utf-8", errors="replace") if log_path.exists() else ""
+        separator = "\n\n" if existing and not existing.endswith("\n\n") else ""
+        log_path.write_text(existing + separator + entry, encoding="utf-8")
 
     if preview_output:
         preview_path = Path(preview_output).resolve()
@@ -42,8 +44,10 @@ def markdown_entry(args: argparse.Namespace, run_log_relative: str) -> str:
     now = datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
     dry_run = parse_bool(args.dry_run, "dry_run")
     run_aider = parse_bool(args.run_aider, "run_aider")
-    run_aider_requested = parse_bool(args.run_aider_requested, "run_aider_requested")
+    run_aider_config = parse_bool(args.run_aider_config, "run_aider_config")
+    confirm_real_run = parse_bool(args.confirm_real_run, "confirm_real_run")
     run_mode = "dry-run" if dry_run else "live"
+    real_migration_allowed = (not dry_run) and run_aider_config and confirm_real_run and run_aider
 
     if dry_run:
         pr_result = "Skipped because dry_run is true."
@@ -53,8 +57,10 @@ def markdown_entry(args: argparse.Namespace, run_log_relative: str) -> str:
         pr_result = args.pr_result
 
     warnings: list[str] = []
-    if run_aider_requested and not run_aider:
-        warnings.append("run_aider was requested, but dry_run kept AI execution disabled.")
+    if dry_run and run_aider_config:
+        warnings.append("dry_run=true, Aider execution is disabled.")
+    if not dry_run and not confirm_real_run:
+        warnings.append("Real AI migration requires confirm_real_run: true in FORGIS_CONFIG.yml.")
     if args.warning:
         warnings.append(args.warning)
 
@@ -74,9 +80,12 @@ def markdown_entry(args: argparse.Namespace, run_log_relative: str) -> str:
 | Run time | `{now}` |
 | Run URL | `{args.run_url or '[not provided]'}` |
 | Run mode | `{run_mode}` |
-| Dry run | `{str(dry_run).lower()}` |
-| Run Aider | `{str(run_aider).lower()}` |
-| Run Aider requested | `{str(run_aider_requested).lower()}` |
+| dry_run config value | `{str(dry_run).lower()}` |
+| run_aider config value | `{str(run_aider_config).lower()}` |
+| confirm_real_run config value | `{str(confirm_real_run).lower()}` |
+| Effective dry_run | `{str(dry_run).lower()}` |
+| Effective run_aider | `{str(run_aider).lower()}` |
+| Real migration allowed | `{str(real_migration_allowed).lower()}` |
 | Source repo | `{args.source_repo}` |
 | Source ref | `{args.source_ref}` |
 | Target repo | `{args.target_repo}` |
@@ -130,7 +139,9 @@ def main() -> None:
     parser.add_argument("--run-log-path", required=False, default="")
     parser.add_argument("--dry-run", required=True)
     parser.add_argument("--run-aider", required=True)
-    parser.add_argument("--run-aider-requested", required=True)
+    parser.add_argument("--run-aider-config", required=True)
+    parser.add_argument("--confirm-real-run", required=True)
+    parser.add_argument("--append-target-log", default="false")
     parser.add_argument("--run-url", default="")
     parser.add_argument("--build-result", default="See workflow logs.")
     parser.add_argument("--pr-result", default="Pending push and pull request step.")
@@ -150,17 +161,23 @@ def main() -> None:
         "run_log_path",
     )
     entry = markdown_entry(args, run_log_relative)
+    dry_run = parse_bool(args.dry_run, "dry_run")
+    append_target_log = parse_bool(args.append_target_log, "append_target_log") and not dry_run
     log_path = append_run_log(
         target=target,
         target_subdir=args.target_subdir,
         run_log_path=run_log_input,
         entry=entry,
         preview_output=args.preview_output or None,
+        append_target_log=append_target_log,
     )
 
     print("Forgis long-term run log entry:")
     print(entry)
-    print(f"Long-term run log appended to: {log_path}")
+    if append_target_log:
+        print(f"Long-term run log appended to: {log_path}")
+    else:
+        print(f"Long-term run log preview only; target repository was not modified: {log_path}")
 
 
 if __name__ == "__main__":

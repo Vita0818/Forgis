@@ -40,6 +40,7 @@ TARGET_SUBDIR="${TARGET_SUBDIR:-forgis-output}"
 RUN_LOG_PATH="${RUN_LOG_PATH:-$TARGET_SUBDIR/FORGIS_LOG.md}"
 CONFIG_PATH="${CONFIG_PATH:-FORGIS_CONFIG.yml}"
 TASK_PROMPT_PATH="${TASK_PROMPT_PATH:-FORGIS_TASK.md}"
+CONFIRM_REAL_RUN="${CONFIRM_REAL_RUN:-false}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [[ ! -d "$TARGET_REPO_DIR" ]]; then
@@ -98,6 +99,11 @@ fi
 if [[ "$DRY_RUN_NORMALIZED" == "true" ]]; then
   echo "Dry run enabled. Skipping push and pull request creation."
   exit 0
+fi
+
+if [[ "${CONFIRM_REAL_RUN,,}" != "true" ]]; then
+  echo "Real AI migration requires confirm_real_run: true in FORGIS_CONFIG.yml." >&2
+  exit 1
 fi
 
 echo "Pushing branch: $TARGET_BRANCH"
