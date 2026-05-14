@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       source_repo:
-        description: "Source repository, for example owner/apple-source-repo"
+        description: "Source repository, for example owner/source-repo"
         required: true
         default: "Vita0818/Forgis"
         type: string
@@ -16,7 +16,7 @@ on:
         type: string
 
       target_repo:
-        description: "Target output repository, for example owner/target-output-repo"
+        description: "Target output repository, for example owner/target-repo"
         required: true
         default: "Vita0818/Forgis"
         type: string
@@ -68,6 +68,12 @@ on:
         default: false
         type: boolean
 
+      target_prompt_file:
+        description: "Markdown task prompt file path relative to target repository root"
+        required: true
+        default: "FORGIS_TASK.md"
+        type: string
+
       aider_model:
         description: "Aider model name. Use DeepSeek Pro by default."
         required: true
@@ -93,6 +99,7 @@ jobs:
       TARGET_BASE_BRANCH: ${{ inputs.target_base_branch }}
       DRY_RUN: ${{ inputs.dry_run }}
       RUN_AI: ${{ inputs.run_ai }}
+      TARGET_PROMPT_FILE: ${{ inputs.target_prompt_file }}
       AIDER_MODEL: ${{ inputs.aider_model }}
 
     steps:
@@ -168,6 +175,7 @@ jobs:
             --migration-profile "$MIGRATION_PROFILE" \
             --source-bundle "$GITHUB_WORKSPACE/forgis-runtime/source_bundle.md" \
             --source-manifest "$GITHUB_WORKSPACE/forgis-runtime/source_manifest.md" \
+            --target-prompt-file "$GITHUB_WORKSPACE/target-output/$TARGET_PROMPT_FILE" \
             --output "$GITHUB_WORKSPACE/forgis-runtime/forgis_prompt.md"
 
           test -f "$GITHUB_WORKSPACE/forgis-runtime/forgis_prompt.md"
@@ -177,6 +185,17 @@ jobs:
           bash -n forgis/agent/run_aider.sh
           bash -n forgis/agent/build_target.sh
           bash -n forgis/agent/create_pr.sh
+
+      - name: Check target repository task prompt
+        if: ${{ inputs.run_ai == true || inputs.run_ai == 'true' }}
+        run: |
+          TARGET_PROMPT_PATH="$GITHUB_WORKSPACE/target-output/$TARGET_PROMPT_FILE"
+
+          if [ ! -f "$TARGET_PROMPT_PATH" ] || [ ! -s "$TARGET_PROMPT_PATH" ]; then
+            echo "Target repository task prompt is required when run_ai is true."
+            echo "Create a non-empty $TARGET_PROMPT_FILE file in the target repository root."
+            exit 1
+          fi
 
       - name: Run Aider with configured model
         if: ${{ inputs.run_ai == true || inputs.run_ai == 'true' }}
