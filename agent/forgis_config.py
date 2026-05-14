@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,7 @@ DEFAULT_FORBIDDEN_PROMPT_MARKERS = (
     "Which file (or which phrase) should be changed?",
     "casual greeting",
 )
+ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 CONFIG_FIELDS = {
     "source_repo",
@@ -39,6 +41,7 @@ CONFIG_FIELDS = {
     "confirm_real_run",
     "required_prompt_markers",
     "forbidden_prompt_markers",
+    "model_env",
 }
 
 REQUIRED_FIELDS = {
@@ -74,8 +77,10 @@ class ResolvedConfig:
     run_aider: bool
     required_prompt_markers: tuple[str, ...]
     forbidden_prompt_markers: tuple[str, ...]
+    model_env: tuple[tuple[str, str], ...]
 
     def env(self) -> dict[str, str]:
+        model_env = {runtime: source for runtime, source in self.model_env}
         return {
             "SOURCE_REPO": self.source_repo,
             "SOURCE_REF": self.source_ref,
@@ -108,6 +113,7 @@ class ResolvedConfig:
                 list(self.forbidden_prompt_markers),
                 ensure_ascii=False,
             ),
+            "MODEL_ENV_JSON": json.dumps(model_env, ensure_ascii=False, sort_keys=True),
         }
 
     def outputs(self) -> dict[str, str]:
@@ -167,6 +173,36 @@ def select_string_list(config: dict[str, Any], field: str) -> tuple[str, ...]:
         markers.append(clean_single_line(text, f"{field}[{index}]"))
 
     return dedupe_strings(markers)
+
+
+def validate_env_name(value: str, label: str) -> str:
+    name = clean_single_line(value.strip(), label)
+    if not ENV_NAME_PATTERN.fullmatch(name):
+        raise ValueError(f"{label} must be a valid environment variable name: {value}")
+    return name
+
+
+def select_model_env(config: dict[str, Any]) -> tuple[tuple[str, str], ...]:
+    if "model_env" not in config or config["model_env"] is None:
+        return ()
+
+    value = config["model_env"]
+    if not isinstance(value, dict):
+        raise ValueError("model_env must be a YAML mapping of runtime env names to secret env names.")
+
+    pairs: list[tuple[str, str]] = []
+    for runtime_name_raw, secret_name_raw in value.items():
+        if not isinstance(runtime_name_raw, str):
+            raise ValueError("model_env contains a non-string runtime env name.")
+
+        runtime_name = validate_env_name(runtime_name_raw, "model_env runtime env name")
+        secret_name_text = non_empty(secret_name_raw)
+        if secret_name_text is None:
+            raise ValueError(f"model_env.{runtime_name} must name a non-empty secret env.")
+        secret_name = validate_env_name(secret_name_text, f"model_env.{runtime_name}")
+        pairs.append((runtime_name, secret_name))
+
+    return tuple(sorted(pairs))
 
 
 def resolve_inside_root(root: Path, relative_path: str, label: str) -> tuple[Path, str]:
@@ -354,6 +390,7 @@ def resolve_config(
     forbidden_prompt_markers = dedupe_strings(
         list(DEFAULT_FORBIDDEN_PROMPT_MARKERS) + list(configured_forbidden_prompt_markers)
     )
+    model_env = select_model_env(config)
 
     if not dry_run_value and not confirm_real_run:
         raise ValueError("Real AI migration requires confirm_real_run: true in FORGIS_CONFIG.yml.")
@@ -384,6 +421,7 @@ def resolve_config(
         run_aider=run_aider_effective,
         required_prompt_markers=required_prompt_markers,
         forbidden_prompt_markers=forbidden_prompt_markers,
+        model_env=model_env,
     )
 
 
@@ -398,6 +436,11 @@ def markdown_summary(resolved: ResolvedConfig) -> str:
         else "[none]"
     )
     forbidden_markers = ", ".join(resolved.forbidden_prompt_markers)
+    model_env = (
+        ", ".join(f"{runtime} <- {source}" for runtime, source in resolved.model_env)
+        if resolved.model_env
+        else "[none]"
+    )
 
     return "\n".join(
         [
@@ -420,6 +463,7 @@ def markdown_summary(resolved: ResolvedConfig) -> str:
             f"| Target subdir | `{resolved.target_subdir}` |",
             f"| Run log path | `{resolved.run_log_path}` |",
             f"| Model | `{resolved.model}` |",
+            f"| Model env mapping | `{model_env}` |",
             f"| dry_run config value | `{str(resolved.dry_run).lower()}` |",
             f"| run_aider config value | `{str(resolved.run_aider_config).lower()}` |",
             f"| confirm_real_run config value | `{str(resolved.confirm_real_run).lower()}` |",

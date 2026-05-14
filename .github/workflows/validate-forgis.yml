@@ -38,6 +38,7 @@ jobs:
           test -f prompts/platforms/web.md
           test -f agent/forge.py
           test -f agent/aider_compat.py
+          test -f agent/model_env.py
           test -f agent/forgis_config.py
           test -f agent/resolve_config.py
           test -f agent/guardrails.py
@@ -65,6 +66,7 @@ jobs:
         run: |
           python -m py_compile agent/forge.py
           python -m py_compile agent/aider_compat.py
+          python -m py_compile agent/model_env.py
           python -m py_compile agent/forgis_config.py
           python -m py_compile agent/resolve_config.py
           python -m py_compile agent/guardrails.py
