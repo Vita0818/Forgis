@@ -71,6 +71,8 @@ jobs:
             --target-stack kotlin-compose \
             --migration-profile default \
             --target-branch forgis/android-from-source \
+            --task-prompt-path tmp/FORGIS_TASK.md \
+            --target-subdir tmp/validation-output \
             --dry-run true \
             --run-ai false
 
@@ -102,13 +104,17 @@ jobs:
             --migration-profile default \
             --source-bundle "$GITHUB_WORKSPACE/tmp/source_bundle.md" \
             --source-manifest "$GITHUB_WORKSPACE/tmp/source_manifest.md" \
-            --target-prompt-file "$GITHUB_WORKSPACE/tmp/FORGIS_TASK.md" \
+            --task-prompt-path "tmp/FORGIS_TASK.md" \
+            --require-task-prompt \
+            --target-subdir "tmp/validation-output" \
             --output "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
 
           test -f "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
           grep -q "Forgis Generated Migration Task" "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
           grep -q "Target Repository Task Prompt" "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
           grep -q "Create a minimal target project skeleton" "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
+          grep -q "Target Writable Scope" "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
+          grep -q "tmp/validation-output" "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
           grep -q "Project Boundary" "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
           grep -q "Target stack: kotlin-compose" "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"
           grep -q "Migration profile: default" "$GITHUB_WORKSPACE/tmp/forgis_prompt.md"

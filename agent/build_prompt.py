@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import sys
 from pathlib import Path
 
 
 DEFAULT_MAX_SOURCE_BUNDLE_CHARS = 900_000
+DEFAULT_TARGET_SUBDIR = "forgis-output"
+GREETING_EXAMPLE = "make the greeting more casual"
 
 
 def read_text(path: Path) -> str:
@@ -16,10 +19,50 @@ def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
-def read_target_prompt(path: Path | None) -> str:
-    if path is None or not path.is_file():
+def resolve_inside_root(root: Path, relative_path: str, label: str, allow_root: bool = False) -> tuple[Path, str]:
+    if not relative_path or not relative_path.strip():
+        raise ValueError(f"{label} is required.")
+
+    raw = Path(relative_path.strip())
+    if raw.is_absolute():
+        raise ValueError(f"{label} must be relative to the target repository root: {relative_path}")
+
+    if any(part in {"", ".", "..", ".git"} for part in raw.parts):
+        raise ValueError(f"{label} contains an unsafe path segment: {relative_path}")
+
+    resolved = (root / raw).resolve()
+    root_resolved = root.resolve()
+
+    if not resolved.is_relative_to(root_resolved):
+        raise ValueError(f"{label} escapes the target repository root: {relative_path}")
+
+    if resolved == root_resolved and not allow_root:
+        raise ValueError(f"{label} must not resolve to the target repository root.")
+
+    resolved_relative = resolved.relative_to(root_resolved).as_posix()
+    return resolved, resolved_relative
+
+
+def read_target_prompt(path: Path) -> str:
+    if not path.is_file():
         return "[No target repository task prompt provided.]"
+
     return path.read_text(encoding="utf-8", errors="replace")
+
+
+def print_preview(label: str, text: str, max_lines: int = 10) -> None:
+    print(f"{label}:")
+
+    lines = text.splitlines()
+    if not lines:
+        print("  [empty]")
+        return
+
+    for line in lines[:max_lines]:
+        print(f"  {line[:240]}")
+
+    if len(lines) > max_lines:
+        print(f"  ... [{len(lines) - max_lines} more lines]")
 
 
 def read_text_limited(path: Path, max_chars: int) -> str:
@@ -80,7 +123,19 @@ def main() -> None:
     parser.add_argument("--migration-profile", required=True, help="Migration profile name")
     parser.add_argument("--source-bundle", required=False, help="Optional source bundle markdown file")
     parser.add_argument("--source-manifest", required=False, help="Optional source manifest markdown file")
-    parser.add_argument("--target-prompt-file", required=False, help="Optional task prompt file from the target repository root")
+    parser.add_argument("--task-prompt-path", required=False, help="Task prompt path relative to the target repository root")
+    parser.add_argument("--target-prompt-file", required=False, help="Deprecated alias for --task-prompt-path")
+    parser.add_argument(
+        "--require-task-prompt",
+        action="store_true",
+        help="Fail if the target repository task prompt is missing or empty.",
+    )
+    parser.add_argument(
+        "--target-subdir",
+        required=False,
+        default=DEFAULT_TARGET_SUBDIR,
+        help="Target output directory relative to the target repository root.",
+    )
     parser.add_argument(
         "--max-source-bundle-chars",
         required=False,
@@ -116,8 +171,52 @@ def main() -> None:
         source_manifest_path = Path(args.source_manifest).resolve()
         source_manifest_text = read_text(source_manifest_path)
 
-    target_prompt_path = Path(args.target_prompt_file).resolve() if args.target_prompt_file else None
-    target_prompt_text = read_target_prompt(target_prompt_path)
+    task_prompt_input = args.task_prompt_path or args.target_prompt_file
+    target_prompt_text = "[No target repository task prompt provided.]"
+    target_prompt_path: Path | None = None
+    target_prompt_relative = "[not provided]"
+    target_prompt_found = False
+
+    if task_prompt_input:
+        target_prompt_path, target_prompt_relative = resolve_inside_root(
+            target,
+            task_prompt_input,
+            "Task prompt path",
+        )
+        target_prompt_found = target_prompt_path.is_file()
+        target_prompt_text = read_target_prompt(target_prompt_path)
+    elif args.require_task_prompt:
+        raise ValueError("Task prompt path is required.")
+
+    target_subdir_path, target_subdir_relative = resolve_inside_root(
+        target,
+        args.target_subdir,
+        "Target output directory",
+    )
+
+    print("Forgis migration prompt inputs:")
+    print(f"  source path: {source}")
+    print(f"  target path: {target}")
+    print(f"  target platform: {args.platform}")
+    print(f"  target stack: {args.target_stack}")
+    print(f"  migration profile: {args.migration_profile}")
+    print(f"  task_prompt_path input: {task_prompt_input if task_prompt_input else '[not provided]'}")
+    print(f"  task prompt resolved relative path: {target_prompt_relative}")
+    print(f"  task prompt resolved absolute path: {target_prompt_path if target_prompt_path else '[not provided]'}")
+    print(f"  task prompt found: {'yes' if target_prompt_found else 'no'}")
+    print(f"  task prompt character count: {len(target_prompt_text)}")
+    print_preview("  task prompt preview", target_prompt_text, max_lines=10)
+    print(f"  target writable scope relative path: {target_subdir_relative}")
+    print(f"  target writable scope absolute path: {target_subdir_path}")
+
+    if args.require_task_prompt and not target_prompt_found:
+        raise FileNotFoundError(f"Target repository task prompt does not exist: {target_prompt_path}")
+
+    if args.require_task_prompt and not target_prompt_text.strip():
+        raise ValueError(f"Target repository task prompt is empty: {target_prompt_path}")
+
+    if GREETING_EXAMPLE in target_prompt_text.casefold():
+        raise ValueError("Target repository task prompt contains the forbidden greeting example prompt.")
 
     content = f"""# Forgis Generated Migration Task
 
@@ -217,6 +316,8 @@ This section is loaded from the target repository root.
 
 Default file: FORGIS_TASK.md
 
+Loaded file: {target_prompt_relative}
+
 It is the human instruction for the current Forgis run.
 
 It defines the concrete migration task for this run.
@@ -229,6 +330,20 @@ It must be followed unless it conflicts with:
 - GitHub token permission boundaries
 
 {target_prompt_text}
+
+---
+
+# Target Writable Scope
+
+Target output directory relative to target repository root: {target_subdir_relative}
+
+Write generated or modified project files only under this target output directory.
+
+Do not edit the task prompt file `{target_prompt_relative}`.
+
+Do not scatter target project files into the target repository root.
+
+`MIGRATION_REPORT.md` may be updated at the target repository root for run reporting.
 
 ---
 
@@ -249,11 +364,19 @@ Always create or update MIGRATION_REPORT.md.
 If the migration cannot be completed safely, write the reason into MIGRATION_REPORT.md and stop.
 """
 
+    if GREETING_EXAMPLE in target_prompt_text.casefold():
+        raise ValueError("Final prompt would contain the forbidden greeting example as the task prompt.")
+
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(content, encoding="utf-8")
 
     print(f"Forgis prompt written to: {output}")
+    print(f"Final prompt character count: {len(content)}")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)

@@ -29,8 +29,17 @@ A Forgis run is configured by workflow inputs:
 - `target_branch`: target migration branch
 - `target_base_branch`: target repository base branch for pull requests
 - `dry_run`: whether to skip push and pull request creation
-- `run_ai`: whether to actually call the configured AI model
-- `target_prompt_file`: Markdown task prompt file path relative to the target repository root. Defaults to `FORGIS_TASK.md`.
+- `run_aider`: whether to actually call Aider with the configured AI model
+- `task_prompt_path`: Markdown task prompt file path relative to the target repository root. Defaults to `FORGIS_TASK.md`.
+- `target_subdir`: target output directory relative to the target repository root. Defaults to `forgis-output`.
+- `model`: Aider model name. Defaults to `deepseek/deepseek-v4-pro`.
+
+Deprecated aliases are still accepted by the workflow for compatibility:
+
+- `run_ai` for `run_aider`
+- `target_prompt_file` for `task_prompt_path`
+- `aider_model` for `model`
+- `base_branch` for `target_base_branch`
 
 ## Per-run task prompt
 
@@ -42,27 +51,44 @@ Before each run, create or update a Markdown task prompt in the target repositor
 FORGIS_TASK.md
 ```
 
-GitHub Actions checks out the target repository, reads `target_prompt_file` from that target repository root, and embeds the file contents in the final prompt sent to the configured AI model.
+GitHub Actions checks out the target repository, reads `task_prompt_path` from that target repository root, and embeds the file contents in the final prompt sent to Aider.
 
 For example, a run can use:
 
 - `source_repo`: `owner/source-repo`
 - `target_repo`: `owner/target-repo`
 - `target_stack`: `kotlin-compose`
-- `target_prompt_file`: `FORGIS_TASK.md`
+- `task_prompt_path`: `FORGIS_TASK.md`
+- `target_subdir`: `android-output`
 
-Long task instructions should be written into a `.md` file in the target repository root instead of being pasted into a workflow input box. You may choose another filename by changing `target_prompt_file`, but the path is always resolved relative to the target repository root.
+Long task instructions should be written into a `.md` file in the target repository root instead of being pasted into a workflow input box. You may choose another filename by changing `task_prompt_path`, but the path is always resolved relative to the target repository root.
 
 Do not put API keys, tokens, certificates, signing material, or private information in `FORGIS_TASK.md` or any other task prompt file.
+
+If the task prompt file is missing or empty, the migration workflow fails instead of falling back to an example task.
+
+## Target output directory
+
+Forgis uses `target_subdir` to define the project directory Aider may create or modify inside the target repository.
+
+The default is:
+
+```text
+forgis-output
+```
+
+Aider receives the task prompt as read-only context and runs with the target output directory as its writable scope. Generated project files should stay under `target_subdir`; `MIGRATION_REPORT.md` may be updated at the target repository root for run reporting.
+
+Set `target_subdir` explicitly for real migrations when the target repository should contain a named project directory.
 
 ## Safety
 
 By default:
 
 - `dry_run` is `true`
-- `run_ai` is `false`
+- `run_aider` is `false`
 - the source repository is treated as read-only
-- generated changes are written only inside the checked-out target repository
+- generated project changes are written only inside the configured `target_subdir`
 - push and PR creation are disabled unless explicitly enabled
 
 API keys must be stored in GitHub Actions Secrets, not in repository files.
