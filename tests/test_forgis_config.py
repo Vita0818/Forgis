@@ -21,6 +21,7 @@ from file_tools import FileToolSandbox, ToolError
 from forgis_config import resolve_config, require_path_inside_subdir
 from guardrails import changed_read_only_paths, scan_secret_leaks, snapshot_paths, target_scope_violations
 from model_env import describe_model_env, parse_model_env_json, require_model_env_values
+from source_inventory import bundled_units_for_folder, collect_source_inventory, safe_source_report_name
 from tool_loop import run_tool_loop, write_status
 from validate_target_output import files_snapshot, meaningful_changes, validate
 
@@ -104,6 +105,77 @@ class ForgisConfigTests(unittest.TestCase):
             config += extra if extra.endswith("\n") else extra + "\n"
         (target / "FORGIS_CONFIG.yml").write_text(config, encoding="utf-8")
         (target / "FORGIS_TASK.md").write_text(task_text, encoding="utf-8")
+
+    def staged_extra(
+        self,
+        *,
+        max_iterations: int = 12,
+        min_total_iterations: int = 0,
+        overview_min: int = 0,
+        per_file_min: int = 0,
+        stabilization_min: int = 0,
+        include_globs: list[str] | None = None,
+        folder_max_bundle_chars: int = 80000,
+    ) -> str:
+        selected_globs = ["**/*"] if include_globs is None else include_globs
+        include_lines = "\n".join(f"      - {item!r}" for item in selected_globs)
+        if not include_lines:
+            include_lines = "      []"
+        return textwrap.dedent(
+            f"""\
+            dry_run: false
+            run_agent: true
+            confirm_real_run: true
+            execution_mode: staged_translation
+            max_iterations: {max_iterations}
+            staged_translation:
+              min_total_iterations: {min_total_iterations}
+              phases:
+                overview:
+                  min_iterations: {overview_min}
+                  max_iterations: {max(overview_min, max_iterations)}
+                per_file:
+                  min_iterations: {per_file_min}
+                  max_iterations: {max(per_file_min, max_iterations)}
+                stabilization:
+                  min_iterations: {stabilization_min}
+                  max_iterations: {max(stabilization_min, max_iterations)}
+              folder_batch_review:
+                enabled: true
+                max_bundle_chars: {folder_max_bundle_chars}
+              source_inventory:
+                include_globs:
+            {include_lines}
+            """
+        )
+
+    def tool_response(
+        self,
+        *calls: tuple[str, str, dict[str, Any]],
+        reasoning_content: str | None = None,
+    ) -> dict[str, Any]:
+        message: dict[str, Any] = {
+            "tool_calls": [
+                {
+                    "id": call_id,
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "arguments": json.dumps(arguments),
+                    },
+                }
+                for call_id, name, arguments in calls
+            ]
+        }
+        if reasoning_content is not None:
+            message["reasoning_content"] = reasoning_content
+        return {"choices": [{"message": message}]}
+
+    def final_response(self, summary: str, *, reasoning_content: str | None = None) -> dict[str, Any]:
+        message: dict[str, Any] = {"content": json.dumps({"final_summary": summary})}
+        if reasoning_content is not None:
+            message["reasoning_content"] = reasoning_content
+        return {"choices": [{"message": message}]}
 
     def make_source_target(self, root: Path) -> tuple[Path, Path]:
         source = root / "source"
@@ -240,6 +312,60 @@ class ForgisConfigTests(unittest.TestCase):
             resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
             self.assertTrue(resolved.strict_mode)
             self.assertEqual(resolved.env()["STRICT_MODE"], "true")
+
+    def test_execution_mode_defaults_to_tool_loop_and_staged_defaults_parse(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            target = Path(dirname)
+            self.write_config(target)
+            resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
+            self.assertEqual(resolved.execution_mode, "tool_loop")
+            self.assertEqual(resolved.env()["EXECUTION_MODE"], "tool_loop")
+
+            self.write_config(
+                target,
+                extra=textwrap.dedent(
+                    """\
+                    execution_mode: staged_translation
+                    max_iterations: 120
+                    """
+                ),
+            )
+            staged = resolve_config(target_root=target, target_repo="owner/target-repo")
+            self.assertEqual(staged.execution_mode, "staged_translation")
+            self.assertEqual(staged.staged_translation.min_total_iterations, 120)
+            self.assertEqual(staged.staged_translation.overview.min_iterations, 20)
+            self.assertEqual(staged.staged_translation.progress_files.plan, "FORGIS_TRANSLATION_PLAN.md")
+            self.assertIn("STAGED_TRANSLATION_JSON", staged.env())
+
+    def test_staged_translation_rejects_conflicting_iteration_config_and_unsafe_progress_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            target = Path(dirname)
+            self.write_config(
+                target,
+                extra=textwrap.dedent(
+                    """\
+                    execution_mode: staged_translation
+                    max_iterations: 8
+                    """
+                ),
+            )
+            with self.assertRaisesRegex(ValueError, "min_total_iterations"):
+                resolve_config(target_root=target, target_repo="owner/target-repo")
+
+            self.write_config(
+                target,
+                extra=textwrap.dedent(
+                    """\
+                    execution_mode: staged_translation
+                    max_iterations: 120
+                    staged_translation:
+                      progress_files:
+                        progress: ../FORGIS_TRANSLATION_PROGRESS.md
+                    """
+                ),
+            )
+            with self.assertRaisesRegex(ValueError, "unsafe path segment"):
+                resolve_config(target_root=target, target_repo="owner/target-repo")
 
     def test_task_file_is_required_non_empty_and_configured_path_is_read(self) -> None:
         with tempfile.TemporaryDirectory() as dirname:
@@ -524,6 +650,302 @@ class ForgisConfigTests(unittest.TestCase):
             self.assertNotIn(write_content, log)
             self.assertNotIn("# Mock Task", log)
             self.assertNotIn(hidden_reasoning, log)
+
+    def test_staged_translation_runs_three_phases_and_per_file_micro_phases_in_order(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target = self.make_source_target(root)
+            (target / "target-output").mkdir()
+            self.write_config(target, extra=self.staged_extra(max_iterations=12))
+            resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
+            hidden_reasoning = "hidden staged reasoning"
+            write_content = "do-not-print-staged-write-content"
+            fake = FakeDeepSeekClient(
+                [
+                    self.tool_response(
+                        (
+                            "plan",
+                            "write_file",
+                            {"path": "target_subdir/FORGIS_TRANSLATION_PLAN.md", "content": "# Plan\n"},
+                        ),
+                        (
+                            "map",
+                            "write_file",
+                            {
+                                "path": "target_subdir/FORGIS_SOURCE_TARGET_MAP.md",
+                                "content": "| Source path/unit | Target path/unit | Status | Notes |\n",
+                            },
+                        ),
+                        (
+                            "progress",
+                            "write_file",
+                            {"path": "target_subdir/FORGIS_TRANSLATION_PROGRESS.md", "content": "# Progress\n"},
+                        ),
+                        reasoning_content=hidden_reasoning,
+                    ),
+                    self.tool_response(("feed", "read_file", {"path": "source/input.txt"})),
+                    self.tool_response(
+                        (
+                            "write",
+                            "write_file",
+                            {"path": "target_subdir/generated.txt", "content": write_content},
+                        )
+                    ),
+                    self.tool_response(
+                        ("compare-read-source", "read_file", {"path": "source/input.txt"}),
+                        ("compare-read-target", "read_file", {"path": "target_subdir/generated.txt"}),
+                        (
+                            "compare-report",
+                            "write_file",
+                            {
+                                "path": "target_subdir/FORGIS_COMPARE_REPORTS/input.txt.md",
+                                "content": "# Compare\n",
+                            },
+                        ),
+                    ),
+                    self.tool_response(
+                        (
+                            "revise",
+                            "write_file",
+                            {"path": "target_subdir/generated.txt", "content": "revised\n"},
+                        )
+                    ),
+                    self.tool_response(
+                        (
+                            "folder",
+                            "append_file",
+                            {
+                                "path": "target_subdir/FORGIS_TRANSLATION_PROGRESS.md",
+                                "content": "\nfolder reviewed\n",
+                            },
+                        )
+                    ),
+                    self.final_response("staged complete"),
+                ]
+            )
+
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                result = run_tool_loop(
+                    config=resolved,
+                    source_root=source,
+                    target_root=target,
+                    environ={"DEEPSEEK_API_KEY": "mock-secret-value"},
+                    client_factory=lambda _config, _env: fake,
+                )
+
+            log = stdout.getvalue()
+            controls = "\n".join(
+                message["content"]
+                for call in fake.calls
+                for message in call["messages"]
+                if message.get("role") == "user" and "[forgis staged control]" in message.get("content", "")
+            )
+            self.assertEqual(result.status, "completed")
+            self.assertEqual(result.final_summary, "staged complete")
+            self.assertEqual(resolved.execution_mode, "staged_translation")
+            self.assertIn("staged mode enabled", log)
+            self.assertIn("phase=overview", log)
+            self.assertIn("current_micro_phase=feed", log)
+            self.assertIn("current_micro_phase=write", log)
+            self.assertIn("current_micro_phase=readonly_compare", log)
+            self.assertIn("current_micro_phase=revise", log)
+            self.assertIn("folder batch review start", log)
+            self.assertIn("folder batch review end", log)
+            self.assertIn("progress file update", log)
+            self.assertIn("final_summary accepted", log)
+            self.assertNotIn(hidden_reasoning, log)
+            self.assertNotIn(write_content, log)
+            self.assertNotIn("mock source", log)
+            self.assertIn("current_micro_phase: feed", controls)
+            self.assertIn("current_micro_phase: write", controls)
+            self.assertIn("current_micro_phase: readonly_compare", controls)
+            self.assertIn("current_micro_phase: revise", controls)
+            self.assertIn("current_micro_phase: folder_batch_review", controls)
+            self.assertEqual((target / "target-output/generated.txt").read_text(encoding="utf-8"), "revised\n")
+            self.assertTrue((target / "target-output/FORGIS_COMPARE_REPORTS/input.txt.md").is_file())
+
+    def test_staged_translation_rejects_early_final_summary_until_phase_gates_are_satisfied(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target = self.make_source_target(root)
+            (source / "input.txt").unlink()
+            (target / "target-output").mkdir()
+            self.write_config(target, extra=self.staged_extra(max_iterations=8, overview_min=2))
+            resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
+            fake = FakeDeepSeekClient(
+                [
+                    self.final_response("too early"),
+                    self.tool_response(
+                        (
+                            "plan",
+                            "write_file",
+                            {"path": "target_subdir/FORGIS_TRANSLATION_PLAN.md", "content": "# Plan\n"},
+                        ),
+                        (
+                            "map",
+                            "write_file",
+                            {"path": "target_subdir/FORGIS_SOURCE_TARGET_MAP.md", "content": "| a | b |\n"},
+                        ),
+                        (
+                            "progress",
+                            "write_file",
+                            {"path": "target_subdir/FORGIS_TRANSLATION_PROGRESS.md", "content": "# Progress\n"},
+                        ),
+                    ),
+                    self.final_response("still early"),
+                    self.final_response("accepted"),
+                ]
+            )
+
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                result = run_tool_loop(
+                    config=resolved,
+                    source_root=source,
+                    target_root=target,
+                    environ={"DEEPSEEK_API_KEY": "mock-secret-value"},
+                    client_factory=lambda _config, _env: fake,
+                )
+
+            log = stdout.getvalue()
+            self.assertEqual(result.status, "completed")
+            self.assertEqual(result.final_summary, "accepted")
+            self.assertIn("early final_summary rejected", log)
+            self.assertGreaterEqual(len(fake.calls), 4)
+
+    def test_staged_compare_phase_blocks_target_code_writes_but_revision_can_write(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target = self.make_source_target(root)
+            (target / "target-output").mkdir()
+            self.write_config(target, extra=self.staged_extra(max_iterations=12))
+            resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
+            fake = FakeDeepSeekClient(
+                [
+                    self.tool_response(
+                        (
+                            "plan",
+                            "write_file",
+                            {"path": "target_subdir/FORGIS_TRANSLATION_PLAN.md", "content": "# Plan\n"},
+                        ),
+                        (
+                            "map",
+                            "write_file",
+                            {"path": "target_subdir/FORGIS_SOURCE_TARGET_MAP.md", "content": "| a | b |\n"},
+                        ),
+                        (
+                            "progress",
+                            "write_file",
+                            {"path": "target_subdir/FORGIS_TRANSLATION_PROGRESS.md", "content": "# Progress\n"},
+                        ),
+                    ),
+                    self.tool_response(("feed", "read_file", {"path": "source/input.txt"})),
+                    self.tool_response(
+                        (
+                            "write",
+                            "write_file",
+                            {"path": "target_subdir/generated.txt", "content": "translated\n"},
+                        )
+                    ),
+                    self.tool_response(
+                        (
+                            "blocked-code-write",
+                            "write_file",
+                            {"path": "target_subdir/generated.txt", "content": "bad compare write\n"},
+                        ),
+                        (
+                            "compare-report",
+                            "write_file",
+                            {
+                                "path": "target_subdir/FORGIS_COMPARE_REPORTS/input.txt.md",
+                                "content": "# Report\n",
+                            },
+                        ),
+                    ),
+                    self.tool_response(
+                        (
+                            "revise",
+                            "write_file",
+                            {"path": "target_subdir/generated.txt", "content": "revised\n"},
+                        )
+                    ),
+                    self.tool_response(
+                        (
+                            "folder",
+                            "append_file",
+                            {"path": "target_subdir/FORGIS_TRANSLATION_PROGRESS.md", "content": "\nfolder\n"},
+                        )
+                    ),
+                    self.final_response("done"),
+                ]
+            )
+
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                result = run_tool_loop(
+                    config=resolved,
+                    source_root=source,
+                    target_root=target,
+                    environ={"DEEPSEEK_API_KEY": "mock-secret-value"},
+                    client_factory=lambda _config, _env: fake,
+                )
+
+            self.assertEqual(result.status, "completed")
+            self.assertIn("blocked", stdout.getvalue())
+            self.assertEqual((target / "target-output/generated.txt").read_text(encoding="utf-8"), "revised\n")
+            self.assertTrue((target / "target-output/FORGIS_COMPARE_REPORTS/input.txt.md").is_file())
+
+    def test_folder_batch_review_bundle_respects_max_bundle_chars_and_report_names_are_safe(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source = root / "source"
+            target = root / "target"
+            (source / "feature").mkdir(parents=True)
+            target.mkdir()
+            (source / "feature/a.txt").write_text("a" * 20, encoding="utf-8")
+            (source / "feature/b.txt").write_text("b" * 20, encoding="utf-8")
+            self.write_config(
+                target,
+                extra=self.staged_extra(max_iterations=12, folder_max_bundle_chars=25),
+            )
+            resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
+
+            units = collect_source_inventory(source, resolved.staged_translation.source_inventory)
+            included, omitted = bundled_units_for_folder(units, "feature", max_bundle_chars=25)
+            self.assertEqual([unit.path for unit in included], ["feature/a.txt"])
+            self.assertEqual([unit.path for unit in omitted], ["feature/b.txt"])
+            self.assertEqual(safe_source_report_name("../feature/a.txt"), "feature__a.txt.md")
+
+    def test_staged_max_iterations_saves_partial_progress(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target = self.make_source_target(root)
+            (target / "target-output").mkdir()
+            self.write_config(target, extra=self.staged_extra(max_iterations=2))
+            resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
+            fake = FakeDeepSeekClient(
+                [
+                    self.tool_response(("read-task-1", "read_file", {"path": "task"})),
+                    self.tool_response(("read-task-2", "read_file", {"path": "task"})),
+                ]
+            )
+
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                result = run_tool_loop(
+                    config=resolved,
+                    source_root=source,
+                    target_root=target,
+                    environ={"DEEPSEEK_API_KEY": "mock-secret-value"},
+                    client_factory=lambda _config, _env: fake,
+                )
+
+            progress = (target / "target-output/FORGIS_TRANSLATION_PROGRESS.md").read_text(encoding="utf-8")
+            self.assertEqual(result.status, "max-iterations")
+            self.assertIn("Partial progress saved", progress)
+            self.assertIn("max_iterations reached", stdout.getvalue())
+            self.assertIn("partial progress saved", stdout.getvalue())
 
     def test_list_dir_only_reads_allowed_paths(self) -> None:
         with tempfile.TemporaryDirectory() as dirname:

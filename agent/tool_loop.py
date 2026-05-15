@@ -14,7 +14,7 @@ from typing import Any, Callable
 
 from deepseek_agent import DeepSeekClient, TOOL_DEFINITIONS, initial_messages
 from file_tools import READ_TOOLS, WRITE_TOOLS, FileToolSandbox, ToolError
-from forgis_config import ResolvedConfig, resolve_config
+from forgis_config import STAGED_TRANSLATION_MODE, ResolvedConfig, resolve_config
 
 
 ClientFactory = Callable[[ResolvedConfig, dict[str, str]], Any]
@@ -190,6 +190,17 @@ def run_tool_loop(
             read_tool_count=0,
             write_tool_count=0,
             operation_log=[],
+        )
+
+    if config.execution_mode == STAGED_TRANSLATION_MODE:
+        from staged_translation import run_staged_translation_loop
+
+        return run_staged_translation_loop(
+            config=config,
+            source_root=source_root,
+            target_root=target_root,
+            environ=env,
+            client_factory=client_factory,
         )
 
     sandbox = FileToolSandbox(
@@ -370,8 +381,12 @@ def main() -> None:
     write_json(args.summary_output, result.as_dict())
     print(json.dumps(result.as_dict(), indent=2, ensure_ascii=False, sort_keys=True))
 
-    if result.status == "max-iterations":
+    if result.status == "max-iterations" and (
+        config.execution_mode != STAGED_TRANSLATION_MODE or config.strict_mode
+    ):
         raise RuntimeError(result.final_summary)
+    if result.status == "max-iterations":
+        print("WARNING: staged_translation reached max_iterations; continuing with partial progress.")
 
 
 if __name__ == "__main__":

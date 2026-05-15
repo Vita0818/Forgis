@@ -47,6 +47,7 @@ Generated at: {now}
 - Run log path: {config.run_log_path}
 - Agent backend: {config.agent_backend}
 - Model: {config.model}
+- Execution mode: {config.execution_mode}
 - Dry run: {config.dry_run}
 - Run agent: {config.run_agent}
 - Confirm real run: {config.confirm_real_run}
