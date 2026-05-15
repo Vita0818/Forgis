@@ -111,11 +111,14 @@ class ForgisConfigTests(unittest.TestCase):
         *,
         max_iterations: int = 12,
         min_total_iterations: int = 0,
+        min_processed_units: int = 0,
+        max_units_per_run: int = 12,
         overview_min: int = 0,
         per_file_min: int = 0,
         stabilization_min: int = 0,
         include_globs: list[str] | None = None,
         folder_max_bundle_chars: int = 80000,
+        strict_mode: bool | None = None,
     ) -> str:
         selected_globs = ["**/*"] if include_globs is None else include_globs
         include_lines = "\n".join(f"      - {item!r}" for item in selected_globs)
@@ -126,10 +129,13 @@ class ForgisConfigTests(unittest.TestCase):
             dry_run: false
             run_agent: true
             confirm_real_run: true
+            {"strict_mode: " + str(strict_mode).lower() if strict_mode is not None else ""}
             execution_mode: staged_translation
             max_iterations: {max_iterations}
             staged_translation:
               min_total_iterations: {min_total_iterations}
+              min_processed_units: {min_processed_units}
+              max_units_per_run: {max_units_per_run}
               phases:
                 overview:
                   min_iterations: {overview_min}
@@ -176,6 +182,25 @@ class ForgisConfigTests(unittest.TestCase):
         if reasoning_content is not None:
             message["reasoning_content"] = reasoning_content
         return {"choices": [{"message": message}]}
+
+    def staged_overview_response(self) -> dict[str, Any]:
+        return self.tool_response(
+            (
+                "plan",
+                "write_file",
+                {"path": "target_subdir/FORGIS_TRANSLATION_PLAN.md", "content": "# Plan\n"},
+            ),
+            (
+                "map",
+                "write_file",
+                {"path": "target_subdir/FORGIS_SOURCE_TARGET_MAP.md", "content": "| Source | Target |\n"},
+            ),
+            (
+                "progress",
+                "write_file",
+                {"path": "target_subdir/FORGIS_TRANSLATION_PROGRESS.md", "content": "# Progress\n"},
+            ),
+        )
 
     def make_source_target(self, root: Path) -> tuple[Path, Path]:
         source = root / "source"
@@ -333,6 +358,11 @@ class ForgisConfigTests(unittest.TestCase):
             staged = resolve_config(target_root=target, target_repo="owner/target-repo")
             self.assertEqual(staged.execution_mode, "staged_translation")
             self.assertEqual(staged.staged_translation.min_total_iterations, 120)
+            self.assertEqual(staged.staged_translation.min_processed_units, 3)
+            self.assertEqual(staged.staged_translation.max_units_per_run, 12)
+            self.assertTrue(staged.staged_translation.enforce_micro_phases)
+            self.assertTrue(staged.staged_translation.require_target_effect_or_deferred_reason)
+            self.assertTrue(staged.staged_translation.low_impact_warning.enabled)
             self.assertEqual(staged.staged_translation.overview.min_iterations, 20)
             self.assertEqual(staged.staged_translation.progress_files.plan, "FORGIS_TRANSLATION_PLAN.md")
             self.assertIn("STAGED_TRANSLATION_JSON", staged.env())
@@ -688,12 +718,12 @@ class ForgisConfigTests(unittest.TestCase):
                         (
                             "write",
                             "write_file",
-                            {"path": "target_subdir/generated.txt", "content": write_content},
+                            {"path": "target_subdir/generated.py", "content": write_content},
                         )
                     ),
                     self.tool_response(
                         ("compare-read-source", "read_file", {"path": "source/input.txt"}),
-                        ("compare-read-target", "read_file", {"path": "target_subdir/generated.txt"}),
+                        ("compare-read-target", "read_file", {"path": "target_subdir/generated.py"}),
                         (
                             "compare-report",
                             "write_file",
@@ -707,8 +737,16 @@ class ForgisConfigTests(unittest.TestCase):
                         (
                             "revise",
                             "write_file",
-                            {"path": "target_subdir/generated.txt", "content": "revised\n"},
-                        )
+                            {"path": "target_subdir/generated.py", "content": "revised\n"},
+                        ),
+                        (
+                            "revise-progress",
+                            "append_file",
+                            {
+                                "path": "target_subdir/FORGIS_TRANSLATION_PROGRESS.md",
+                                "content": "\nsource/input.txt no_revision_needed after compare\n",
+                            },
+                        ),
                     ),
                     self.tool_response(
                         (
@@ -716,7 +754,7 @@ class ForgisConfigTests(unittest.TestCase):
                             "append_file",
                             {
                                 "path": "target_subdir/FORGIS_TRANSLATION_PROGRESS.md",
-                                "content": "\nfolder reviewed\n",
+                                "content": "\nfolder reviewed no_fix_needed\n",
                             },
                         )
                     ),
@@ -750,8 +788,8 @@ class ForgisConfigTests(unittest.TestCase):
             self.assertIn("current_micro_phase=write", log)
             self.assertIn("current_micro_phase=readonly_compare", log)
             self.assertIn("current_micro_phase=revise", log)
-            self.assertIn("folder batch review start", log)
-            self.assertIn("folder batch review end", log)
+            self.assertIn("folder review start", log)
+            self.assertIn("folder review end", log)
             self.assertIn("progress file update", log)
             self.assertIn("final_summary accepted", log)
             self.assertNotIn(hidden_reasoning, log)
@@ -761,17 +799,16 @@ class ForgisConfigTests(unittest.TestCase):
             self.assertIn("current_micro_phase: write", controls)
             self.assertIn("current_micro_phase: readonly_compare", controls)
             self.assertIn("current_micro_phase: revise", controls)
-            self.assertIn("current_micro_phase: folder_batch_review", controls)
-            self.assertEqual((target / "target-output/generated.txt").read_text(encoding="utf-8"), "revised\n")
+            self.assertIn("current_micro_phase: folder_review", controls)
+            self.assertEqual((target / "target-output/generated.py").read_text(encoding="utf-8"), "revised\n")
             self.assertTrue((target / "target-output/FORGIS_COMPARE_REPORTS/input.txt.md").is_file())
 
     def test_staged_translation_rejects_early_final_summary_until_phase_gates_are_satisfied(self) -> None:
         with tempfile.TemporaryDirectory() as dirname:
             root = Path(dirname)
             source, target = self.make_source_target(root)
-            (source / "input.txt").unlink()
             (target / "target-output").mkdir()
-            self.write_config(target, extra=self.staged_extra(max_iterations=8, overview_min=2))
+            self.write_config(target, extra=self.staged_extra(max_iterations=10, overview_min=2))
             resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
             fake = FakeDeepSeekClient(
                 [
@@ -794,6 +831,46 @@ class ForgisConfigTests(unittest.TestCase):
                         ),
                     ),
                     self.final_response("still early"),
+                    self.tool_response(("feed", "read_file", {"path": "source/input.txt"})),
+                    self.tool_response(
+                        (
+                            "write",
+                            "write_file",
+                            {"path": "target_subdir/generated.py", "content": "translated\n"},
+                        )
+                    ),
+                    self.tool_response(
+                        ("compare-source", "read_file", {"path": "source/input.txt"}),
+                        ("compare-target", "read_file", {"path": "target_subdir/generated.py"}),
+                        (
+                            "compare-report",
+                            "write_file",
+                            {
+                                "path": "target_subdir/FORGIS_COMPARE_REPORTS/input.txt.md",
+                                "content": "# Compare\n",
+                            },
+                        ),
+                    ),
+                    self.tool_response(
+                        (
+                            "revise-progress",
+                            "append_file",
+                            {
+                                "path": "target_subdir/FORGIS_TRANSLATION_PROGRESS.md",
+                                "content": "\nsource/input.txt no_revision_needed\n",
+                            },
+                        )
+                    ),
+                    self.tool_response(
+                        (
+                            "folder-progress",
+                            "append_file",
+                            {
+                                "path": "target_subdir/FORGIS_TRANSLATION_PROGRESS.md",
+                                "content": "\nfolder reviewed no_fix_needed\n",
+                            },
+                        )
+                    ),
                     self.final_response("accepted"),
                 ]
             )
@@ -811,7 +888,7 @@ class ForgisConfigTests(unittest.TestCase):
             log = stdout.getvalue()
             self.assertEqual(result.status, "completed")
             self.assertEqual(result.final_summary, "accepted")
-            self.assertIn("early final_summary rejected", log)
+            self.assertIn("final_summary rejected", log)
             self.assertGreaterEqual(len(fake.calls), 4)
 
     def test_staged_compare_phase_blocks_target_code_writes_but_revision_can_write(self) -> None:
@@ -845,15 +922,17 @@ class ForgisConfigTests(unittest.TestCase):
                         (
                             "write",
                             "write_file",
-                            {"path": "target_subdir/generated.txt", "content": "translated\n"},
+                            {"path": "target_subdir/generated.py", "content": "translated\n"},
                         )
                     ),
                     self.tool_response(
                         (
                             "blocked-code-write",
                             "write_file",
-                            {"path": "target_subdir/generated.txt", "content": "bad compare write\n"},
+                            {"path": "target_subdir/generated.py", "content": "bad compare write\n"},
                         ),
+                        ("compare-source", "read_file", {"path": "source/input.txt"}),
+                        ("compare-target", "read_file", {"path": "target_subdir/generated.py"}),
                         (
                             "compare-report",
                             "write_file",
@@ -867,14 +946,25 @@ class ForgisConfigTests(unittest.TestCase):
                         (
                             "revise",
                             "write_file",
-                            {"path": "target_subdir/generated.txt", "content": "revised\n"},
-                        )
+                            {"path": "target_subdir/generated.py", "content": "revised\n"},
+                        ),
+                        (
+                            "revise-progress",
+                            "append_file",
+                            {
+                                "path": "target_subdir/FORGIS_TRANSLATION_PROGRESS.md",
+                                "content": "\nsource/input.txt no_revision_needed\n",
+                            },
+                        ),
                     ),
                     self.tool_response(
                         (
                             "folder",
                             "append_file",
-                            {"path": "target_subdir/FORGIS_TRANSLATION_PROGRESS.md", "content": "\nfolder\n"},
+                            {
+                                "path": "target_subdir/FORGIS_TRANSLATION_PROGRESS.md",
+                                "content": "\nfolder reviewed no_fix_needed\n",
+                            },
                         )
                     ),
                     self.final_response("done"),
@@ -893,7 +983,7 @@ class ForgisConfigTests(unittest.TestCase):
 
             self.assertEqual(result.status, "completed")
             self.assertIn("blocked", stdout.getvalue())
-            self.assertEqual((target / "target-output/generated.txt").read_text(encoding="utf-8"), "revised\n")
+            self.assertEqual((target / "target-output/generated.py").read_text(encoding="utf-8"), "revised\n")
             self.assertTrue((target / "target-output/FORGIS_COMPARE_REPORTS/input.txt.md").is_file())
 
     def test_folder_batch_review_bundle_respects_max_bundle_chars_and_report_names_are_safe(self) -> None:
@@ -916,6 +1006,423 @@ class ForgisConfigTests(unittest.TestCase):
             self.assertEqual([unit.path for unit in included], ["feature/a.txt"])
             self.assertEqual([unit.path for unit in omitted], ["feature/b.txt"])
             self.assertEqual(safe_source_report_name("../feature/a.txt"), "feature__a.txt.md")
+
+    def test_source_unit_queue_filters_noise_and_uses_stable_priority_order(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source = root / "source"
+            target = root / "target"
+            (source / "docs").mkdir(parents=True)
+            (source / "build").mkdir()
+            (source / "generated").mkdir()
+            target.mkdir()
+            (source / "zeta.py").write_text("print('z')\n", encoding="utf-8")
+            (source / "alpha.js").write_text("console.log('a')\n", encoding="utf-8")
+            (source / "docs/architecture.md").write_text("# Arch\n", encoding="utf-8")
+            (source / "image.png").write_bytes(b"\x89PNG\r\n")
+            (source / "build/output.py").write_text("ignored\n", encoding="utf-8")
+            (source / "generated/cache.py").write_text("ignored\n", encoding="utf-8")
+            (source / "package-lock.json").write_text("{}", encoding="utf-8")
+            self.write_config(target, extra=self.staged_extra(max_iterations=12))
+            resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
+
+            units = collect_source_inventory(source, resolved.staged_translation.source_inventory)
+            self.assertEqual([unit.path for unit in units], ["alpha.js", "zeta.py", "docs/architecture.md"])
+
+    def test_staged_feed_must_read_current_source_unit_before_write(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target = self.make_source_target(root)
+            (target / "target-output").mkdir()
+            self.write_config(target, extra=self.staged_extra(max_iterations=3))
+            resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
+            fake = FakeDeepSeekClient(
+                [
+                    self.staged_overview_response(),
+                    self.tool_response(("wrong-read", "read_file", {"path": "task"})),
+                    self.final_response("too soon"),
+                ]
+            )
+
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                result = run_tool_loop(
+                    config=resolved,
+                    source_root=source,
+                    target_root=target,
+                    environ={"DEEPSEEK_API_KEY": "mock-secret-value"},
+                    client_factory=lambda _config, _env: fake,
+                )
+
+            self.assertEqual(result.status, "max-iterations")
+            self.assertIn("feed has not read source/input.txt", stdout.getvalue())
+
+    def test_staged_write_requires_target_effect_or_deferred_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target = self.make_source_target(root)
+            (target / "target-output").mkdir()
+            self.write_config(target, extra=self.staged_extra(max_iterations=4))
+            resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
+            fake = FakeDeepSeekClient(
+                [
+                    self.staged_overview_response(),
+                    self.tool_response(("feed", "read_file", {"path": "source/input.txt"})),
+                    self.tool_response(
+                        (
+                            "write-progress",
+                            "append_file",
+                            {
+                                "path": "target_subdir/FORGIS_TRANSLATION_PROGRESS.md",
+                                "content": "\nsource/input.txt considered\n",
+                            },
+                        )
+                    ),
+                    self.final_response("too soon"),
+                ]
+            )
+
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                result = run_tool_loop(
+                    config=resolved,
+                    source_root=source,
+                    target_root=target,
+                    environ={"DEEPSEEK_API_KEY": "mock-secret-value"},
+                    client_factory=lambda _config, _env: fake,
+                )
+
+            self.assertEqual(result.status, "max-iterations")
+            self.assertIn("no target implementation effect", stdout.getvalue())
+
+    def test_staged_compare_report_missing_blocks_revise(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target = self.make_source_target(root)
+            (target / "target-output").mkdir()
+            self.write_config(target, extra=self.staged_extra(max_iterations=5))
+            resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
+            fake = FakeDeepSeekClient(
+                [
+                    self.staged_overview_response(),
+                    self.tool_response(("feed", "read_file", {"path": "source/input.txt"})),
+                    self.tool_response(
+                        (
+                            "write",
+                            "write_file",
+                            {"path": "target_subdir/generated.py", "content": "translated\n"},
+                        )
+                    ),
+                    self.tool_response(
+                        ("compare-source", "read_file", {"path": "source/input.txt"}),
+                        ("compare-target", "read_file", {"path": "target_subdir/generated.py"}),
+                    ),
+                    self.final_response("too soon"),
+                ]
+            )
+
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                result = run_tool_loop(
+                    config=resolved,
+                    source_root=source,
+                    target_root=target,
+                    environ={"DEEPSEEK_API_KEY": "mock-secret-value"},
+                    client_factory=lambda _config, _env: fake,
+                )
+
+            self.assertEqual(result.status, "max-iterations")
+            self.assertIn("compare report or explicit progress compare section is missing", stdout.getvalue())
+
+    def test_staged_final_summary_rejects_when_min_processed_units_not_met(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target = self.make_source_target(root)
+            (source / "second.txt").write_text("second", encoding="utf-8")
+            (target / "target-output").mkdir()
+            self.write_config(
+                target,
+                extra=self.staged_extra(max_iterations=14, min_processed_units=2, max_units_per_run=2),
+            )
+            resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
+            fake = FakeDeepSeekClient(
+                [
+                    self.staged_overview_response(),
+                    self.tool_response(("feed-1", "read_file", {"path": "source/input.txt"})),
+                    self.tool_response(
+                        ("write-1", "write_file", {"path": "target_subdir/one.py", "content": "one\n"})
+                    ),
+                    self.tool_response(
+                        ("compare-source-1", "read_file", {"path": "source/input.txt"}),
+                        ("compare-target-1", "read_file", {"path": "target_subdir/one.py"}),
+                        (
+                            "report-1",
+                            "write_file",
+                            {"path": "target_subdir/FORGIS_COMPARE_REPORTS/input.txt.md", "content": "# C\n"},
+                        ),
+                    ),
+                    self.tool_response(
+                        (
+                            "revise-1",
+                            "append_file",
+                            {
+                                "path": "target_subdir/FORGIS_TRANSLATION_PROGRESS.md",
+                                "content": "\nsource/input.txt no_revision_needed\n",
+                            },
+                        )
+                    ),
+                    self.tool_response(("feed-2", "read_file", {"path": "source/second.txt"})),
+                    self.tool_response(
+                        (
+                            "defer-2",
+                            "append_file",
+                            {
+                                "path": "target_subdir/FORGIS_TRANSLATION_PROGRESS.md",
+                                "content": "\nsource/second.txt deferred: no target support yet\n",
+                            },
+                        )
+                    ),
+                    self.tool_response(
+                        ("compare-source-2", "read_file", {"path": "source/second.txt"}),
+                        (
+                            "report-2",
+                            "write_file",
+                            {"path": "target_subdir/FORGIS_COMPARE_REPORTS/second.txt.md", "content": "# C\n"},
+                        ),
+                    ),
+                    self.tool_response(
+                        (
+                            "revise-2",
+                            "append_file",
+                            {
+                                "path": "target_subdir/FORGIS_TRANSLATION_PROGRESS.md",
+                                "content": "\nsource/second.txt no_revision_needed\n",
+                            },
+                        )
+                    ),
+                    self.tool_response(
+                        (
+                            "folder",
+                            "append_file",
+                            {
+                                "path": "target_subdir/FORGIS_TRANSLATION_PROGRESS.md",
+                                "content": "\nfolder reviewed no_fix_needed\n",
+                            },
+                        )
+                    ),
+                    self.final_response("too soon"),
+                    self.final_response("still too soon"),
+                    self.final_response("still blocked"),
+                    self.final_response("max"),
+                ]
+            )
+
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                result = run_tool_loop(
+                    config=resolved,
+                    source_root=source,
+                    target_root=target,
+                    environ={"DEEPSEEK_API_KEY": "mock-secret-value"},
+                    client_factory=lambda _config, _env: fake,
+                )
+
+            self.assertEqual(result.status, "max-iterations")
+            self.assertIn("min_processed_units not met", stdout.getvalue())
+
+    def test_staged_max_units_per_run_enters_stabilization_after_run_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target = self.make_source_target(root)
+            (source / "second.txt").write_text("second", encoding="utf-8")
+            (target / "target-output").mkdir()
+            self.write_config(target, extra=self.staged_extra(max_iterations=8, max_units_per_run=1))
+            resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
+            fake = FakeDeepSeekClient(
+                [
+                    self.staged_overview_response(),
+                    self.tool_response(("feed", "read_file", {"path": "source/input.txt"})),
+                    self.tool_response(
+                        ("write", "write_file", {"path": "target_subdir/one.py", "content": "one\n"})
+                    ),
+                    self.tool_response(
+                        ("compare-source", "read_file", {"path": "source/input.txt"}),
+                        ("compare-target", "read_file", {"path": "target_subdir/one.py"}),
+                        (
+                            "report",
+                            "write_file",
+                            {"path": "target_subdir/FORGIS_COMPARE_REPORTS/input.txt.md", "content": "# C\n"},
+                        ),
+                    ),
+                    self.tool_response(
+                        (
+                            "revise",
+                            "append_file",
+                            {
+                                "path": "target_subdir/FORGIS_TRANSLATION_PROGRESS.md",
+                                "content": "\nsource/input.txt no_revision_needed\n",
+                            },
+                        )
+                    ),
+                    self.tool_response(
+                        (
+                            "folder",
+                            "append_file",
+                            {
+                                "path": "target_subdir/FORGIS_TRANSLATION_PROGRESS.md",
+                                "content": "\nfolder reviewed no_fix_needed\n",
+                            },
+                        )
+                    ),
+                    self.final_response("done"),
+                ]
+            )
+
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                result = run_tool_loop(
+                    config=resolved,
+                    source_root=source,
+                    target_root=target,
+                    environ={"DEEPSEEK_API_KEY": "mock-secret-value"},
+                    client_factory=lambda _config, _env: fake,
+                )
+
+            self.assertEqual(result.status, "completed")
+            self.assertIn("active_source_units=1", stdout.getvalue())
+            self.assertIn("staged phase transition: per_file -> stabilization", stdout.getvalue())
+
+    def test_staged_low_impact_warning_is_nonblocking_when_strict_mode_false(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target = self.make_source_target(root)
+            (target / "target-output").mkdir()
+            self.write_config(target, extra=self.staged_extra(max_iterations=8, strict_mode=False))
+            resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
+            fake = FakeDeepSeekClient(
+                [
+                    self.staged_overview_response(),
+                    self.tool_response(("feed", "read_file", {"path": "source/input.txt"})),
+                    self.tool_response(
+                        (
+                            "already",
+                            "append_file",
+                            {
+                                "path": "target_subdir/FORGIS_TRANSLATION_PROGRESS.md",
+                                "content": "\nsource/input.txt already_covered: target has equivalent behavior\n",
+                            },
+                        )
+                    ),
+                    self.tool_response(
+                        ("compare-source", "read_file", {"path": "source/input.txt"}),
+                        (
+                            "report",
+                            "write_file",
+                            {"path": "target_subdir/FORGIS_COMPARE_REPORTS/input.txt.md", "content": "# C\n"},
+                        ),
+                    ),
+                    self.tool_response(
+                        (
+                            "revise",
+                            "append_file",
+                            {
+                                "path": "target_subdir/FORGIS_TRANSLATION_PROGRESS.md",
+                                "content": "\nsource/input.txt no_revision_needed\n",
+                            },
+                        )
+                    ),
+                    self.tool_response(
+                        (
+                            "folder",
+                            "append_file",
+                            {
+                                "path": "target_subdir/FORGIS_TRANSLATION_PROGRESS.md",
+                                "content": "\nfolder reviewed no_fix_needed\n",
+                            },
+                        )
+                    ),
+                    self.final_response("done"),
+                ]
+            )
+
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                result = run_tool_loop(
+                    config=resolved,
+                    source_root=source,
+                    target_root=target,
+                    environ={"DEEPSEEK_API_KEY": "mock-secret-value"},
+                    client_factory=lambda _config, _env: fake,
+                )
+
+            self.assertEqual(result.status, "completed")
+            self.assertIn("LOW IMPACT WARNING", result.final_summary)
+            self.assertIn("low-impact warning", stdout.getvalue())
+
+    def test_staged_low_impact_warning_is_failure_status_when_strict_mode_true(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target = self.make_source_target(root)
+            (target / "target-output").mkdir()
+            self.write_config(target, extra=self.staged_extra(max_iterations=8, strict_mode=True))
+            resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
+            fake = FakeDeepSeekClient(
+                [
+                    self.staged_overview_response(),
+                    self.tool_response(("feed", "read_file", {"path": "source/input.txt"})),
+                    self.tool_response(
+                        (
+                            "already",
+                            "append_file",
+                            {
+                                "path": "target_subdir/FORGIS_TRANSLATION_PROGRESS.md",
+                                "content": "\nsource/input.txt already_covered: target has equivalent behavior\n",
+                            },
+                        )
+                    ),
+                    self.tool_response(
+                        ("compare-source", "read_file", {"path": "source/input.txt"}),
+                        (
+                            "report",
+                            "write_file",
+                            {"path": "target_subdir/FORGIS_COMPARE_REPORTS/input.txt.md", "content": "# C\n"},
+                        ),
+                    ),
+                    self.tool_response(
+                        (
+                            "revise",
+                            "append_file",
+                            {
+                                "path": "target_subdir/FORGIS_TRANSLATION_PROGRESS.md",
+                                "content": "\nsource/input.txt no_revision_needed\n",
+                            },
+                        )
+                    ),
+                    self.tool_response(
+                        (
+                            "folder",
+                            "append_file",
+                            {
+                                "path": "target_subdir/FORGIS_TRANSLATION_PROGRESS.md",
+                                "content": "\nfolder reviewed no_fix_needed\n",
+                            },
+                        )
+                    ),
+                    self.final_response("done"),
+                ]
+            )
+
+            with redirect_stdout(StringIO()):
+                result = run_tool_loop(
+                    config=resolved,
+                    source_root=source,
+                    target_root=target,
+                    environ={"DEEPSEEK_API_KEY": "mock-secret-value"},
+                    client_factory=lambda _config, _env: fake,
+                )
+
+            self.assertEqual(result.status, "low-impact")
+            self.assertIn("LOW IMPACT WARNING", result.final_summary)
 
     def test_staged_max_iterations_saves_partial_progress(self) -> None:
         with tempfile.TemporaryDirectory() as dirname:
