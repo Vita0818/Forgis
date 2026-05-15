@@ -87,6 +87,7 @@ model_env:
 
 max_iterations: 80
 max_tool_result_chars: 20000
+execution_mode: tool_loop
 
 validation_commands: []
 success_checks: []
@@ -141,6 +142,96 @@ confirm_real_run: true
 - 最终 `final_summary` 是否收到。
 
 日志不能显示 secret 值、`reasoning_content`、大段源码、完整工具结果或写入内容。工具结果会按 `max_tool_result_chars` 限制截断，较大的文件应让 DeepSeek 使用 `start_line` 和 `max_lines` 分页读取。
+
+## staged_translation 分阶段执行模式
+
+`staged_translation` 是可选执行模式，适合跨端迁移、重构迁移、逐文件投喂模型、或任何需要让模型先整体理解再逐单元推进的任务。它不是 Forgis 内置的平台迁移智能，也不会把某个技术栈或业务项目规则写死进 Forgis。具体迁移策略仍然由 `FORGIS_TASK.md`、目标仓库 docs 和用户任务要求定义。
+
+启用方式：
+
+```yaml
+execution_mode: staged_translation
+max_iterations: 160
+
+staged_translation:
+  min_total_iterations: 120
+
+  phases:
+    overview:
+      min_iterations: 20
+      max_iterations: 80
+    per_file:
+      min_iterations: 80
+      max_iterations: 240
+    stabilization:
+      min_iterations: 20
+      max_iterations: 80
+
+  per_file_micro_phases:
+    enabled: true
+    require_feed: true
+    require_write: true
+    require_compare_report: true
+    require_revision: true
+
+  folder_batch_review:
+    enabled: true
+    max_bundle_chars: 80000
+
+  source_inventory:
+    include_globs:
+      - "**/*"
+    exclude_globs:
+      - ".git/**"
+      - "**/.DS_Store"
+      - "**/build/**"
+      - "**/.gradle/**"
+      - "**/DerivedData/**"
+      - "**/node_modules/**"
+
+  progress_files:
+    plan: FORGIS_TRANSLATION_PLAN.md
+    source_target_map: FORGIS_SOURCE_TARGET_MAP.md
+    progress: FORGIS_TRANSLATION_PROGRESS.md
+    compare_report_dir: FORGIS_COMPARE_REPORTS
+```
+
+不配置 `execution_mode` 时仍走旧的普通 tool loop。`execution_mode` 也可以写成 `run_mode`，但两者同时出现时必须一致。启用 staged 模式后，`max_iterations` 必须大于等于 `staged_translation.min_total_iterations`；如果没有显式配置 `max_iterations`，Forgis 会给 staged 模式使用不低于默认最低总轮次的值。
+
+staged 模式分为三段：
+
+1. `overview`：先让 DeepSeek 读取任务、source tree、target_subdir tree，识别源目录、目标结构、处理顺序和风险，并写入计划、source-target map、progress 文件。这个阶段只允许写 staged 进度 artifact，避免一上来大范围重写目标实现。
+2. `per_file`：按 source inventory 顺序逐个处理源文件或源功能单元。每个单元都走小四段式。
+3. `stabilization`：所有选定单元处理后，只做小修和 build-oriented 一致性检查。若配置了 `validation_commands`，由现有 workflow 运行；否则只做静态复核，不会声称真实 build 成功。
+
+单文件小四段式：
+
+1. `feed`：聚焦当前 source unit，读取源文件和相关目标文件，判断目标侧是已覆盖、部分覆盖、缺失还是偏离，不写目标实现代码。
+2. `write/translate`：只围绕当前 source unit 做语义翻译、状态映射、UI/交互意图重建和目标实现合并，不跳到下一个文件。
+3. `readonly_compare`：只读源文件和刚生成的目标文件，写 compare report 或 progress artifact，不允许改目标实现代码。
+4. `revise`：根据 compare report 做一轮小修，更新 progress，并把当前单元标记为 `translated`、`partially_translated`、`missing target support`、`deferred` 或 `needs_review`。
+
+当某个 source folder 下的直接文件都处理完，Forgis 会触发一次 `folder_batch_review`。它会把该 folder 作为整体让 DeepSeek 检查跨文件状态、类型、导航、组件依赖和目标侧一致性。`max_bundle_chars` 限制一次 folder review 可提示的源文件规模；超过限制时，控制消息会明确列出本轮包含和省略的文件，要求模型分页读取或说明检查范围，不能静默跳过。
+
+staged 模式会在 `target_subdir` 内维护进度文件：
+
+- `FORGIS_TRANSLATION_PLAN.md`
+- `FORGIS_SOURCE_TARGET_MAP.md`
+- `FORGIS_TRANSLATION_PROGRESS.md`
+- `FORGIS_COMPARE_REPORTS/<safe-source-path>.md`
+
+compare report 文件名会安全化，避免路径注入。所有进度 artifact 路径都解析到 `target_subdir` 内；配置成绝对路径、`..`、`.git` 等不安全路径会失败。
+
+阶段门控包括：
+
+- 全局最低轮次 `min_total_iterations`；
+- 每阶段 `min_iterations` / `max_iterations`；
+- overview 必须生成计划、source-target map、progress；
+- per-file 必须按 inventory 顺序推进；
+- 过早 `final_summary` 会被 Forgis 拒绝，并注入控制消息要求继续当前阶段；
+- 达到 `max_iterations` 时不会假装完成，而是记录当前 phase、已处理/剩余单元数量，并向 progress 文件追加 partial progress 和 next-step 线索。
+
+staged 实时日志会额外显示 staged mode enabled、current phase、phase/global iteration、current source unit、current micro-phase、folder batch review start/end、progress file update、过早 `final_summary` 拒绝、`max_iterations reached`、partial progress saved 和 final_summary accepted。日志仍然不会打印 secret、Authorization header、完整请求/响应、`reasoning_content`、大段源码或写入内容。
 
 ## 文件工具列表
 
@@ -237,6 +328,7 @@ model_env:
 
 max_iterations: 80
 max_tool_result_chars: 20000
+execution_mode: tool_loop
 
 validation_commands:
   - "./gradlew test"

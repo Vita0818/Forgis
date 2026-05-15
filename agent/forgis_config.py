@@ -3,7 +3,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
@@ -21,6 +21,10 @@ DEFAULT_TARGET_BASE_BRANCH = "main"
 DEFAULT_RUN_LOG_FILENAME = "FORGIS_LOG.md"
 DEFAULT_MAX_ITERATIONS = 80
 DEFAULT_MAX_TOOL_RESULT_CHARS = 20_000
+DEFAULT_EXECUTION_MODE = "tool_loop"
+STAGED_TRANSLATION_MODE = "staged_translation"
+DEFAULT_STAGED_MIN_TOTAL_ITERATIONS = 120
+DEFAULT_STAGED_COMPARE_REPORT_DIR = "FORGIS_COMPARE_REPORTS"
 
 ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -45,6 +49,9 @@ CONFIG_FIELDS = {
     "validation_commands",
     "success_checks",
     "strict_mode",
+    "execution_mode",
+    "run_mode",
+    "staged_translation",
 }
 
 REQUIRED_FIELDS = {
@@ -52,6 +59,53 @@ REQUIRED_FIELDS = {
     "target_repo",
     "target_branch",
 }
+
+
+@dataclasses.dataclass(frozen=True)
+class StagedPhaseConfig:
+    min_iterations: int
+    max_iterations: int
+
+
+@dataclasses.dataclass(frozen=True)
+class StagedMicroPhasesConfig:
+    enabled: bool
+    require_feed: bool
+    require_write: bool
+    require_compare_report: bool
+    require_revision: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class FolderBatchReviewConfig:
+    enabled: bool
+    max_bundle_chars: int
+
+
+@dataclasses.dataclass(frozen=True)
+class SourceInventoryConfig:
+    include_globs: tuple[str, ...]
+    exclude_globs: tuple[str, ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class ProgressFilesConfig:
+    plan: str
+    source_target_map: str
+    progress: str
+    compare_report_dir: str
+
+
+@dataclasses.dataclass(frozen=True)
+class StagedTranslationConfig:
+    min_total_iterations: int
+    overview: StagedPhaseConfig
+    per_file: StagedPhaseConfig
+    stabilization: StagedPhaseConfig
+    per_file_micro_phases: StagedMicroPhasesConfig
+    folder_batch_review: FolderBatchReviewConfig
+    source_inventory: SourceInventoryConfig
+    progress_files: ProgressFilesConfig
 
 
 @dataclasses.dataclass(frozen=True)
@@ -81,6 +135,8 @@ class ResolvedConfig:
     validation_commands: tuple[str, ...]
     success_checks: tuple[dict[str, str], ...]
     strict_mode: bool
+    execution_mode: str
+    staged_translation: StagedTranslationConfig
 
     def env(self) -> dict[str, str]:
         model_env = {runtime: source for runtime, source in self.model_env}
@@ -117,6 +173,12 @@ class ResolvedConfig:
                 ensure_ascii=False,
             ),
             "STRICT_MODE": "true" if self.strict_mode else "false",
+            "EXECUTION_MODE": self.execution_mode,
+            "STAGED_TRANSLATION_JSON": json.dumps(
+                dataclasses.asdict(self.staged_translation),
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
         }
 
     def outputs(self) -> dict[str, str]:
@@ -255,6 +317,229 @@ def select_int(
     if value < minimum:
         raise ValueError(f"{field} must be at least {minimum}.")
     return value
+
+
+def select_nested_int(
+    config: dict[str, Any],
+    field: str,
+    default: int,
+    *,
+    minimum: int,
+) -> int:
+    if field not in config or config[field] is None:
+        return default
+    try:
+        value = int(config[field])
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"staged_translation.{field} must be an integer.") from exc
+    if value < minimum:
+        raise ValueError(f"staged_translation.{field} must be at least {minimum}.")
+    return value
+
+
+def select_mapping(config: dict[str, Any], field: str) -> dict[str, Any]:
+    if field not in config or config[field] is None:
+        return {}
+    value = config[field]
+    if not isinstance(value, dict):
+        raise ValueError(f"staged_translation.{field} must be a YAML mapping.")
+    return dict(value)
+
+
+def select_nested_bool(config: dict[str, Any], field: str, default: bool, *, prefix: str) -> bool:
+    if field not in config or config[field] is None:
+        return default
+    return parse_bool(config[field], f"{prefix}.{field}")
+
+
+def select_globs(config: dict[str, Any], field: str, default: tuple[str, ...], *, prefix: str) -> tuple[str, ...]:
+    if field not in config or config[field] is None:
+        return default
+    value = config[field]
+    if not isinstance(value, list):
+        raise ValueError(f"{prefix}.{field} must be a YAML list of single-line strings.")
+    globs: list[str] = []
+    for index, item in enumerate(value):
+        text = non_empty(item)
+        if text is None:
+            raise ValueError(f"{prefix}.{field}[{index}] must be a non-empty string.")
+        globs.append(clean_single_line(text, f"{prefix}.{field}[{index}]"))
+    return dedupe_strings(globs)
+
+
+def select_phase_config(
+    phases: dict[str, Any],
+    name: str,
+    *,
+    default_min: int,
+    default_max: int,
+) -> StagedPhaseConfig:
+    raw = phases.get(name)
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"staged_translation.phases.{name} must be a YAML mapping.")
+    minimum = select_nested_int(raw, "min_iterations", default_min, minimum=0)
+    maximum = select_nested_int(raw, "max_iterations", default_max, minimum=0)
+    if maximum < minimum:
+        raise ValueError(
+            f"staged_translation.phases.{name}.max_iterations must be greater than or equal to "
+            f"min_iterations."
+        )
+    return StagedPhaseConfig(min_iterations=minimum, max_iterations=maximum)
+
+
+def validate_target_subdir_relative_path(value: Any, label: str) -> str:
+    text = non_empty(value)
+    if text is None:
+        raise ValueError(f"{label} must be a non-empty relative path.")
+    cleaned = clean_single_line(text, label).replace("\\", "/")
+    if cleaned.startswith("/") or cleaned.startswith("~"):
+        raise ValueError(f"{label} must be relative to target_subdir.")
+    raw = PurePosixPath(cleaned.strip("/"))
+    if raw.is_absolute() or not raw.parts:
+        raise ValueError(f"{label} must be relative to target_subdir.")
+    if any(part in {"", ".", "..", ".git"} for part in raw.parts):
+        raise ValueError(f"{label} contains an unsafe path segment: {value}")
+    return raw.as_posix()
+
+
+def select_progress_files(config: dict[str, Any]) -> ProgressFilesConfig:
+    progress = select_mapping(config, "progress_files")
+    return ProgressFilesConfig(
+        plan=validate_target_subdir_relative_path(
+            progress.get("plan", "FORGIS_TRANSLATION_PLAN.md"),
+            "staged_translation.progress_files.plan",
+        ),
+        source_target_map=validate_target_subdir_relative_path(
+            progress.get("source_target_map", "FORGIS_SOURCE_TARGET_MAP.md"),
+            "staged_translation.progress_files.source_target_map",
+        ),
+        progress=validate_target_subdir_relative_path(
+            progress.get("progress", "FORGIS_TRANSLATION_PROGRESS.md"),
+            "staged_translation.progress_files.progress",
+        ),
+        compare_report_dir=validate_target_subdir_relative_path(
+            progress.get("compare_report_dir", DEFAULT_STAGED_COMPARE_REPORT_DIR),
+            "staged_translation.progress_files.compare_report_dir",
+        ),
+    )
+
+
+def select_execution_mode(config: dict[str, Any]) -> str:
+    execution_mode = non_empty(config.get("execution_mode"))
+    run_mode = non_empty(config.get("run_mode"))
+    if execution_mode and run_mode and execution_mode.casefold() != run_mode.casefold():
+        raise ValueError("execution_mode and run_mode must match when both are configured.")
+
+    mode = execution_mode or run_mode or DEFAULT_EXECUTION_MODE
+    mode = clean_single_line(mode, "execution_mode").casefold()
+    aliases = {
+        "default": DEFAULT_EXECUTION_MODE,
+        "tool_loop": DEFAULT_EXECUTION_MODE,
+        "legacy": DEFAULT_EXECUTION_MODE,
+        STAGED_TRANSLATION_MODE: STAGED_TRANSLATION_MODE,
+    }
+    if mode not in aliases:
+        raise ValueError("execution_mode must be either tool_loop or staged_translation.")
+    return aliases[mode]
+
+
+def select_staged_translation_config(config: dict[str, Any]) -> StagedTranslationConfig:
+    staged = config.get("staged_translation")
+    if staged is None:
+        staged = {}
+    if not isinstance(staged, dict):
+        raise ValueError("staged_translation must be a YAML mapping.")
+
+    phases = select_mapping(staged, "phases")
+    overview = select_phase_config(
+        phases,
+        "overview",
+        default_min=20,
+        default_max=80,
+    )
+    per_file = select_phase_config(
+        phases,
+        "per_file",
+        default_min=80,
+        default_max=240,
+    )
+    stabilization = select_phase_config(
+        phases,
+        "stabilization",
+        default_min=20,
+        default_max=80,
+    )
+
+    micro = select_mapping(staged, "per_file_micro_phases")
+    folder = select_mapping(staged, "folder_batch_review")
+    inventory = select_mapping(staged, "source_inventory")
+
+    return StagedTranslationConfig(
+        min_total_iterations=select_nested_int(
+            staged,
+            "min_total_iterations",
+            DEFAULT_STAGED_MIN_TOTAL_ITERATIONS,
+            minimum=0,
+        ),
+        overview=overview,
+        per_file=per_file,
+        stabilization=stabilization,
+        per_file_micro_phases=StagedMicroPhasesConfig(
+            enabled=select_nested_bool(micro, "enabled", True, prefix="staged_translation.per_file_micro_phases"),
+            require_feed=select_nested_bool(
+                micro,
+                "require_feed",
+                True,
+                prefix="staged_translation.per_file_micro_phases",
+            ),
+            require_write=select_nested_bool(
+                micro,
+                "require_write",
+                True,
+                prefix="staged_translation.per_file_micro_phases",
+            ),
+            require_compare_report=select_nested_bool(
+                micro,
+                "require_compare_report",
+                True,
+                prefix="staged_translation.per_file_micro_phases",
+            ),
+            require_revision=select_nested_bool(
+                micro,
+                "require_revision",
+                True,
+                prefix="staged_translation.per_file_micro_phases",
+            ),
+        ),
+        folder_batch_review=FolderBatchReviewConfig(
+            enabled=select_nested_bool(folder, "enabled", True, prefix="staged_translation.folder_batch_review"),
+            max_bundle_chars=select_nested_int(folder, "max_bundle_chars", 80_000, minimum=1),
+        ),
+        source_inventory=SourceInventoryConfig(
+            include_globs=select_globs(
+                inventory,
+                "include_globs",
+                ("**/*",),
+                prefix="staged_translation.source_inventory",
+            ),
+            exclude_globs=select_globs(
+                inventory,
+                "exclude_globs",
+                (
+                    ".git/**",
+                    "**/.DS_Store",
+                    "**/build/**",
+                    "**/.gradle/**",
+                    "**/DerivedData/**",
+                    "**/node_modules/**",
+                ),
+                prefix="staged_translation.source_inventory",
+            ),
+        ),
+        progress_files=select_progress_files(staged),
+    )
 
 
 def resolve_inside_root(root: Path, relative_path: str, label: str) -> tuple[Path, str]:
@@ -452,10 +737,18 @@ def resolve_config(
     validation_commands = select_string_list(config, "validation_commands")
     success_checks = select_success_checks(config)
     strict_mode = select_config_bool(config, "strict_mode", False)
+    execution_mode = select_execution_mode(config)
+    staged_translation = select_staged_translation_config(config)
+    default_max_iterations = DEFAULT_MAX_ITERATIONS
+    if execution_mode == STAGED_TRANSLATION_MODE and "max_iterations" not in config:
+        default_max_iterations = max(
+            DEFAULT_MAX_ITERATIONS,
+            staged_translation.min_total_iterations,
+        )
     max_iterations = select_int(
         config,
         "max_iterations",
-        DEFAULT_MAX_ITERATIONS,
+        default_max_iterations,
         minimum=1,
     )
     max_tool_result_chars = select_int(
@@ -467,6 +760,12 @@ def resolve_config(
 
     if not dry_run_value and not confirm_real_run:
         raise ValueError("Real Forgis runs require confirm_real_run: true in FORGIS_CONFIG.yml.")
+
+    if execution_mode == STAGED_TRANSLATION_MODE and max_iterations < staged_translation.min_total_iterations:
+        raise ValueError(
+            "max_iterations must be greater than or equal to "
+            "staged_translation.min_total_iterations when execution_mode=staged_translation."
+        )
 
     real_run_allowed = not dry_run_value and confirm_real_run
     run_agent_effective = run_agent_config and real_run_allowed
@@ -497,6 +796,8 @@ def resolve_config(
         validation_commands=validation_commands,
         success_checks=success_checks,
         strict_mode=strict_mode,
+        execution_mode=execution_mode,
+        staged_translation=staged_translation,
     )
 
 
@@ -535,6 +836,7 @@ def markdown_summary(resolved: ResolvedConfig) -> str:
             f"| Target base branch | `{resolved.target_base_branch}` |",
             f"| Target branch | `{resolved.target_branch}` |",
             f"| Agent backend | `{resolved.agent_backend}` |",
+            f"| Execution mode | `{resolved.execution_mode}` |",
             f"| Task prompt path | `{resolved.task_prompt_path}` |",
             f"| Target subdir | `{resolved.target_subdir}` |",
             f"| Run log path | `{resolved.run_log_path}` |",
@@ -547,6 +849,7 @@ def markdown_summary(resolved: ResolvedConfig) -> str:
             f"| validation_commands | `{validation_commands}` |",
             f"| success_checks | `{success_checks}` |",
             f"| strict_mode | `{str(resolved.strict_mode).lower()}` |",
+            f"| staged_translation min_total_iterations | `{resolved.staged_translation.min_total_iterations}` |",
             f"| dry_run config value | `{str(resolved.dry_run).lower()}` |",
             f"| run_agent config value | `{str(resolved.run_agent_config).lower()}` |",
             f"| confirm_real_run config value | `{str(resolved.confirm_real_run).lower()}` |",
