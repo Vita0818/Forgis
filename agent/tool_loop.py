@@ -381,6 +381,9 @@ def main() -> None:
     write_json(args.summary_output, result.as_dict())
     print(json.dumps(result.as_dict(), indent=2, ensure_ascii=False, sort_keys=True))
 
+    if result.status == "low-impact":
+        raise RuntimeError(result.final_summary)
+
     if result.status == "max-iterations" and (
         config.execution_mode != STAGED_TRANSLATION_MODE or config.strict_mode
     ):

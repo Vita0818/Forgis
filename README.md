@@ -88,7 +88,7 @@ Only `agent_backend: deepseek` is supported. Other backend values fail fast.
 
 ## Optional Staged Translation Mode
 
-Set `execution_mode: staged_translation` when a task needs a structured migration run: overview first, then one source file or source unit at a time, then stabilization. This mode still uses the same DeepSeek client, file tools, logging, and guardrails. It does not add platform-specific migration intelligence; the strategy still comes from `FORGIS_TASK.md`, repository docs, and the user's task.
+Set `execution_mode: staged_translation` when a task needs a controller-enforced migration run: overview first, then one queued source file or source unit at a time through feed/write/readonly-compare/revise gates, then stabilization. This mode still uses the same DeepSeek client, file tools, logging, and guardrails. It does not add platform-specific migration intelligence; the strategy still comes from `FORGIS_TASK.md`, repository docs, and the user's task.
 
 See [中文文档](README.zh-CN.md) for the full staged mode configuration and workflow.
 

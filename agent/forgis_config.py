@@ -24,6 +24,8 @@ DEFAULT_MAX_TOOL_RESULT_CHARS = 20_000
 DEFAULT_EXECUTION_MODE = "tool_loop"
 STAGED_TRANSLATION_MODE = "staged_translation"
 DEFAULT_STAGED_MIN_TOTAL_ITERATIONS = 120
+DEFAULT_STAGED_MIN_PROCESSED_UNITS = 3
+DEFAULT_STAGED_MAX_UNITS_PER_RUN = 12
 DEFAULT_STAGED_COMPARE_REPORT_DIR = "FORGIS_COMPARE_REPORTS"
 
 ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -80,6 +82,14 @@ class StagedMicroPhasesConfig:
 class FolderBatchReviewConfig:
     enabled: bool
     max_bundle_chars: int
+    require_after_folder_complete: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class LowImpactWarningConfig:
+    enabled: bool
+    min_code_changed_paths: int
+    ignore_report_only_changes: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -99,11 +109,19 @@ class ProgressFilesConfig:
 @dataclasses.dataclass(frozen=True)
 class StagedTranslationConfig:
     min_total_iterations: int
+    min_processed_units: int
+    max_units_per_run: int
+    enforce_micro_phases: bool
+    require_source_read: bool
+    require_compare_report: bool
+    require_progress_update: bool
+    require_target_effect_or_deferred_reason: bool
     overview: StagedPhaseConfig
     per_file: StagedPhaseConfig
     stabilization: StagedPhaseConfig
     per_file_micro_phases: StagedMicroPhasesConfig
     folder_batch_review: FolderBatchReviewConfig
+    low_impact_warning: LowImpactWarningConfig
     source_inventory: SourceInventoryConfig
     progress_files: ProgressFilesConfig
 
@@ -474,6 +492,7 @@ def select_staged_translation_config(config: dict[str, Any]) -> StagedTranslatio
 
     micro = select_mapping(staged, "per_file_micro_phases")
     folder = select_mapping(staged, "folder_batch_review")
+    low_impact = select_mapping(staged, "low_impact_warning")
     inventory = select_mapping(staged, "source_inventory")
 
     return StagedTranslationConfig(
@@ -482,6 +501,48 @@ def select_staged_translation_config(config: dict[str, Any]) -> StagedTranslatio
             "min_total_iterations",
             DEFAULT_STAGED_MIN_TOTAL_ITERATIONS,
             minimum=0,
+        ),
+        min_processed_units=select_nested_int(
+            staged,
+            "min_processed_units",
+            DEFAULT_STAGED_MIN_PROCESSED_UNITS,
+            minimum=0,
+        ),
+        max_units_per_run=select_nested_int(
+            staged,
+            "max_units_per_run",
+            DEFAULT_STAGED_MAX_UNITS_PER_RUN,
+            minimum=1,
+        ),
+        enforce_micro_phases=select_nested_bool(
+            staged,
+            "enforce_micro_phases",
+            True,
+            prefix="staged_translation",
+        ),
+        require_source_read=select_nested_bool(
+            staged,
+            "require_source_read",
+            True,
+            prefix="staged_translation",
+        ),
+        require_compare_report=select_nested_bool(
+            staged,
+            "require_compare_report",
+            True,
+            prefix="staged_translation",
+        ),
+        require_progress_update=select_nested_bool(
+            staged,
+            "require_progress_update",
+            True,
+            prefix="staged_translation",
+        ),
+        require_target_effect_or_deferred_reason=select_nested_bool(
+            staged,
+            "require_target_effect_or_deferred_reason",
+            True,
+            prefix="staged_translation",
         ),
         overview=overview,
         per_file=per_file,
@@ -516,6 +577,22 @@ def select_staged_translation_config(config: dict[str, Any]) -> StagedTranslatio
         folder_batch_review=FolderBatchReviewConfig(
             enabled=select_nested_bool(folder, "enabled", True, prefix="staged_translation.folder_batch_review"),
             max_bundle_chars=select_nested_int(folder, "max_bundle_chars", 80_000, minimum=1),
+            require_after_folder_complete=select_nested_bool(
+                folder,
+                "require_after_folder_complete",
+                True,
+                prefix="staged_translation.folder_batch_review",
+            ),
+        ),
+        low_impact_warning=LowImpactWarningConfig(
+            enabled=select_nested_bool(low_impact, "enabled", True, prefix="staged_translation.low_impact_warning"),
+            min_code_changed_paths=select_nested_int(low_impact, "min_code_changed_paths", 1, minimum=0),
+            ignore_report_only_changes=select_nested_bool(
+                low_impact,
+                "ignore_report_only_changes",
+                True,
+                prefix="staged_translation.low_impact_warning",
+            ),
         ),
         source_inventory=SourceInventoryConfig(
             include_globs=select_globs(
@@ -534,6 +611,21 @@ def select_staged_translation_config(config: dict[str, Any]) -> StagedTranslatio
                     "**/.gradle/**",
                     "**/DerivedData/**",
                     "**/node_modules/**",
+                    "**/.cache/**",
+                    "**/cache/**",
+                    "**/generated/**",
+                    "**/*.lock",
+                    "**/*lock.json",
+                    "**/*.png",
+                    "**/*.jpg",
+                    "**/*.jpeg",
+                    "**/*.gif",
+                    "**/*.webp",
+                    "**/*.ico",
+                    "**/*.pdf",
+                    "**/*.zip",
+                    "**/*.gz",
+                    "**/*.tar",
                 ),
                 prefix="staged_translation.source_inventory",
             ),
@@ -850,6 +942,8 @@ def markdown_summary(resolved: ResolvedConfig) -> str:
             f"| success_checks | `{success_checks}` |",
             f"| strict_mode | `{str(resolved.strict_mode).lower()}` |",
             f"| staged_translation min_total_iterations | `{resolved.staged_translation.min_total_iterations}` |",
+            f"| staged_translation min_processed_units | `{resolved.staged_translation.min_processed_units}` |",
+            f"| staged_translation max_units_per_run | `{resolved.staged_translation.max_units_per_run}` |",
             f"| dry_run config value | `{str(resolved.dry_run).lower()}` |",
             f"| run_agent config value | `{str(resolved.run_agent_config).lower()}` |",
             f"| confirm_real_run config value | `{str(resolved.confirm_real_run).lower()}` |",

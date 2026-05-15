@@ -147,6 +147,8 @@ confirm_real_run: true
 
 `staged_translation` 是可选执行模式，适合跨端迁移、重构迁移、逐文件投喂模型、或任何需要让模型先整体理解再逐单元推进的任务。它不是 Forgis 内置的平台迁移智能，也不会把某个技术栈或业务项目规则写死进 Forgis。具体迁移策略仍然由 `FORGIS_TASK.md`、目标仓库 docs 和用户任务要求定义。
 
+这个模式是 controller-enforced，不只是提示词建议。Forgis 会维护 source unit queue、当前 phase、当前 micro-phase、已处理/延期单元、compare report 状态、目标侧变更路径和 folder review 状态；如果当前门控条件没满足，Forgis 会停留在当前 micro-phase，并在下一轮把缺失条件反馈给模型。
+
 启用方式：
 
 ```yaml
@@ -155,6 +157,14 @@ max_iterations: 160
 
 staged_translation:
   min_total_iterations: 120
+  min_processed_units: 3
+  max_units_per_run: 12
+
+  enforce_micro_phases: true
+  require_source_read: true
+  require_compare_report: true
+  require_progress_update: true
+  require_target_effect_or_deferred_reason: true
 
   phases:
     overview:
@@ -177,6 +187,12 @@ staged_translation:
   folder_batch_review:
     enabled: true
     max_bundle_chars: 80000
+    require_after_folder_complete: true
+
+  low_impact_warning:
+    enabled: true
+    min_code_changed_paths: 1
+    ignore_report_only_changes: true
 
   source_inventory:
     include_globs:
@@ -198,20 +214,26 @@ staged_translation:
 
 不配置 `execution_mode` 时仍走旧的普通 tool loop。`execution_mode` 也可以写成 `run_mode`，但两者同时出现时必须一致。启用 staged 模式后，`max_iterations` 必须大于等于 `staged_translation.min_total_iterations`；如果没有显式配置 `max_iterations`，Forgis 会给 staged 模式使用不低于默认最低总轮次的值。
 
+source unit queue 来自 `source_inventory`。Forgis 会稳定排序，默认排除 `.git`、构建/缓存/生成目录、锁文件、常见二进制和图片文件，并优先处理源代码、项目说明、架构文档、配置和文本规格。queue 会写入 `FORGIS_TRANSLATION_PROGRESS.md` 和 `FORGIS_SOURCE_TARGET_MAP.md`，实时日志会显示 queue length 和当前 unit index。queue 为空时 staged 模式会 fail-fast。
+
 staged 模式分为三段：
 
 1. `overview`：先让 DeepSeek 读取任务、source tree、target_subdir tree，识别源目录、目标结构、处理顺序和风险，并写入计划、source-target map、progress 文件。这个阶段只允许写 staged 进度 artifact，避免一上来大范围重写目标实现。
-2. `per_file`：按 source inventory 顺序逐个处理源文件或源功能单元。每个单元都走小四段式。
+2. `per_file`：按 source unit queue 顺序逐个处理源文件或源功能单元。每个单元都必须走小四段式，不能跳步。
 3. `stabilization`：所有选定单元处理后，只做小修和 build-oriented 一致性检查。若配置了 `validation_commands`，由现有 workflow 运行；否则只做静态复核，不会声称真实 build 成功。
 
 单文件小四段式：
 
-1. `feed`：聚焦当前 source unit，读取源文件和相关目标文件，判断目标侧是已覆盖、部分覆盖、缺失还是偏离，不写目标实现代码。
-2. `write/translate`：只围绕当前 source unit 做语义翻译、状态映射、UI/交互意图重建和目标实现合并，不跳到下一个文件。
-3. `readonly_compare`：只读源文件和刚生成的目标文件，写 compare report 或 progress artifact，不允许改目标实现代码。
-4. `revise`：根据 compare report 做一轮小修，更新 progress，并把当前单元标记为 `translated`、`partially_translated`、`missing target support`、`deferred` 或 `needs_review`。
+1. `feed`：必须用 `read_file` 读取当前 source unit，读取相关目标文件，判断目标侧是已覆盖、部分覆盖、缺失还是偏离；此阶段禁止写目标实现代码。
+2. `write/translate`：必须围绕当前 source unit 创建或修改目标实现。如果判断无需修改，必须在 progress/map 中明确写出 `already_covered`、`deferred` 或缺失支持原因；否则 Forgis 不会认为该单元完成。
+3. `readonly_compare`：必须只读当前 source unit 和刚生成/相关目标文件，必须写 compare report 或 progress 中的明确 compare section；此阶段禁止修改普通实现文件，只允许写 report/progress/map artifact。
+4. `revise`：根据 compare report 做一轮小修。如果不需要改代码，必须记录 `no_revision_needed`；修完还要更新 progress 或 source-target map，然后 Forgis 才会把当前 source unit 标记为 processed 或 deferred。
 
-当某个 source folder 下的直接文件都处理完，Forgis 会触发一次 `folder_batch_review`。它会把该 folder 作为整体让 DeepSeek 检查跨文件状态、类型、导航、组件依赖和目标侧一致性。`max_bundle_chars` 限制一次 folder review 可提示的源文件规模；超过限制时，控制消息会明确列出本轮包含和省略的文件，要求模型分页读取或说明检查范围，不能静默跳过。
+`min_processed_units` 防止模型只处理 0-1 个单元就结束；`max_units_per_run` 防止一次运行吞完整仓库。达到本轮最大单元数后，Forgis 会进入 stabilization，而不是继续无限推进。若 reached `max_iterations`，Forgis 会写入 partial progress，不会声称完整完成。
+
+当某个 source folder 下本轮直接文件都处理完或延期后，Forgis 会强制触发一次 `folder_review`。它会把该 folder 作为整体让 DeepSeek 检查跨文件状态、类型、导航、组件依赖和目标侧一致性。`max_bundle_chars` 限制一次 folder review 可提示的源文件规模；超过限制时，控制消息会明确列出本轮包含和省略的文件，要求模型分页读取或说明检查范围，不能静默跳过。folder review 必须更新 progress 或 source-target map 才能结束。
+
+Forgis 还会做 low-impact detection。如果迭代很多但有效处理单元少、只改报告/README、没有代码类目标变更、compare report 缺失、progress/map 未更新，会在日志、progress 和 `final_summary` 中写入 `LOW IMPACT WARNING`。默认 `strict_mode=false` 时 warning 不阻断 PR；`strict_mode=true` 时 low-impact 会让 tool loop 以失败状态结束。
 
 staged 模式会在 `target_subdir` 内维护进度文件：
 
@@ -226,12 +248,16 @@ compare report 文件名会安全化，避免路径注入。所有进度 artifac
 
 - 全局最低轮次 `min_total_iterations`；
 - 每阶段 `min_iterations` / `max_iterations`；
+- 有效处理单元数 `min_processed_units`；
+- 单次运行最多处理单元数 `max_units_per_run`；
 - overview 必须生成计划、source-target map、progress；
-- per-file 必须按 inventory 顺序推进；
+- per-file 必须按 source unit queue 顺序推进；
+- 每个 source unit 必须满足 feed/write/readonly_compare/revise 的事实门控；
+- compare report 或 progress compare section 必须存在；
 - 过早 `final_summary` 会被 Forgis 拒绝，并注入控制消息要求继续当前阶段；
 - 达到 `max_iterations` 时不会假装完成，而是记录当前 phase、已处理/剩余单元数量，并向 progress 文件追加 partial progress 和 next-step 线索。
 
-staged 实时日志会额外显示 staged mode enabled、current phase、phase/global iteration、current source unit、current micro-phase、folder batch review start/end、progress file update、过早 `final_summary` 拒绝、`max_iterations reached`、partial progress saved 和 final_summary accepted。日志仍然不会打印 secret、Authorization header、完整请求/响应、`reasoning_content`、大段源码或写入内容。
+staged 实时日志会额外显示 staged mode enabled、source unit queue length、current unit index、current source unit、current micro-phase、source unit 是否已读取、target changed paths before/after、compare report path、processed/deferred unit count、folder review start/end、low-impact warning、`final_summary` 接受或拒绝原因、`max_iterations reached` 和 partial progress saved。日志仍然不会打印 secret、Authorization header、完整请求/响应、`reasoning_content`、大段源码或写入内容。
 
 ## 文件工具列表
 
