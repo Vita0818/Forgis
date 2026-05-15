@@ -2,6 +2,11 @@
 
 Forgis is a thin DeepSeek-powered file interaction interface.
 
+Documentation:
+
+- [中文文档](README.zh-CN.md)
+- [SwiftUI → Kotlin / Jetpack Compose migration guide](docs/DS_GUIDE_Swift_Kotlin.md)
+
 It only does three things:
 
 - reads `FORGIS_CONFIG.yml` and the configured task file from the target repository
