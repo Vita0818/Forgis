@@ -7,9 +7,11 @@ import os
 from pathlib import Path
 from typing import Any
 
-from deepseek_agent import DeepSeekClient, TOOL_DEFINITIONS, initial_messages
+from deepseek_agent import DeepSeekClient, TOOL_DEFINITIONS, build_skill_selection, initial_messages
 from file_tools import WRITE_TOOLS, FileToolSandbox, ToolError
 from forgis_config import ResolvedConfig
+from runtime_controller import RuntimeController
+from skill_loader import SkillSelection, render_selected_skills
 from source_inventory import (
     SourceUnit,
     bundled_units_for_folder,
@@ -1069,6 +1071,7 @@ def run_staged_translation_loop(
     target_root: Path,
     environ: dict[str, str] | None = None,
     client_factory: ClientFactory | None = None,
+    skill_selection: SkillSelection | None = None,
 ) -> ToolLoopResult:
     env = dict(os.environ if environ is None else environ)
     all_units = collect_source_inventory(source_root, config.staged_translation.source_inventory)
@@ -1085,7 +1088,15 @@ def run_staged_translation_loop(
         config_path=config.config_path,
         task_path=config.task_prompt_path,
         max_result_chars=config.max_tool_result_chars,
+        build_command=config.build_command,
+        test_command=config.test_command,
+        build_timeout_seconds=config.build_timeout_seconds,
+        test_timeout_seconds=config.test_timeout_seconds,
+        max_command_output_chars=config.max_command_output_chars,
     )
+    runtime = RuntimeController()
+    effective_skill_selection = skill_selection or build_skill_selection(config, target_root=target_root)
+    runtime.attach_skills(effective_skill_selection.as_runtime_state())
     state = StagedState()
     initialize_progress_artifacts(
         sandbox=sandbox,
@@ -1097,7 +1108,7 @@ def run_staged_translation_loop(
 
     factory = client_factory or (lambda cfg, local_env: DeepSeekClient.from_config(cfg, local_env))
     client = factory(config, env)
-    messages: list[dict[str, Any]] = initial_messages(config)
+    messages: list[dict[str, Any]] = initial_messages(config, render_selected_skills(effective_skill_selection))
     tool_call_count = 0
 
     safe_log(
@@ -1187,6 +1198,7 @@ def run_staged_translation_loop(
                         read_tool_count=sandbox.read_count,
                         write_tool_count=sandbox.write_count,
                         operation_log=sandbox.operation_log(),
+                        runtime_state=runtime.as_dict(),
                     )
 
                 phase_min = phase_min_iterations(config, state.phase)
@@ -1280,6 +1292,7 @@ def run_staged_translation_loop(
                 config=config,
                 micro=iteration_micro,
             )
+            runtime.observe_tool_result(name=name, arguments=arguments, result=result)
             full_result_text = json.dumps(result, ensure_ascii=False, sort_keys=True)
             formatted_result = format_tool_result(result, config.max_tool_result_chars)
             result_truncated = bool(result.get("truncated")) or len(full_result_text) > config.max_tool_result_chars
@@ -1357,4 +1370,5 @@ def run_staged_translation_loop(
         read_tool_count=sandbox.read_count,
         write_tool_count=sandbox.write_count,
         operation_log=sandbox.operation_log(),
+        runtime_state=runtime.as_dict(),
     )

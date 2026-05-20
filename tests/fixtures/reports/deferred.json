@@ -1,0 +1,174 @@
+{
+  "name": "deferred",
+  "final_summary": "Fixture unit is deferred until export input is available.",
+  "repair_report_markdown": "# Fixture Repair Report\n\n- deferred fixture has no runtime diff.\n",
+  "operation_log": [],
+  "runtime_state": {
+    "build_runs": 0,
+    "test_runs": 0,
+    "last_build_status": "skipped",
+    "last_test_status": "skipped",
+    "repair_loop_enabled": false,
+    "max_repair_attempts": 2,
+    "repair_attempts_used": 0,
+    "repair_allowed": false,
+    "repair_success": false,
+    "stopped_reason": "none",
+    "repair_event_count": 0,
+    "changed_paths": [],
+    "migration_scheduler_enabled": true,
+    "migration_plan_source": "loaded",
+    "migration_plan_path": "forgis-runtime/reports/FORGIS_MIGRATION_PLAN.json",
+    "migration_plan_load_status": "loaded",
+    "migration_plan_write_status": "written",
+    "plan_update_status": "updated",
+    "active_unit_id": "asset-icons",
+    "active_unit_status": "deferred",
+    "active_unit_reason": "Icon export package is not ready for migration.",
+    "active_unit_switch": {
+      "status": "skipped",
+      "active_unit_id": "asset-icons",
+      "message": "No requested active unit id was configured."
+    },
+    "manual_unit_status_update": {
+      "status": "updated",
+      "unit_id": "asset-icons",
+      "previous_status": "active",
+      "requested_status": "deferred",
+      "final_status": "deferred",
+      "reason": "Icon export package is not ready for migration.",
+      "message": "Manual migration unit status update applied."
+    },
+    "resume_summary": {
+      "plan_id": "fixture-plan-deferred",
+      "active_unit_id": "asset-icons",
+      "last_active_unit_status": "deferred",
+      "counts": {
+        "completed": 0,
+        "blocked": 0,
+        "pending": 2,
+        "deferred": 1,
+        "active": 0,
+        "total": 3
+      },
+      "last_stopped_reason": "Icon export package is not ready for migration.",
+      "changed_paths": [],
+      "next_step": "Review the deferred reason before continuing or explicitly select another unit."
+    },
+    "migration_plan_summary": {
+      "plan_id": "fixture-plan-deferred",
+      "active_unit_id": "asset-icons",
+      "completed_count": 0,
+      "blocked_count": 0,
+      "pending_count": 2,
+      "deferred_count": 1,
+      "active_count": 0,
+      "unit_count": 3,
+      "active_unit": {
+        "unit_id": "asset-icons",
+        "title": "Icon assets",
+        "source_paths": [
+          "Assets/IconSet"
+        ],
+        "target_paths": [
+          "target-output/assets/icons"
+        ],
+        "unit_type": "asset",
+        "priority": 50,
+        "status": "deferred",
+        "reason": "Icon export package is not ready for migration.",
+        "build_status": "skipped",
+        "test_status": "skipped"
+      },
+      "units": [
+        {
+          "unit_id": "ui-homeview-swift",
+          "title": "Home view migration",
+          "source_paths": [
+            "Source/HomeView.swift"
+          ],
+          "target_paths": [
+            "target-output/HomeView.kt"
+          ],
+          "unit_type": "ui",
+          "priority": 100,
+          "status": "pending"
+        },
+        {
+          "unit_id": "asset-icons",
+          "title": "Icon assets",
+          "source_paths": [
+            "Assets/IconSet"
+          ],
+          "target_paths": [
+            "target-output/assets/icons"
+          ],
+          "unit_type": "asset",
+          "priority": 50,
+          "status": "deferred",
+          "reason": "Icon export package is not ready for migration.",
+          "build_status": "skipped",
+          "test_status": "skipped"
+        },
+        {
+          "unit_id": "model-userprofile",
+          "title": "User profile model",
+          "source_paths": [
+            "Models/UserProfile.swift"
+          ],
+          "target_paths": [
+            "target-output/UserProfile.kt"
+          ],
+          "unit_type": "model",
+          "priority": 40,
+          "status": "pending"
+        }
+      ]
+    },
+    "plan_events": [
+      {
+        "event_type": "unit_status_update_requested",
+        "unit_id": "asset-icons",
+        "requested_status": "deferred",
+        "reason": "Icon export package is not ready for migration.",
+        "short_message": "Manual migration unit status update requested.",
+        "order": 1,
+        "timestamp": "2026-05-20T00:00:00Z"
+      },
+      {
+        "event_type": "unit_status_update_succeeded",
+        "unit_id": "asset-icons",
+        "status_before": "active",
+        "status_after": "deferred",
+        "previous_status": "active",
+        "requested_status": "deferred",
+        "final_status": "deferred",
+        "reason": "Icon export package is not ready for migration.",
+        "short_message": "Manual migration unit status update applied.",
+        "order": 2,
+        "timestamp": "2026-05-20T00:01:00Z"
+      },
+      {
+        "event_type": "unit_deferred",
+        "unit_id": "asset-icons",
+        "status_before": "active",
+        "status_after": "deferred",
+        "reason": "Icon export package is not ready for migration.",
+        "short_message": "Active unit state is deferred.",
+        "order": 3,
+        "timestamp": "2026-05-20T00:02:00Z"
+      }
+    ],
+    "repair_events": []
+  },
+  "expect": {
+    "report_schema_version": "forgis.run_report.v5.0",
+    "active_unit_id": "asset-icons",
+    "reason": "Icon export package is not ready for migration.",
+    "recommended_keywords": [
+      "resolve",
+      "switch"
+    ],
+    "deferred_count": 1
+  }
+}

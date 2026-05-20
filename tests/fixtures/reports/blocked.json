@@ -1,0 +1,188 @@
+{
+  "name": "blocked",
+  "final_summary": "Fixture active unit is blocked for manual review.",
+  "repair_report_markdown": "# Fixture Repair Report\n\n- blocked fixture uses a short fake reason.\n",
+  "operation_log": [],
+  "runtime_state": {
+    "build_runs": 0,
+    "test_runs": 1,
+    "last_build_status": "skipped",
+    "last_test_status": "blocked",
+    "last_failure_summary": {
+      "message": "Fixture verification is blocked by a missing navigation mapping."
+    },
+    "repair_loop_enabled": true,
+    "max_repair_attempts": 2,
+    "repair_attempts_used": 1,
+    "repair_allowed": false,
+    "repair_success": false,
+    "stopped_reason": "blocked",
+    "repair_event_count": 1,
+    "changed_paths": [],
+    "migration_scheduler_enabled": true,
+    "migration_plan_source": "loaded",
+    "migration_plan_path": "forgis-runtime/reports/FORGIS_MIGRATION_PLAN.json",
+    "migration_plan_load_status": "loaded",
+    "migration_plan_write_status": "written",
+    "plan_update_status": "updated",
+    "active_unit_id": "ui-homeview-swift",
+    "active_unit_status": "blocked",
+    "active_unit_reason": "Navigation dependency is not mapped in the target UI.",
+    "active_unit_switch": {
+      "status": "skipped",
+      "active_unit_id": "ui-homeview-swift",
+      "message": "No requested active unit id was configured."
+    },
+    "manual_unit_status_update": {
+      "status": "updated",
+      "unit_id": "ui-homeview-swift",
+      "previous_status": "active",
+      "requested_status": "blocked",
+      "final_status": "blocked",
+      "reason": "Navigation dependency is not mapped in the target UI.",
+      "message": "Manual migration unit status update applied."
+    },
+    "resume_summary": {
+      "plan_id": "fixture-plan-blocked",
+      "active_unit_id": "ui-homeview-swift",
+      "last_active_unit_status": "blocked",
+      "counts": {
+        "completed": 0,
+        "blocked": 1,
+        "pending": 2,
+        "deferred": 0,
+        "active": 0,
+        "total": 3
+      },
+      "last_stopped_reason": "Navigation dependency is not mapped in the target UI.",
+      "changed_paths": [],
+      "next_step": "Review the blocked reason manually or switch units explicitly."
+    },
+    "migration_plan_summary": {
+      "plan_id": "fixture-plan-blocked",
+      "active_unit_id": "ui-homeview-swift",
+      "completed_count": 0,
+      "blocked_count": 1,
+      "pending_count": 2,
+      "deferred_count": 0,
+      "active_count": 0,
+      "unit_count": 3,
+      "active_unit": {
+        "unit_id": "ui-homeview-swift",
+        "title": "Home view migration",
+        "source_paths": [
+          "Source/HomeView.swift"
+        ],
+        "target_paths": [
+          "target-output/HomeView.kt"
+        ],
+        "unit_type": "ui",
+        "priority": 100,
+        "status": "blocked",
+        "reason": "Navigation dependency is not mapped in the target UI.",
+        "build_status": "skipped",
+        "test_status": "blocked"
+      },
+      "units": [
+        {
+          "unit_id": "ui-homeview-swift",
+          "title": "Home view migration",
+          "source_paths": [
+            "Source/HomeView.swift"
+          ],
+          "target_paths": [
+            "target-output/HomeView.kt"
+          ],
+          "unit_type": "ui",
+          "priority": 100,
+          "status": "blocked",
+          "reason": "Navigation dependency is not mapped in the target UI.",
+          "build_status": "skipped",
+          "test_status": "blocked"
+        },
+        {
+          "unit_id": "asset-icons",
+          "title": "Icon assets",
+          "source_paths": [
+            "Assets/IconSet"
+          ],
+          "target_paths": [
+            "target-output/assets/icons"
+          ],
+          "unit_type": "asset",
+          "priority": 50,
+          "status": "pending"
+        },
+        {
+          "unit_id": "model-userprofile",
+          "title": "User profile model",
+          "source_paths": [
+            "Models/UserProfile.swift"
+          ],
+          "target_paths": [
+            "target-output/UserProfile.kt"
+          ],
+          "unit_type": "model",
+          "priority": 40,
+          "status": "pending"
+        }
+      ]
+    },
+    "plan_events": [
+      {
+        "event_type": "unit_status_update_requested",
+        "unit_id": "ui-homeview-swift",
+        "requested_status": "blocked",
+        "reason": "Navigation dependency is not mapped in the target UI.",
+        "short_message": "Manual migration unit status update requested.",
+        "order": 1,
+        "timestamp": "2026-05-20T00:00:00Z"
+      },
+      {
+        "event_type": "unit_status_update_succeeded",
+        "unit_id": "ui-homeview-swift",
+        "status_before": "active",
+        "status_after": "blocked",
+        "previous_status": "active",
+        "requested_status": "blocked",
+        "final_status": "blocked",
+        "reason": "Navigation dependency is not mapped in the target UI.",
+        "short_message": "Manual migration unit status update applied.",
+        "order": 2,
+        "timestamp": "2026-05-20T00:01:00Z"
+      },
+      {
+        "event_type": "unit_blocked",
+        "unit_id": "ui-homeview-swift",
+        "status_before": "active",
+        "status_after": "blocked",
+        "reason": "Navigation dependency is not mapped in the target UI.",
+        "short_message": "Active unit state is blocked.",
+        "order": 3,
+        "timestamp": "2026-05-20T00:02:00Z"
+      }
+    ],
+    "repair_events": [
+      {
+        "event_id": 1,
+        "event_type": "repair_blocked",
+        "attempt_index": 1,
+        "check_type": "test",
+        "status": "blocked",
+        "short_message": "Fixture test check blocked."
+      }
+    ]
+  },
+  "expect": {
+    "report_schema_version": "forgis.run_report.v5.0",
+    "active_unit_id": "ui-homeview-swift",
+    "reason": "Navigation dependency is not mapped in the target UI.",
+    "recommended_keywords": [
+      "inspect",
+      "blocked reason",
+      "switch",
+      "deferred"
+    ],
+    "blocked_count": 1
+  }
+}

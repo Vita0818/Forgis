@@ -89,6 +89,63 @@ max_iterations: 80
 max_tool_result_chars: 20000
 execution_mode: tool_loop
 
+build_command: []
+test_command: []
+build_timeout_seconds: 60
+test_timeout_seconds: 60
+max_command_output_chars: 8000
+
+repair_loop_enabled: false
+max_repair_attempts: 2
+repair_requires_diff_check: true
+repair_requires_build_or_test: true
+repair_stop_on_success: true
+
+run_report_enabled: true
+run_report_output_dir: .forgis/reports
+run_report_include_events: true
+run_report_max_events: 100
+run_report_max_chars: 200000
+run_report_required: false
+
+skills_enabled: true
+selected_skills: []
+auto_select_skills: true
+max_skill_chars: 12000
+max_total_skill_chars: 30000
+
+migration_scheduler_enabled: false
+max_migration_units: 50
+migration_unit_strategy: inventory
+migration_unit_prioritize_ui: true
+migration_unit_include_tests: true
+migration_unit_include_assets: true
+migration_plan_persistence_enabled: true
+migration_plan_output_dir: .forgis/reports
+migration_plan_filename: FORGIS_MIGRATION_PLAN.json
+migration_plan_resume_enabled: false
+migration_plan_required: false
+migration_plan_auto_update_enabled: true
+migration_plan_resume_summary_enabled: true
+migration_plan_event_log_max_events: 100
+migration_plan_audit_summary_enabled: true
+migration_plan_audit_max_events: 10
+migration_plan_auto_complete_on_success: false
+migration_plan_requested_active_unit_id: ""
+migration_plan_allow_switch_from_blocked: true
+migration_plan_allow_switch_from_completed: false
+migration_plan_allow_switch_from_deferred: true
+migration_plan_switch_requires_resume: true
+migration_plan_switch_reason: ""
+migration_plan_requested_unit_status_unit_id: ""
+migration_plan_requested_unit_status: ""
+migration_plan_requested_unit_status_reason: ""
+migration_plan_allow_manual_complete: true
+migration_plan_allow_manual_block: true
+migration_plan_allow_manual_defer: true
+migration_plan_allow_manual_activate: true
+migration_plan_status_update_requires_resume: true
+
 validation_commands: []
 success_checks: []
 ```
@@ -259,6 +316,395 @@ compare report 文件名会安全化，避免路径注入。所有进度 artifac
 
 staged 实时日志会额外显示 staged mode enabled、source unit queue length、current unit index、current source unit、current micro-phase、source unit 是否已读取、target changed paths before/after、compare report path、processed/deferred unit count、folder review start/end、low-impact warning、`final_summary` 接受或拒绝原因、`max_iterations reached` 和 partial progress saved。日志仍然不会打印 secret、Authorization header、完整请求/响应、`reasoning_content`、大段源码或写入内容。
 
+## Forgis v3.0 第一阶段 Runtime
+
+Forgis v3.0 第一阶段加入的是最小 Claude Code-like agent runtime 内核，不替换现有 v2 tool loop，也不替换 `staged_translation`。这一阶段的目标是让 DeepSeek 能真实观察仓库状态、搜索、做小步修改、查看自己的 diff，并具备后续接入构建/测试反馈循环的基础。
+
+新增能力：
+
+- `search_text`：在 source、target 或 target_subdir 内做有上限的文本/正则搜索；
+- `git_status`：查看 target workspace 的 git status 摘要；
+- `git_diff`：查看 target workspace 当前 diff，并支持字符数限制；
+- `edit_file` / `apply_patch`：对 target_subdir 内已有文件做小步替换或 unified diff 修改；
+- `run_command`：在 `target_subdir` 内运行保守 allowlist 命令，禁用 `shell=True`，带 timeout 和输出截断；
+- runtime controller skeleton：记录本轮是否读过文件、是否修改 target、是否查看 diff、是否运行命令。
+
+这不是完整 v3，也不是完整 Claude Code 能力。完整构建编排、自动 repair 调度、migration unit scheduler、远程 skill 发现和更完整的 controller 状态机仍然是后续工作。
+
+## Forgis v3.1 构建/测试反馈闭环基础
+
+Forgis v3.1 新增的是最小验证反馈闭环基础。它不会强制每个任务都 build/test，也不会自动进入复杂修复循环；它只是给 DeepSeek 提供两个配置驱动的专用工具：
+
+- `run_build`：当配置了 `build_command` 时运行构建检查；
+- `run_tests`：当配置了 `test_command` 时运行测试检查。
+
+两个工具都在 `target_subdir` 内运行，继续使用 safe command runner，不使用 `shell=True`，有 timeout 和输出截断，并返回结构化结果：
+
+- `status`：`success` / `failed` / `skipped` / `rejected` / `timeout`；
+- `exit_code`；
+- `stdout_tail` / `stderr_tail`；
+- `duration_seconds`；
+- 失败时的短 `summary`。
+
+错误摘要器会识别 Python `SyntaxError`、`ImportError`、`ModuleNotFoundError`、unittest failure、命令被拒绝、timeout 和通用非零退出。runtime controller 会记录最近一次 build/test 状态、最近失败摘要，以及失败后是否发生过 target 文件修改。
+
+命令必须写成参数数组，不是 shell 字符串：
+
+```yaml
+build_command:
+  - python3
+  - -m
+  - py_compile
+  - app.py
+
+test_command:
+  - python3
+  - -m
+  - unittest
+  - discover
+```
+
+v3.1 暂不支持 command array 里的 glob 展开。请写明确相对路径，或使用安全的测试发现命令。
+
+## Forgis v3.2 受限 repair loop 第一阶段
+
+Forgis v3.2 新增的是受限 repair loop controller。它默认关闭，只有显式配置后才会记录并执行 repair 门控：
+
+```yaml
+repair_loop_enabled: true
+max_repair_attempts: 2
+repair_requires_diff_check: true
+repair_requires_build_or_test: true
+repair_stop_on_success: true
+```
+
+当 `run_build` 或 `run_tests` 返回 `failed`、`rejected` 或 `timeout` 时，controller 会记录失败摘要，并允许最多 N 次小步修复尝试。修复只能通过现有 read/search/edit/apply_patch 等工具推进；controller 不会自己调用模型，也不会自己运行命令。
+
+如果 `repair_requires_diff_check=true`，每次 edit/apply_patch 后必须先调用 `git_diff`，才能再次运行 `run_build` 或 `run_tests`。再次检查成功会停止 repair loop，并记录 `stopped_reason: success`；达到尝试上限会停止，并记录 `stopped_reason: max_attempts_reached`；违反顺序的工具调用会返回 `status: blocked`，而不是让 tool loop 崩溃。
+
+`max_repair_attempts` 最大为 5。repair loop 不扩大 `run_command` / `run_build` / `run_tests` 的安全权限，不允许任意 shell，也不是完整 Claude Code 或自动迁移调度器。它只是最小的“检查 → 摘要 → 小步修复 → diff 自查 → 再检查”闭环。
+
+## Forgis v3.3 repair event log 与 runtime report
+
+Forgis v3.3 增强的是 build/test/repair 流程的可观测性，不增加新的自动化智能，不是完整 Claude Code，不做完整 migration scheduler，也不改变 push 或 PR 创建语义。
+
+普通 tool loop 运行时，Forgis 会在 repair loop 启用的情况下维护一个有长度上限的 repair event log。事件包括 build/test 开始和结束、失败摘要记录、允许 repair attempt、失败后的 edit/apply_patch、diff 自查、repair recheck、repair 成功、被门控阻止，以及达到最大尝试次数。每个事件只保存短状态、attempt 编号、check 类型、安全相对路径和短失败摘要。
+
+tool loop 的 JSON summary 现在会包含 compact runtime summary 和 Markdown `repair_report`。报告会展示：
+
+- build/test 运行次数和最近状态；
+- repair loop 是否启用、已用 attempts、是否成功、停止原因；
+- 最近失败摘要；
+- 每次 repair attempt 的触发原因、修改路径、是否看过 diff、复核结果；
+- blocked / stopped reason；
+- next suggested action。
+
+如果运行环境提供 `GITHUB_STEP_SUMMARY`，Forgis 会把同一份安全 Markdown 报告追加到 GitHub Actions step summary。summary 路径缺失或不可写不会让主流程崩溃。
+
+报告会遮蔽 secret-like 内容，避免输出绝对私人路径，限制事件和报告长度，并且不会输出完整源码或完整 diff。
+
+## Forgis v3.4 持久化运行报告
+
+Forgis v3.4 会把 v3.3 的 runtime report 以受控文件形式持久化，便于本地调试和 GitHub Actions artifact 下载：
+
+- `FORGIS_RUN_REPORT.md`
+- `FORGIS_RUN_REPORT.json`
+
+Markdown report 面向人阅读，包含配置概览、tool 统计、build/test 状态、repair loop 状态、changed paths、v3.3 repair report、final summary、停止原因和 next suggested action。JSON report 面向自动化分析，包含同样的信息，并在 `run_report_include_events=true` 时写入有数量上限的 repair event log。
+
+报告只会写入 Forgis runtime output 目录。默认配置路径是 `.forgis/reports`；GitHub workflow 中显式写入 `forgis-runtime/reports`，方便作为 artifact 上传。报告路径必须是相对 runtime path；绝对路径、路径穿越、source/target checkout 目录、`target_subdir`、`.git` 和 secret-like 路径段会被拒绝。写入失败会记录在 tool loop JSON/status output 里，默认不阻断主流程；只有 `run_report_required: true` 时才会让运行失败。
+
+workflow 只会把 `forgis-runtime/reports/**` 作为 Forgis reports artifact 上传。它不会上传 resolved config summary、run summary、tool-loop summary、operation log、status env、long-log preview 等 legacy runtime diagnostics artifacts。这不改变 dry-run、real-run、push 或 PR 创建门控。
+
+持久化报告仍然不会输出完整源码、完整 diff、API key、token、绝对私人路径或无上限 stdout/stderr。v3.4 仍然不是完整 Claude Code，也不是 migration scheduler。
+
+## Forgis v3.5 本地动态 skills 第一阶段
+
+Forgis v3.5 新增第一阶段本地动态 skills。skill 是 Forgis 仓库内 `skills/` 目录下的短 Markdown 文档，用来把迁移规则拆成可控、按需注入的小块，避免继续膨胀 system prompt。
+
+默认本地 skills：
+
+- `migration_general`
+- `ui_style_preservation`
+- `swiftui_to_compose`
+- `swiftui_to_harmonyos`
+- `build_repair`
+
+可以用 `selected_skills` 显式指定本轮要加载的 skill：
+
+```yaml
+selected_skills:
+  - migration_general
+  - swiftui_to_compose
+```
+
+当 `selected_skills` 非空时，Forgis 只加载这些显式配置的 skill。否则在 `auto_select_skills: true` 时，根据任务文本和未来可选的 target stack hint 做简单关键词选择：
+
+- Android / Compose / Kotlin -> `swiftui_to_compose`
+- HarmonyOS / ArkUI / 鸿蒙 -> `swiftui_to_harmonyos`
+- UI / interface / 界面 / 组件 / 风格 -> `ui_style_preservation`
+- build / test / repair / failure / error -> `build_repair`
+- 自动选择时默认加载 `migration_general`
+
+选中的 skill 会作为独立的 `Relevant Forgis Skills` section 进入模型上下文，不会混进用户 task prompt，也不会改变 tool 权限、dry-run 语义、命令 allowlist、build/test 配置、push 门控或 PR 门控。Forgis 只从仓库自身 `skills/` 读取 skill，拒绝路径穿越、绝对路径、secret-like skill 名称、单个 skill 超限和总内容超限；不会联网下载 skill，也不会从 source repo 或 target repo 业务目录读取 skill。
+
+运行报告只记录 skill 名称和统计，包括 `skills_enabled`、`auto_select_skills`、`selected_skill_names`、skipped/failed skill names 和 `total_skill_chars`。报告不会写入完整 skill 内容。
+
+v3.5 仍然不是完整 migration scheduler，不是完整 Claude Code，也不是跨语言构建适配器。具体迁移判断仍然以任务文件和实际仓库代码为准。
+
+## Forgis v3.6 migration unit scheduler 第一阶段
+
+Forgis v3.6 新增第一阶段轻量 migration unit scheduler。它默认关闭，不替代普通 tool loop，也不替代 `staged_translation`。
+
+启用 `migration_scheduler_enabled: true` 后，Forgis 会根据 source inventory 路径和任务文本里显式提到的路径生成有上限的 `MigrationPlan`。每个 `MigrationUnit` 只记录安全元信息：unit id、标题、source/target virtual path、unit 类型、优先级、状态、原因、selected skill 名称、最近失败摘要、changed paths、build/test 状态。它不会保存完整源码、完整 diff 或 secret-like 内容。
+
+scheduler 会选择一个 active unit，并只把这个 active unit 摘要注入模型上下文。模型应优先围绕该 unit 工作；如果发现 unit 阻塞，应说明原因，而不是跳到无关文件。运行时结果可以回写 active unit 的 changed paths 和 build/test 状态。v3.4 持久化报告现在会记录 migration plan summary，包括 active unit、completed/blocked/pending/deferred 计数和当前 unit 状态。
+
+配置项：
+
+```yaml
+migration_scheduler_enabled: false
+max_migration_units: 50
+migration_unit_strategy: inventory
+migration_unit_prioritize_ui: true
+migration_unit_include_tests: true
+migration_unit_include_assets: true
+migration_plan_persistence_enabled: true
+migration_plan_output_dir: .forgis/reports
+migration_plan_filename: FORGIS_MIGRATION_PLAN.json
+migration_plan_resume_enabled: false
+migration_plan_required: false
+migration_plan_auto_update_enabled: true
+migration_plan_resume_summary_enabled: true
+migration_plan_event_log_max_events: 100
+migration_plan_audit_summary_enabled: true
+migration_plan_audit_max_events: 10
+migration_plan_auto_complete_on_success: false
+migration_plan_requested_active_unit_id: ""
+migration_plan_allow_switch_from_blocked: true
+migration_plan_allow_switch_from_completed: false
+migration_plan_allow_switch_from_deferred: true
+migration_plan_switch_requires_resume: true
+migration_plan_switch_reason: ""
+migration_plan_requested_unit_status_unit_id: ""
+migration_plan_requested_unit_status: ""
+migration_plan_requested_unit_status_reason: ""
+migration_plan_allow_manual_complete: true
+migration_plan_allow_manual_block: true
+migration_plan_allow_manual_defer: true
+migration_plan_allow_manual_activate: true
+migration_plan_status_update_requires_resume: true
+```
+
+`max_migration_units` 硬上限为 200。第一阶段只使用简单路径规则：UI-like 文件优先，model/service/config/asset/test 分开分类；当 inventory 不完整时，任务文本中的显式路径也可以生成 unit。v3.6 仍不是完整自动迁移调度，不做复杂规划或 RAG，也不改变工具权限。
+
+## Forgis v3.7 持久化 MigrationPlan / Resume 基础
+
+Forgis v3.7 会把 v3.6 的安全 `MigrationPlan` 元信息持久化为：
+
+- `FORGIS_MIGRATION_PLAN.json`
+
+当 `migration_scheduler_enabled: true` 时，Forgis 可以把 plan 写入安全 runtime report/artifact 目录。GitHub Actions 运行时会把 report 目录设为 `forgis-runtime/reports`，因此该文件会落在现有 `forgis-runtime/reports/**` artifact 上传范围内。plan 不会写入 source checkout、target checkout、`target_subdir`、`.git`、Desktop、Downloads、Documents 或 secret-like 路径。
+
+配置项：
+
+```yaml
+migration_plan_persistence_enabled: true
+migration_plan_output_dir: .forgis/reports
+migration_plan_filename: FORGIS_MIGRATION_PLAN.json
+migration_plan_resume_enabled: false
+migration_plan_required: false
+```
+
+默认允许写 plan artifact，但不会自动 resume。只有显式设置 `migration_plan_resume_enabled: true`，下一次运行才会尝试读取已有 `FORGIS_MIGRATION_PLAN.json`；否则会生成新 plan。文件不存在、JSON 损坏或版本不匹配时，Forgis 会记录 load status，并安全生成新的有界 plan。写入失败默认不让主流程崩溃，除非设置 `migration_plan_required: true`。
+
+plan JSON 只保存安全摘要：schema version、plan id、active unit id、unit 计数、unit id、标题、清洗后的 source/target virtual path、unit 类型、优先级、状态、原因、selected skill 名称、短失败摘要、changed paths、build/test 状态。它不会保存完整源码、完整 diff、完整 stdout/stderr、模型隐藏推理、secret、API key 或绝对私人路径。
+
+v3.7 仍不是完整多 unit 自动调度器；它不会跨 run 自动执行多个 unit，不做复杂 RAG，也不替代 `staged_translation`。
+
+## Forgis v3.8 migration plan state / resume summary 第一阶段
+
+Forgis v3.8 让 active unit 的状态回写更清晰、更可审计，但仍不会把 scheduler 变成多 unit 自动执行器。
+
+新增行为：
+
+- `migration_plan_auto_update_enabled: true` 允许 Forgis 根据 runtime 证据回写 active unit 的安全摘要：changed paths、build status、test status、短失败摘要。
+- `migration_plan_auto_complete_on_success: false` 是安全默认值。即使存在 target 修改且 build/test 验证通过，Forgis 默认仍保持 unit 为 `active`，并记录“验证已通过但等待显式完成”。只有显式设为 `true` 时，才允许满足证据条件后自动标记 `completed`。
+- `blocked` 只能来自 runtime 证据，例如 repair 达到最大尝试次数、repair blocked、build/test rejected/timeout 或 fatal runtime failure。`deferred` 也必须有明确 reason。
+- plan event log 会记录有界、脱敏事件，例如 `plan_loaded`、`plan_generated`、`active_unit_selected`、`active_unit_updated`、`unit_completed`、`unit_blocked`、`unit_deferred`、`plan_write_succeeded`、`plan_write_failed`、`resume_summary_generated`。
+- 当显式启用 resume 且成功加载已有 plan 时，Forgis 会生成面向用户的 resume summary，包含 plan id、active unit id/status、各状态计数、上次 stopped reason、changed paths 摘要和建议下一步。
+
+`tool_loop` final output 与 `FORGIS_RUN_REPORT.md` / `FORGIS_RUN_REPORT.json` 会包含 plan update status、active unit state、plan events 和 resume summary。`staged_translation` 只把 active unit id/status 作为 summary 信息记录，不让 scheduler 接管 staged micro-phase。
+
+v3.8 仍不是完整多 unit 自动调度：不会自动执行下一个 unit，不做多 unit loop，不做复杂 RAG，也不扩大命令权限。
+
+## Forgis v3.9 人工 active unit 切换
+
+Forgis v3.9 新增一个安全的人工接口，用来从已 resume 的现有 plan 中明确选择 active migration unit。它仍然要求显式启用 `migration_scheduler_enabled: true`；默认还要求 `migration_plan_resume_enabled: true` 且成功加载已有 plan。
+
+配置：
+
+```yaml
+migration_plan_requested_active_unit_id: ""
+migration_plan_allow_switch_from_blocked: true
+migration_plan_allow_switch_from_completed: false
+migration_plan_allow_switch_from_deferred: true
+migration_plan_switch_requires_resume: true
+migration_plan_switch_reason: ""
+```
+
+当 `migration_plan_requested_active_unit_id` 为空时，Forgis 保持 v3.8 行为。非空时，Forgis 会校验 scheduler/resume 条件、requested id 是否存在于 `plan.units`、目标 unit 状态是否允许切换。`blocked` 和 `deferred` 默认允许切换，`completed` 默认不允许切回，除非显式设置 `migration_plan_allow_switch_from_completed: true`。
+
+切换尝试会写入有界、脱敏的 plan events：`active_unit_switch_requested`、`active_unit_switch_succeeded`、`active_unit_switch_rejected`、`active_unit_switch_skipped`。`tool_loop` 会在切换尝试之后再注入 active unit context；成功切换时模型看到新的 active unit，切换被拒绝时保留原 active unit。`FORGIS_RUN_REPORT.md` / `FORGIS_RUN_REPORT.json` 会显示 Active Unit Switch 结果，包括 requested id、previous active id、最终 active id、status、reason/message。
+
+v3.9 不允许模型重排 plan，不会自动执行下一个 unit，也仍然不是完整多 unit 自动调度器。`staged_translation` 只记录 active unit summary，不让 scheduler 接管 staged phase。
+
+## Forgis v4.8 受控人工 unit 状态操作
+
+Forgis v4.8 新增一个受控人工接口，用配置显式把某个 migration unit 标记为 `completed`、`blocked`、`deferred` 或 `active`。它仍然要求 `migration_scheduler_enabled: true`；默认还要求成功 resume 已持久化的 plan，避免误改本轮新生成的 plan。
+
+配置：
+
+```yaml
+migration_plan_requested_unit_status_unit_id: ""
+migration_plan_requested_unit_status: ""
+migration_plan_requested_unit_status_reason: ""
+migration_plan_allow_manual_complete: true
+migration_plan_allow_manual_block: true
+migration_plan_allow_manual_defer: true
+migration_plan_allow_manual_activate: true
+migration_plan_status_update_requires_resume: true
+```
+
+当 unit id 或 requested status 为空时，v4.8 会跳过人工状态操作。requested status 非 `completed` / `blocked` / `deferred` / `active` 时会拒绝。`completed`、`blocked`、`deferred` 必须填写非空 reason；`active` 可以使用配置 reason，也可以使用安全默认 reason。每种目标状态分别由 `migration_plan_allow_manual_*` 控制。
+
+`tool_loop` 的顺序是：先加载或生成 plan，再处理 active unit switch，再处理 manual unit status update。把某个 unit 设为 `active` 会更新 `plan.active_unit_id`。把当前 active unit 设为 `completed`、`blocked` 或 `deferred` 时不会自动选择或执行下一个 unit；active id 保留指向该 unit，context/report 会显示它的最终状态，等待下一轮明确指示。
+
+状态操作会写入有界、脱敏的 plan events：`unit_status_update_requested`、`unit_status_update_succeeded`、`unit_status_update_rejected`、`unit_status_update_skipped`。`FORGIS_RUN_REPORT.md` / `FORGIS_RUN_REPORT.json` 会显示 **Manual Unit Status Update**，包括 unit id、previous status、requested status、final status、result、reason/message。
+
+v4.8 仍然不是完整多 unit 自动调度器。它不允许模型自由重写全部 unit 状态，不重排 plan，不做多 unit loop，也不会自动执行下一个 unit。`staged_translation` 仍只记录 active unit summary，不让 scheduler 驱动 staged phase。
+
+## Forgis v4.9 人工 migration audit summary
+
+Forgis v4.9 在 `FORGIS_RUN_REPORT.md`、`FORGIS_RUN_REPORT.json` 和 tool loop runtime outputs 中新增更紧凑的 **Migration Plan Audit Summary**。它会汇总最近的人工动作、active unit、unit 计数、最近关键 plan events，以及一条简短 suggested next action。建议只用于人工判断；Forgis 不会自动切换 unit、自动运行验证，或自动执行下一个 migration unit。
+
+audit summary 配置：
+
+```yaml
+migration_plan_audit_summary_enabled: true
+migration_plan_audit_max_events: 10
+```
+
+`migration_plan_audit_max_events` 上限为 50。audit summary 会做有界裁剪和脱敏；不会包含完整源码、完整 diff、完整日志、secret，或私人绝对路径。
+
+可复制示例：
+
+开启 scheduler、plan persistence 和 resume：
+
+```yaml
+migration_scheduler_enabled: true
+migration_plan_resume_enabled: true
+migration_plan_persistence_enabled: true
+```
+
+人工切换 active unit：
+
+```yaml
+migration_plan_requested_active_unit_id: "ui-homeview-swift"
+migration_plan_switch_reason: "Continue the HomeView migration first."
+```
+
+人工标记 blocked：
+
+```yaml
+migration_plan_requested_unit_status_unit_id: "ui-homeview-swift"
+migration_plan_requested_unit_status: "blocked"
+migration_plan_requested_unit_status_reason: "Target platform component is missing; needs manual design decision."
+```
+
+人工标记 deferred：
+
+```yaml
+migration_plan_requested_unit_status_unit_id: "asset-icons"
+migration_plan_requested_unit_status: "deferred"
+migration_plan_requested_unit_status_reason: "Asset conversion will be handled after UI structure is stable."
+```
+
+人工标记 completed：
+
+```yaml
+migration_plan_requested_unit_status_unit_id: "model-userprofile"
+migration_plan_requested_unit_status: "completed"
+migration_plan_requested_unit_status_reason: "Implementation reviewed and build/test passed in the previous run."
+```
+
+切回 active：
+
+```yaml
+migration_plan_requested_unit_status_unit_id: "ui-homeview-swift"
+migration_plan_requested_unit_status: "active"
+migration_plan_requested_unit_status_reason: "Required design decision has been resolved."
+```
+
+`completed`、`blocked`、`deferred` 的 reason 必填。这些配置只影响 migration plan 状态，不扩大 `run_command`、`run_build` 或 `run_tests` 权限，不允许任意 shell，也不会自动执行下一个 unit。
+
+## Forgis v5.0 final schema freeze 与 release checklist
+
+Forgis v5.0 final 对 v5 report / plan 表面做版本定版，不新增运行能力。run report schema 为 `forgis.run_report.v5.0`；migration plan 写出 schema 为 `forgis.migration_plan.v5.0`。plan 读取仍兼容 `forgis.migration_plan.v4.8`、`v3.9`、`v3.8`、`v3.7`，因此旧的持久化 plan 仍可以安全 resume。
+
+v5.0 包含：
+
+- DeepSeek tool loop 基础
+- 受 Forgis virtual path 限制的 safe file tools
+- `search_text`、`git_status`、`git_diff`、`edit_file`、`apply_patch`
+- `target_subdir` 内的 safe `run_command`
+- 配置驱动的 `run_build` / `run_tests`
+- build/test feedback summary
+- limited repair loop
+- repair event log
+- runtime Markdown report 与 GitHub Step Summary
+- 持久化 `FORGIS_RUN_REPORT.md` / `FORGIS_RUN_REPORT.json`
+- 通过 `forgis-runtime/reports/**` 上传 reports-only Actions artifact
+- dynamic local skills
+- migration units
+- migration plan persistence 与显式 resume
+- manual active unit switch
+- manual unit status update
+- Migration Plan Audit Summary
+- report fixtures / golden samples
+
+v5.0 不包含：
+
+- 完整 Claude Code parity
+- 自动多 unit 连续执行
+- 模型自由重排 plan
+- 复杂 RAG
+- 外部 skill 下载
+- 从 source/target 业务仓库读取 skills
+- 任意 shell
+- 跨语言 build adapter
+- UI 控制台
+- Aider
+
+report fixtures 和 golden samples 位于 `tests/fixtures/reports/`，覆盖：
+
+- `active`
+- `blocked`
+- `deferred`
+- `completed`
+
+测试采用关键 JSON 字段和必要 Markdown section 标题断言，不做脆弱的 Markdown/JSON 全文逐字匹配。它们会验证 Migration Plan Audit Summary 稳定存在、recommended next action 稳定存在、active unit id 和状态计数正确、event log 受上限约束、redaction 生效，以及 report write safety 仍会拒绝 source/target checkout、`.git`、用户 Desktop/Downloads/Documents、runtime root 外路径等不安全写入位置。
+
+Release checklist：
+
+- 安全默认值：scheduler 默认关闭，resume 默认关闭，repair loop 默认关闭，不自动执行下一个 unit，不允许任意 shell，不扩大 command 权限，不把 report/plan 写入 source checkout、target checkout、`target_subdir` 或业务目录。
+- 必须通过的测试：`python3 -m py_compile agent/*.py`、`python3 -m unittest`、`bash -n agent/create_pr.sh`、`bash -n agent/build_target.sh`、`git diff --check`。
+- Report regression：active fixture、blocked fixture、deferred fixture、completed fixture、redaction、path safety、event limit、write safety。
+- Actions artifact：只上传 `forgis-runtime/reports/**`。启用时该目录用于包含 `FORGIS_RUN_REPORT.md`、`FORGIS_RUN_REPORT.json`、`FORGIS_MIGRATION_PLAN.json`。v5.0 final 不上传 legacy runtime diagnostics artifacts、业务源码、完整 diff、secret、未脱敏模型输出或 target repository snapshot。
+- 不属于 v5.0：完整 Claude Code parity、多 unit 自动执行、复杂 RAG、跨语言 build adapter、UI 控制台、Aider。
+
+legacy runtime diagnostics 文件仍可在 workflow 内部本地生成，用于流程控制和日志上下文，但 v5.0 final 不把它们作为 artifact 发布。未来版本如需重新考虑上传这些文件，应先加入明确的 redaction、bounding 和回归测试。
+
 ## 文件工具列表
 
 读工具：
@@ -267,6 +713,9 @@ staged 实时日志会额外显示 staged mode enabled、source unit queue lengt
 - `tree(path, max_depth?)`
 - `read_file(path, start_line?, max_lines?)`
 - `file_exists(path)`
+- `search_text(query, root?, regex?, case_sensitive?, max_results?)`
+- `git_status(max_entries?)`
+- `git_diff(max_chars?)`
 
 写工具：
 
@@ -274,6 +723,14 @@ staged 实时日志会额外显示 staged mode enabled、source unit queue lengt
 - `write_file(path, content)`
 - `append_file(path, content)`
 - `delete_file(path)`
+- `edit_file(path, old_text, new_text, expected_replacements?)`
+- `apply_patch(path, patch)`
+
+安全命令工具：
+
+- `run_command(command, cwd?, timeout_seconds?, max_output_chars?)`
+- `run_build()`
+- `run_tests()`
 
 DeepSeek 使用 Forgis 虚拟路径：
 
@@ -296,6 +753,9 @@ Forgis 的边界是通用的，不依赖具体平台：
 - `run_log_path` 必须位于 `target_subdir` 内。
 - dry run 不应改动 target。
 - confirmed run 应至少产生一个非日志目标输出变更。
+- `git_status` / `git_diff` 只作用于 target workspace，不能 commit。
+- `run_command` 只能在 `target_subdir` 内运行，不能访问 source cwd，不能使用 shell 拼接命令，默认拒绝 rm、sudo、chmod/chown、curl/wget、ssh/scp、git commit/push 等危险命令。
+- `run_build` / `run_tests` 不接受模型传入的任意命令，只读取配置里的 command array；仍然只能在 `target_subdir` 内运行，禁用 `shell=True`，并拒绝 rm、sudo、chmod/chown、curl/wget、ssh/scp、git、shell 解释器等危险命令。
 
 这些检查是为了让模型能工作，但不能越界。
 

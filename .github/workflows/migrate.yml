@@ -136,7 +136,8 @@ jobs:
               --target-repo "$TARGET_REPO" \
               --status-output "$GITHUB_WORKSPACE/forgis-runtime/deepseek_status.env" \
               --operation-log-output "$GITHUB_WORKSPACE/forgis-runtime/tool_operations.json" \
-              --summary-output "$GITHUB_WORKSPACE/forgis-runtime/tool_loop_summary.json"
+              --summary-output "$GITHUB_WORKSPACE/forgis-runtime/tool_loop_summary.json" \
+              --report-output-dir "$GITHUB_WORKSPACE/forgis-runtime/reports"
             exit 0
           fi
 
@@ -146,7 +147,8 @@ jobs:
             --target-repo "$TARGET_REPO" \
             --status-output "$GITHUB_WORKSPACE/forgis-runtime/deepseek_status.env" \
             --operation-log-output "$GITHUB_WORKSPACE/forgis-runtime/tool_operations.json" \
-            --summary-output "$GITHUB_WORKSPACE/forgis-runtime/tool_loop_summary.json"
+            --summary-output "$GITHUB_WORKSPACE/forgis-runtime/tool_loop_summary.json" \
+            --report-output-dir "$GITHUB_WORKSPACE/forgis-runtime/reports"
 
       - name: Verify source repository stayed read-only
         id: check_source_clean
@@ -360,57 +362,10 @@ jobs:
 
           bash forgis/agent/create_pr.sh
 
-      - name: Package target output snapshot
-        if: always()
-        run: |
-          if [[ ! -d "$GITHUB_WORKSPACE/target-repo/.git" ]]; then
-            echo "Target repository checkout is unavailable. Skipping target snapshot package."
-            exit 0
-          fi
-          mkdir -p "$GITHUB_WORKSPACE/forgis-runtime"
-          tar -czf "$GITHUB_WORKSPACE/forgis-runtime/target-repo-snapshot.tar.gz" \
-            -C "$GITHUB_WORKSPACE" \
-            target-repo
-
-      - name: Upload resolved config summary
+      - name: Upload Forgis reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: forgis-resolved-config
-          path: forgis-runtime/resolved_config.md
-          if-no-files-found: ignore
-
-      - name: Upload run summary
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: forgis-run-summary
-          path: forgis-runtime/run_summary.md
-          if-no-files-found: ignore
-
-      - name: Upload DeepSeek tool loop summary
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: forgis-tool-loop
-          path: |
-            forgis-runtime/tool_loop_summary.json
-            forgis-runtime/tool_operations.json
-            forgis-runtime/deepseek_status.env
-          if-no-files-found: ignore
-
-      - name: Upload generated long log preview
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: forgis-long-log-preview
-          path: forgis-runtime/forgis_log_entry.md
-          if-no-files-found: ignore
-
-      - name: Upload target output snapshot
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: forgis-target-repo
-          path: forgis-runtime/target-repo-snapshot.tar.gz
+          name: forgis-reports
+          path: forgis-runtime/reports/**
           if-no-files-found: ignore

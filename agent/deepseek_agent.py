@@ -6,13 +6,15 @@ import urllib.error
 import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from forgis_config import ResolvedConfig
 from model_env import require_model_env_values
+from skill_loader import SkillSelection, render_selected_skills, select_skills
 
 
-SYSTEM_MESSAGE = """You are running inside Forgis.
+LEGACY_SYSTEM_MESSAGE = """You are running inside Forgis.
 You do not have direct filesystem access.
 You can only use the file tools provided by Forgis.
 First read the task file with read_file("task").
@@ -25,28 +27,90 @@ You must not write the config file or task file.
 When finished, return final_summary.
 """
 
+SYSTEM_MESSAGE = LEGACY_SYSTEM_MESSAGE
+SYSTEM_AGENT_V3_PATH = Path(__file__).resolve().parents[1] / "prompts" / "system_agent_v3.md"
 
-def initial_messages(config: ResolvedConfig) -> list[dict[str, str]]:
-    return [
-        {"role": "system", "content": SYSTEM_MESSAGE},
-        {
-            "role": "user",
-            "content": "\n".join(
-                [
-                    "Forgis virtual paths:",
-                    "- task: configured task file",
-                    "- config: FORGIS_CONFIG.yml",
-                    "- source/: source repository root",
-                    "- target/: target repository root",
-                    "- target_subdir/: writable target_subdir",
-                    "",
-                    f"target_subdir: {config.target_subdir}",
-                    f"run_log_path: {config.run_log_path}",
-                    "Use file tools to inspect source and target paths as needed.",
-                ]
-            ),
-        },
+
+def system_message() -> str:
+    try:
+        text = SYSTEM_AGENT_V3_PATH.read_text(encoding="utf-8")
+    except OSError:
+        return LEGACY_SYSTEM_MESSAGE
+    return text.strip() or LEGACY_SYSTEM_MESSAGE
+
+
+def _read_task_text_for_skills(target_root: Path | None, config: ResolvedConfig) -> str:
+    if target_root is None:
+        return ""
+    try:
+        path = (target_root / config.task_prompt_path).resolve()
+        root = target_root.resolve()
+    except OSError:
+        return ""
+    if not path.is_relative_to(root) or not path.is_file():
+        return ""
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def build_skill_selection(
+    config: ResolvedConfig,
+    *,
+    target_root: Path | None = None,
+    task_text: str | None = None,
+    stack_hint: str | None = None,
+) -> SkillSelection:
+    effective_task_text = task_text if task_text is not None else _read_task_text_for_skills(target_root, config)
+    return select_skills(config, effective_task_text, stack_hint=stack_hint)
+
+
+def initial_messages(
+    config: ResolvedConfig,
+    skills_section: str = "",
+    active_migration_unit_context: str = "",
+) -> list[dict[str, str]]:
+    user_lines = [
+        "Forgis virtual paths:",
+        "- task: configured task file",
+        "- config: FORGIS_CONFIG.yml",
+        "- source/: source repository root",
+        "- target/: target repository root",
+        "- target_subdir/: writable target_subdir",
+        "",
+        f"target_subdir: {config.target_subdir}",
+        f"run_log_path: {config.run_log_path}",
+        "Use tools to inspect source and target paths as needed.",
+        "After modifying target files, use git_diff to inspect your changes before final_summary.",
+        "Use run_build and run_tests when configured and useful; read their short failure summaries before repair edits.",
+        "If the repair loop blocks a build/test or edit, stop blind repairs and report the blocker.",
     ]
+    if skills_section.strip():
+        user_lines.extend(["", skills_section.strip()])
+    if active_migration_unit_context.strip():
+        user_lines.extend(["", active_migration_unit_context.strip()])
+    return [
+        {"role": "system", "content": system_message()},
+        {"role": "user", "content": "\n".join(user_lines)},
+    ]
+
+
+def build_initial_messages(
+    config: ResolvedConfig,
+    *,
+    target_root: Path | None = None,
+    task_text: str | None = None,
+    stack_hint: str | None = None,
+    active_migration_unit_context: str = "",
+) -> tuple[list[dict[str, str]], SkillSelection]:
+    selection = build_skill_selection(
+        config,
+        target_root=target_root,
+        task_text=task_text,
+        stack_hint=stack_hint,
+    )
+    return initial_messages(config, render_selected_skills(selection), active_migration_unit_context), selection
 
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
@@ -112,6 +176,53 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "search_text",
+            "description": "Search text in source, target, or target_subdir without leaving allowed Forgis roots.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "root": {"type": "string", "default": "target"},
+                    "regex": {"type": "boolean", "default": False},
+                    "case_sensitive": {"type": "boolean", "default": False},
+                    "max_results": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50},
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_status",
+            "description": "Return a bounded git status summary for the target workspace.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "max_entries": {"type": "integer", "minimum": 1, "maximum": 500, "default": 200},
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_diff",
+            "description": "Return the current target workspace git diff, bounded by max_chars.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "max_chars": {"type": "integer", "minimum": 100, "maximum": 200000, "default": 20000},
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "mkdir",
             "description": "Create a directory inside target_subdir.",
             "parameters": {
@@ -157,12 +268,92 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "edit_file",
+            "description": "Make a small exact text replacement in an existing UTF-8 file inside target_subdir.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "old_text": {"type": "string"},
+                    "new_text": {"type": "string"},
+                    "expected_replacements": {"type": "integer", "minimum": 1, "default": 1},
+                },
+                "required": ["path", "old_text", "new_text"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "apply_patch",
+            "description": "Apply a unified diff hunk to one existing UTF-8 file inside target_subdir.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "patch": {"type": "string"},
+                },
+                "required": ["path", "patch"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "delete_file",
             "description": "Delete a file inside target_subdir.",
             "parameters": {
                 "type": "object",
                 "properties": {"path": {"type": "string"}},
                 "required": ["path"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_command",
+            "description": "Run a conservative allowlisted command inside target_subdir without shell=True.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 1,
+                    },
+                    "cwd": {"type": "string", "default": "target_subdir"},
+                    "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 60, "default": 10},
+                    "max_output_chars": {"type": "integer", "minimum": 100, "maximum": 50000, "default": 8000},
+                },
+                "required": ["command"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_build",
+            "description": "Run the configured build_command inside target_subdir and return a structured short result.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_tests",
+            "description": "Run the configured test_command inside target_subdir and return a structured short result.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
                 "additionalProperties": False,
             },
         },

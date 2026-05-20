@@ -57,6 +57,63 @@ max_iterations: 80
 max_tool_result_chars: 20000
 execution_mode: tool_loop
 
+build_command: []
+test_command: []
+build_timeout_seconds: 60
+test_timeout_seconds: 60
+max_command_output_chars: 8000
+
+repair_loop_enabled: false
+max_repair_attempts: 2
+repair_requires_diff_check: true
+repair_requires_build_or_test: true
+repair_stop_on_success: true
+
+run_report_enabled: true
+run_report_output_dir: .forgis/reports
+run_report_include_events: true
+run_report_max_events: 100
+run_report_max_chars: 200000
+run_report_required: false
+
+skills_enabled: true
+selected_skills: []
+auto_select_skills: true
+max_skill_chars: 12000
+max_total_skill_chars: 30000
+
+migration_scheduler_enabled: false
+max_migration_units: 50
+migration_unit_strategy: inventory
+migration_unit_prioritize_ui: true
+migration_unit_include_tests: true
+migration_unit_include_assets: true
+migration_plan_persistence_enabled: true
+migration_plan_output_dir: .forgis/reports
+migration_plan_filename: FORGIS_MIGRATION_PLAN.json
+migration_plan_resume_enabled: false
+migration_plan_required: false
+migration_plan_auto_update_enabled: true
+migration_plan_resume_summary_enabled: true
+migration_plan_event_log_max_events: 100
+migration_plan_audit_summary_enabled: true
+migration_plan_audit_max_events: 10
+migration_plan_auto_complete_on_success: false
+migration_plan_requested_active_unit_id: ""
+migration_plan_allow_switch_from_blocked: true
+migration_plan_allow_switch_from_completed: false
+migration_plan_allow_switch_from_deferred: true
+migration_plan_switch_requires_resume: true
+migration_plan_switch_reason: ""
+migration_plan_requested_unit_status_unit_id: ""
+migration_plan_requested_unit_status: ""
+migration_plan_requested_unit_status_reason: ""
+migration_plan_allow_manual_complete: true
+migration_plan_allow_manual_block: true
+migration_plan_allow_manual_defer: true
+migration_plan_allow_manual_activate: true
+migration_plan_status_update_requires_resume: true
+
 validation_commands: []
 success_checks: []
 ```
@@ -83,6 +140,58 @@ Defaults:
 - `max_iterations: 80`
 - `max_tool_result_chars: 20000`
 - `execution_mode: tool_loop`
+- `build_command: []`
+- `test_command: []`
+- `build_timeout_seconds: 60`
+- `test_timeout_seconds: 60`
+- `max_command_output_chars: 8000`
+- `repair_loop_enabled: false`
+- `max_repair_attempts: 2`
+- `repair_requires_diff_check: true`
+- `repair_requires_build_or_test: true`
+- `repair_stop_on_success: true`
+- `run_report_enabled: true`
+- `run_report_output_dir: .forgis/reports`
+- `run_report_include_events: true`
+- `run_report_max_events: 100`
+- `run_report_max_chars: 200000`
+- `run_report_required: false`
+- `skills_enabled: true`
+- `selected_skills: []`
+- `auto_select_skills: true`
+- `max_skill_chars: 12000`
+- `max_total_skill_chars: 30000`
+- `migration_scheduler_enabled: false`
+- `max_migration_units: 50`
+- `migration_unit_strategy: inventory`
+- `migration_unit_prioritize_ui: true`
+- `migration_unit_include_tests: true`
+- `migration_unit_include_assets: true`
+- `migration_plan_persistence_enabled: true`
+- `migration_plan_output_dir: .forgis/reports`
+- `migration_plan_filename: FORGIS_MIGRATION_PLAN.json`
+- `migration_plan_resume_enabled: false`
+- `migration_plan_required: false`
+- `migration_plan_auto_update_enabled: true`
+- `migration_plan_resume_summary_enabled: true`
+- `migration_plan_event_log_max_events: 100`
+- `migration_plan_audit_summary_enabled: true`
+- `migration_plan_audit_max_events: 10`
+- `migration_plan_auto_complete_on_success: false`
+- `migration_plan_requested_active_unit_id: ""`
+- `migration_plan_allow_switch_from_blocked: true`
+- `migration_plan_allow_switch_from_completed: false`
+- `migration_plan_allow_switch_from_deferred: true`
+- `migration_plan_switch_requires_resume: true`
+- `migration_plan_switch_reason: ""`
+- `migration_plan_requested_unit_status_unit_id: ""`
+- `migration_plan_requested_unit_status: ""`
+- `migration_plan_requested_unit_status_reason: ""`
+- `migration_plan_allow_manual_complete: true`
+- `migration_plan_allow_manual_block: true`
+- `migration_plan_allow_manual_defer: true`
+- `migration_plan_allow_manual_activate: true`
+- `migration_plan_status_update_requires_resume: true`
 
 Only `agent_backend: deepseek` is supported. Other backend values fail fast.
 
@@ -91,6 +200,368 @@ Only `agent_backend: deepseek` is supported. Other backend values fail fast.
 Set `execution_mode: staged_translation` when a task needs a controller-enforced migration run: overview first, then one queued source file or source unit at a time through feed/write/readonly-compare/revise gates, then stabilization. This mode still uses the same DeepSeek client, file tools, logging, and guardrails. It does not add platform-specific migration intelligence; the strategy still comes from `FORGIS_TASK.md`, repository docs, and the user's task.
 
 See [中文文档](README.zh-CN.md) for the full staged mode configuration and workflow.
+
+## Forgis v3.0 Phase 1 Runtime
+
+Forgis v3.0 phase 1 adds a minimal Claude Code-like agent runtime kernel without replacing the existing v2 tool loop or `staged_translation` mode. DeepSeek can now observe repository state more directly, make smaller edits, inspect its own diff, and run a very small set of safe commands.
+
+New phase 1 capabilities:
+
+- `search_text` for bounded source/target text search
+- `git_status` for a target workspace status summary
+- `git_diff` for bounded target workspace diff self-checks
+- `edit_file` and `apply_patch` for small target-side edits
+- `run_command` for conservative allowlisted commands inside `target_subdir`
+- a lightweight runtime controller state skeleton that records whether the run read files, modified target files, viewed diff, or ran commands
+
+This is not complete Claude Code parity. Full build orchestration, automatic repair scheduling, migration schedulers, remote skill discovery, and a fuller controller state machine are still future work.
+
+## Forgis v3.1 Build/Test Feedback
+
+Forgis v3.1 adds the first minimal verification feedback loop. It does not force every task to build or test, and it does not automatically run a repair loop. It gives DeepSeek two dedicated tools backed by configured command arrays:
+
+- `run_build` runs `build_command` when configured
+- `run_tests` runs `test_command` when configured
+
+Both tools execute inside `target_subdir`, use the same safe command runner policy, avoid `shell=True`, enforce a timeout, and return a short structured result:
+
+- `status`: `success`, `failed`, `skipped`, `rejected`, or `timeout`
+- `exit_code`
+- `stdout_tail` / `stderr_tail`
+- `duration_seconds`
+- `summary` for failures
+
+The feedback summarizer recognizes Python `SyntaxError`, `ImportError`, `ModuleNotFoundError`, unittest failures, rejected commands, timeouts, and generic nonzero exits. The runtime controller records the latest build/test status, latest failure summary, and whether a target edit happened after a failed check.
+
+Commands are configured as arrays, not shell strings:
+
+```yaml
+build_command:
+  - python3
+  - -m
+  - py_compile
+  - app.py
+
+test_command:
+  - python3
+  - -m
+  - unittest
+  - discover
+```
+
+Glob expansion is intentionally not supported in command arrays for v3.1. Add explicit relative paths or use a safe test discovery command.
+
+## Forgis v3.2 Limited Repair Loop
+
+Forgis v3.2 adds the first restricted repair loop controller. It is disabled by default and only records/enforces state when explicitly enabled:
+
+```yaml
+repair_loop_enabled: true
+max_repair_attempts: 2
+repair_requires_diff_check: true
+repair_requires_build_or_test: true
+repair_stop_on_success: true
+```
+
+When `run_build` or `run_tests` returns `failed`, `rejected`, or `timeout`, the controller records the failure summary and allows a bounded repair pass. After an edit or patch, the model must inspect `git_diff` before it can run build/tests again when `repair_requires_diff_check` is true. A successful recheck stops the loop with `stopped_reason: success`; exhausting the configured attempts stops it with `stopped_reason: max_attempts_reached`; invalid next steps return `status: blocked`.
+
+`max_repair_attempts` is capped at 5. The loop does not call the model by itself, does not run commands automatically, and does not expand the command allowlist. It is a minimal "check, summarize, small repair, diff, recheck" guardrail, not a complete automatic repair scheduler.
+
+## Forgis v3.3 Repair Event Log and Runtime Report
+
+Forgis v3.3 adds observability around the v3.1/v3.2 build, test, and repair flow. It does not add new automation intelligence, is not complete Claude Code, does not schedule migrations, and does not change the push or pull request semantics.
+
+When the tool loop runs, Forgis now keeps a bounded repair event log for enabled repair-loop runs. Events include build/test start and finish, recorded failures, allowed repair attempts, edits after failure, required diff checks, repair rechecks, successful repairs, blocked steps, and max-attempt stops. Each event stores only a short status, attempt index, check type, safe relative changed paths, and a short failure summary.
+
+The tool loop summary JSON now includes a compact runtime report and a Markdown `repair_report`. The report shows:
+
+- build/test run counts and latest statuses
+- repair-loop enabled state, attempts used, success flag, and stopped reason
+- latest failure summary
+- repair attempts, changed paths, diff-check status, and recheck result
+- blocked or stopped reason
+- next suggested action
+
+If `GITHUB_STEP_SUMMARY` is available, Forgis appends the same safe Markdown report to the GitHub Actions step summary. Missing or unwritable summary files are ignored and do not fail the run.
+
+Reports redact secret-like values, avoid absolute private paths, cap event/report length, and never include full source files or full diffs.
+
+## Forgis v3.4 Persistent Run Reports
+
+Forgis v3.4 persists the v3.3 runtime report into bounded local report files for debugging and GitHub Actions artifacts:
+
+- `FORGIS_RUN_REPORT.md`
+- `FORGIS_RUN_REPORT.json`
+
+The Markdown report is a readable run summary with configuration overview, tool statistics, build/test status, repair-loop status, changed paths, the v3.3 repair report, final summary, stopped reason, and next suggested action. The JSON report contains the same information in structured form, including bounded repair events when `run_report_include_events` is true.
+
+Reports are written only to a Forgis runtime output directory. The default configured path is `.forgis/reports`, and the GitHub workflow writes to `forgis-runtime/reports` so the files can be uploaded as artifacts. Report paths must be relative runtime paths; absolute paths, path traversal, source/target checkout directories, `target_subdir`, `.git`, and secret-like path segments are rejected. Write failures are reported in the tool-loop JSON/status output and do not fail the run unless `run_report_required: true`.
+
+The workflow uploads only `forgis-runtime/reports/**` as the Forgis reports artifact. It does not upload legacy runtime diagnostics artifacts such as resolved config summaries, run summaries, tool-loop summaries, operation logs, status env files, or long-log previews. This does not change dry-run, real-run, push, or pull request creation gates.
+
+Persistent reports still do not include full source files, full diffs, API keys, tokens, absolute private paths, or unbounded stdout/stderr. v3.4 is still not complete Claude Code and not a migration scheduler.
+
+## Forgis v3.5 Local Skills Phase 1
+
+Forgis v3.5 adds the first local dynamic skills layer. Skills are short Markdown notes stored in this repository under `skills/`. They let Forgis provide focused migration guidance without growing the system prompt into one large document.
+
+The default local skills are:
+
+- `migration_general`
+- `ui_style_preservation`
+- `swiftui_to_compose`
+- `swiftui_to_harmonyos`
+- `build_repair`
+
+Configure explicit skills when a task should use a known subset:
+
+```yaml
+selected_skills:
+  - migration_general
+  - swiftui_to_compose
+```
+
+When `selected_skills` is non-empty, Forgis loads only those configured skills. Otherwise, when `auto_select_skills: true`, Forgis chooses a small set from the task text and optional target stack hints:
+
+- Android / Compose / Kotlin -> `swiftui_to_compose`
+- HarmonyOS / ArkUI / 鸿蒙 -> `swiftui_to_harmonyos`
+- UI / interface / 界面 / 组件 / 风格 -> `ui_style_preservation`
+- build / test / repair / failure / error -> `build_repair`
+- `migration_general` is loaded by default during auto selection
+
+Selected skills enter the model context as a separate `Relevant Forgis Skills` section. They do not change file-tool permissions, dry-run behavior, command allowlists, build/test configuration, push gates, or PR gates. Forgis only reads skills from the repository-local `skills/` directory; it rejects path traversal, absolute paths, secret-like skill names, oversized single skills, and oversized total skill content. It does not download skills and does not read skills from source or target business repositories.
+
+Run reports record only skill names and statistics: `skills_enabled`, `auto_select_skills`, `selected_skill_names`, skipped/failed skill names, and `total_skill_chars`. Reports do not include full skill content.
+
+v3.5 is still not a complete migration scheduler, not complete Claude Code, and not a cross-language build adapter. The task file and repository code remain the source of truth.
+
+## Forgis v3.6 Migration Unit Scheduler Phase 1
+
+Forgis v3.6 adds the first lightweight migration unit scheduler layer. It is disabled by default and does not replace the normal tool loop or `staged_translation`.
+
+When `migration_scheduler_enabled: true`, Forgis builds a bounded `MigrationPlan` from source inventory paths and explicit paths mentioned in the task text. Each `MigrationUnit` stores safe metadata only: unit id, title, source/target virtual paths, unit type, priority, status, reason, selected skill names, latest failure summary, changed paths, and build/test status. It does not store full source files, full diffs, or secret-like content.
+
+The scheduler picks one active unit and injects only that unit summary into the model context. The model is asked to stay focused on that unit, and runtime results can update the unit's changed paths and build/test status. Reports now include a migration plan summary with active unit id and completed/blocked/pending/deferred counts.
+
+Configuration:
+
+```yaml
+migration_scheduler_enabled: false
+max_migration_units: 50
+migration_unit_strategy: inventory
+migration_unit_prioritize_ui: true
+migration_unit_include_tests: true
+migration_unit_include_assets: true
+```
+
+`max_migration_units` is capped at 200. The first phase uses simple path rules: UI-like files are prioritized, model/service/config/asset/test paths are classified separately, and task-text explicit paths can seed units when inventory is incomplete. v3.6 is still not a complete automatic migration scheduler, does not do complex planning or RAG, and does not change tool permissions.
+
+## Forgis v3.7 Persistent Migration Plan / Resume Foundation
+
+Forgis v3.7 persists the safe v3.6 `MigrationPlan` metadata as:
+
+- `FORGIS_MIGRATION_PLAN.json`
+
+When the migration scheduler is enabled, Forgis can write this plan to the same safe runtime report/artifact area used by run reports. In GitHub Actions, the workflow passes `forgis-runtime/reports`, so the plan is covered by the existing `forgis-runtime/reports/**` artifact upload. The plan is never written into the source checkout, target checkout, `target_subdir`, `.git`, Desktop, Downloads, Documents, or secret-like paths.
+
+Configuration:
+
+```yaml
+migration_plan_persistence_enabled: true
+migration_plan_output_dir: .forgis/reports
+migration_plan_filename: FORGIS_MIGRATION_PLAN.json
+migration_plan_resume_enabled: false
+migration_plan_required: false
+```
+
+Persistence is enabled by default, but resume is not. Set `migration_plan_resume_enabled: true` explicitly when a later run should load an existing `FORGIS_MIGRATION_PLAN.json`; otherwise Forgis generates a fresh plan. If loading fails or the file is missing, Forgis records the load status and generates a new bounded plan. Plan write failures do not fail the main run unless `migration_plan_required: true`.
+
+The plan JSON stores only safe summaries: schema version, plan id, active unit id, unit counts, unit ids, titles, sanitized source/target virtual paths, unit type, priority, status, reason, selected skill names, last short failure summary, changed paths, and build/test status. It does not store full source files, full diffs, full stdout/stderr, model reasoning, secrets, API keys, or absolute private paths.
+
+v3.7 is still not a full multi-unit automatic scheduler. It does not run multiple migration units across a run, does not do complex RAG, and does not replace `staged_translation`.
+
+## Forgis v3.8 Migration Plan State / Resume Summary Phase 1
+
+Forgis v3.8 makes active unit updates more auditable without turning the scheduler into a multi-unit runner.
+
+New behavior:
+
+- `migration_plan_auto_update_enabled: true` lets Forgis write runtime evidence back to the active unit: sanitized changed paths, build status, test status, and short failure summary.
+- `migration_plan_auto_complete_on_success: false` is the safe default. Even when target changes and build/test verification pass, Forgis keeps the unit `active` and records that verification passed but explicit completion is still required. Set it to `true` only when you want evidence-backed automatic completion.
+- Active units become `blocked` only from runtime evidence such as max repair attempts, blocked repair state, rejected/timeout verification, or fatal runtime failure. `deferred` also requires a concrete reason.
+- The plan event log records bounded, redacted events such as `plan_loaded`, `plan_generated`, `active_unit_selected`, `active_unit_updated`, `unit_completed`, `unit_blocked`, `unit_deferred`, `plan_write_succeeded`, `plan_write_failed`, and `resume_summary_generated`.
+- When resume is explicitly enabled and an existing plan loads, Forgis generates a user-facing resume summary with the plan id, active unit id/status, status counts, last stopped reason, changed path summary, and recommended next step.
+
+`tool_loop` final output and `FORGIS_RUN_REPORT.md` / `FORGIS_RUN_REPORT.json` now include plan update status, active unit state, plan events, and resume summary. `staged_translation` only records the active unit id/status in its summary; it does not let the scheduler drive staged micro-phases.
+
+v3.8 still does not automatically execute the next unit, does not run a multi-unit loop, and does not add complex RAG or broader command permissions.
+
+## Forgis v3.9 Manual Active Unit Switch
+
+Forgis v3.9 adds a safe manual interface for selecting the active migration unit from an existing resumed plan. It is still disabled unless `migration_scheduler_enabled: true`, and by default it also requires `migration_plan_resume_enabled: true` plus a successfully loaded plan.
+
+Configuration:
+
+```yaml
+migration_plan_requested_active_unit_id: ""
+migration_plan_allow_switch_from_blocked: true
+migration_plan_allow_switch_from_completed: false
+migration_plan_allow_switch_from_deferred: true
+migration_plan_switch_requires_resume: true
+migration_plan_switch_reason: ""
+```
+
+When `migration_plan_requested_active_unit_id` is empty, v3.9 keeps the v3.8 behavior. When it is set, Forgis validates that the unit id exists in `plan.units`, that scheduler/resume requirements are met, and that the target status is allowed. Switching to `blocked` and `deferred` units is allowed by default; switching back to `completed` units is rejected unless explicitly enabled.
+
+Switch attempts are recorded as bounded, redacted plan events: `active_unit_switch_requested`, `active_unit_switch_succeeded`, `active_unit_switch_rejected`, and `active_unit_switch_skipped`. `tool_loop` context is rendered after the switch attempt, so a successful manual switch becomes the active unit context; a rejected switch keeps the previous active unit. Reports include an **Active Unit Switch** section and JSON `active_unit_switch` object with status, requested id, previous active id, active id, and reason/message.
+
+v3.9 does not let the model reorder the plan, does not automatically execute the next unit, and is still not a full multi-unit automatic scheduler. `staged_translation` records the active unit as summary context only; it does not let this switch drive staged phases.
+
+## Forgis v4.8 Manual Unit Status Updates
+
+Forgis v4.8 adds a controlled manual interface for marking one migration unit `completed`, `blocked`, `deferred`, or `active` through configuration. It is still gated by `migration_scheduler_enabled: true`; by default it also requires a successfully resumed persisted plan so a fresh generated plan is not changed by accident.
+
+Configuration:
+
+```yaml
+migration_plan_requested_unit_status_unit_id: ""
+migration_plan_requested_unit_status: ""
+migration_plan_requested_unit_status_reason: ""
+migration_plan_allow_manual_complete: true
+migration_plan_allow_manual_block: true
+migration_plan_allow_manual_defer: true
+migration_plan_allow_manual_activate: true
+migration_plan_status_update_requires_resume: true
+```
+
+When either the unit id or requested status is empty, v4.8 skips the manual status update. Invalid requested statuses are rejected. `completed`, `blocked`, and `deferred` require a non-empty reason; `active` may use the configured reason or a safe default. Each target status is controlled by its `migration_plan_allow_manual_*` flag.
+
+`tool_loop` processes resumed plan load first, then manual active-unit switch, then manual unit status update. A status update to `active` sets `plan.active_unit_id` to that unit. A status update to `completed`, `blocked`, or `deferred` does not select or execute another unit; if that unit was active, the active id remains pointed at it and the context/report show the terminal status until the next explicit instruction.
+
+Attempts are recorded as bounded, redacted plan events: `unit_status_update_requested`, `unit_status_update_succeeded`, `unit_status_update_rejected`, and `unit_status_update_skipped`. `FORGIS_RUN_REPORT.md` / `FORGIS_RUN_REPORT.json` include **Manual Unit Status Update** with unit id, previous status, requested status, final status, result, reason, and message.
+
+v4.8 is still not a full multi-unit automatic scheduler. It does not let the model freely rewrite all unit states, does not reorder the plan, does not run a multi-unit loop, and does not automatically execute the next unit. `staged_translation` continues to record active unit information as summary context only.
+
+## Forgis v4.9 Manual Migration Audit Summary
+
+Forgis v4.9 adds a compact **Migration Plan Audit Summary** to `FORGIS_RUN_REPORT.md`, `FORGIS_RUN_REPORT.json`, and the tool loop runtime outputs. It summarizes the latest manual action, active unit, unit counts, recent key plan events, and a short suggested next action. The suggestion is only guidance; Forgis does not auto-switch, auto-run, or auto-execute the next migration unit.
+
+Audit summary config:
+
+```yaml
+migration_plan_audit_summary_enabled: true
+migration_plan_audit_max_events: 10
+```
+
+`migration_plan_audit_max_events` is capped at 50. The audit summary is redacted and bounded; it does not include full source, full diffs, full logs, secrets, or private absolute paths.
+
+Copyable examples:
+
+Enable scheduler, persistence, and resume:
+
+```yaml
+migration_scheduler_enabled: true
+migration_plan_resume_enabled: true
+migration_plan_persistence_enabled: true
+```
+
+Manually switch the active unit:
+
+```yaml
+migration_plan_requested_active_unit_id: "ui-homeview-swift"
+migration_plan_switch_reason: "Continue the HomeView migration first."
+```
+
+Manually mark a unit blocked:
+
+```yaml
+migration_plan_requested_unit_status_unit_id: "ui-homeview-swift"
+migration_plan_requested_unit_status: "blocked"
+migration_plan_requested_unit_status_reason: "Target platform component is missing; needs manual design decision."
+```
+
+Manually mark a unit deferred:
+
+```yaml
+migration_plan_requested_unit_status_unit_id: "asset-icons"
+migration_plan_requested_unit_status: "deferred"
+migration_plan_requested_unit_status_reason: "Asset conversion will be handled after UI structure is stable."
+```
+
+Manually mark a unit completed:
+
+```yaml
+migration_plan_requested_unit_status_unit_id: "model-userprofile"
+migration_plan_requested_unit_status: "completed"
+migration_plan_requested_unit_status_reason: "Implementation reviewed and build/test passed in the previous run."
+```
+
+Switch a unit back to active:
+
+```yaml
+migration_plan_requested_unit_status_unit_id: "ui-homeview-swift"
+migration_plan_requested_unit_status: "active"
+migration_plan_requested_unit_status_reason: "Required design decision has been resolved."
+```
+
+`completed`, `blocked`, and `deferred` require `migration_plan_requested_unit_status_reason`. These controls only affect migration plan state. They do not expand `run_command`, `run_build`, or `run_tests` permissions, do not allow arbitrary shell, and do not automatically execute the next unit.
+
+## Forgis v5.0 Final Schema Freeze and Release Checklist
+
+Forgis v5.0 final freezes the v5 report/report-plan surface without adding new runtime powers. The run report schema is `forgis.run_report.v5.0`; the migration plan write schema is `forgis.migration_plan.v5.0`. Plan loading remains backward compatible with `forgis.migration_plan.v4.8`, `v3.9`, `v3.8`, and `v3.7` so older persisted plans can still resume safely.
+
+v5.0 includes:
+
+- DeepSeek tool loop foundation
+- safe file tools scoped to Forgis virtual paths
+- `search_text`, `git_status`, `git_diff`, `edit_file`, and `apply_patch`
+- safe `run_command` inside `target_subdir`
+- configured `run_build` and `run_tests`
+- build/test feedback summaries
+- limited repair loop
+- repair event log
+- runtime Markdown report and GitHub Step Summary
+- persistent `FORGIS_RUN_REPORT.md` and `FORGIS_RUN_REPORT.json`
+- reports-only Actions artifact upload through `forgis-runtime/reports/**`
+- dynamic local skills
+- migration units
+- migration plan persistence and explicit resume
+- manual active unit switch
+- manual unit status update
+- Migration Plan Audit Summary
+- report fixtures / golden samples
+
+v5.0 does not include:
+
+- full Claude Code parity
+- automatic multi-unit execution
+- model-controlled plan reordering
+- complex RAG
+- external skill downloads
+- reading skills from source or target business repositories
+- arbitrary shell
+- cross-language build adapters
+- a UI console
+- Aider
+
+Report fixtures and golden samples live under `tests/fixtures/reports/` and cover:
+
+- `active`
+- `blocked`
+- `deferred`
+- `completed`
+
+The tests assert key JSON fields and required Markdown section headings instead of doing fragile full-file Markdown/JSON comparisons. They verify that the Migration Plan Audit Summary exists, recommended next actions remain present, active unit ids and status counts are stable, event logs stay bounded, redaction works, and report write safety still rejects source/target checkout paths, `.git`, home Desktop/Downloads/Documents paths, and paths outside the runtime root.
+
+Release checklist:
+
+- Safety defaults: scheduler default off, resume default off, repair loop default off, no automatic next-unit execution, no arbitrary shell, no expanded command permissions, no report/plan writes into source checkout, target checkout, `target_subdir`, or business directories.
+- Required tests: `python3 -m py_compile agent/*.py`, `python3 -m unittest`, `bash -n agent/create_pr.sh`, `bash -n agent/build_target.sh`, and `git diff --check`.
+- Report regression: active fixture, blocked fixture, deferred fixture, completed fixture, redaction, path safety, event limits, and write safety.
+- Actions artifact: only `forgis-runtime/reports/**` is uploaded. This is intended to contain `FORGIS_RUN_REPORT.md`, `FORGIS_RUN_REPORT.json`, and `FORGIS_MIGRATION_PLAN.json` when enabled. The workflow does not upload legacy runtime diagnostics artifacts, business source code, full diffs, secrets, unredacted model output, or a target repository snapshot as part of v5.0 final.
+- Out of scope for v5.0: full Claude Code parity, multi-unit auto-execution, complex RAG, cross-language build adapters, UI console, and Aider.
+
+Legacy runtime diagnostics files may still be generated locally for workflow control and log context, but v5.0 final does not publish them as artifacts. A future version should add explicit redaction, bounding, and regression tests before considering those files for artifact upload again.
 
 ## Run Switches
 
@@ -144,6 +615,9 @@ Read tools:
 - `tree(path, max_depth?)`
 - `read_file(path, start_line?, max_lines?)`
 - `file_exists(path)`
+- `search_text(query, root?, regex?, case_sensitive?, max_results?)`
+- `git_status(max_entries?)`
+- `git_diff(max_chars?)`
 
 Write tools:
 
@@ -151,6 +625,14 @@ Write tools:
 - `write_file(path, content)`
 - `append_file(path, content)`
 - `delete_file(path)`
+- `edit_file(path, old_text, new_text, expected_replacements?)`
+- `apply_patch(path, patch)`
+
+Safe command tool:
+
+- `run_command(command, cwd?, timeout_seconds?, max_output_chars?)`
+- `run_build()`
+- `run_tests()`
 
 DeepSeek uses virtual paths:
 
@@ -167,6 +649,10 @@ Read results are bounded by `max_tool_result_chars`. Large files should be read 
 Read access is limited to the checked-out source repository, checked-out target repository, config file, task file, and `target_subdir`.
 
 Write access is limited to files inside target repository `target_subdir/`.
+
+`git_status` and `git_diff` operate only on the target workspace and never commit. `run_command` runs without `shell=True`, only inside `target_subdir`, with timeout and output limits, and starts with a conservative allowlist plus explicit dangerous-command blocking.
+
+`run_build` and `run_tests` do not accept model-supplied commands. They only run configured command arrays, still without `shell=True`, inside `target_subdir`, with timeout and output limits. Dangerous commands such as `rm`, `sudo`, `chmod`, `chown`, `curl`, `wget`, `ssh`, `scp`, `git`, and shell interpreters are rejected.
 
 Forgis rejects path traversal, absolute-path escape attempts, symlink escapes, prefix spoofing, workflow writes, config/task writes, and secret-like paths.
 
