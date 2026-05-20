@@ -1,0 +1,210 @@
+{
+  "name": "active",
+  "final_summary": "Fixture active unit remains ready for focused verification.",
+  "repair_report_markdown": "# Fixture Repair Report\n\n- active fixture uses bounded fake paths only.\n",
+  "operation_log": [
+    {
+      "tool": "edit_file",
+      "path": "target-output/HomeView.kt"
+    }
+  ],
+  "runtime_state": {
+    "build_runs": 1,
+    "test_runs": 0,
+    "last_build_status": "success",
+    "last_test_status": "skipped",
+    "repair_loop_enabled": false,
+    "max_repair_attempts": 2,
+    "repair_attempts_used": 0,
+    "repair_allowed": false,
+    "repair_success": false,
+    "stopped_reason": "none",
+    "repair_event_count": 1,
+    "changed_paths": [
+      "target-output/HomeView.kt"
+    ],
+    "migration_scheduler_enabled": true,
+    "migration_plan_source": "loaded",
+    "migration_plan_path": "forgis-runtime/reports/FORGIS_MIGRATION_PLAN.json",
+    "migration_plan_load_status": "loaded",
+    "migration_plan_write_status": "written",
+    "plan_update_status": "updated",
+    "active_unit_id": "ui-homeview-swift",
+    "active_unit_status": "active",
+    "active_unit_reason": "Verification passed; waiting for explicit completion.",
+    "active_unit_switch": {
+      "status": "skipped",
+      "active_unit_id": "ui-homeview-swift",
+      "message": "No requested active unit id was configured."
+    },
+    "manual_unit_status_update": {
+      "status": "skipped",
+      "message": "No manual unit status update was configured."
+    },
+    "resume_summary": {
+      "plan_id": "fixture-plan-active",
+      "active_unit_id": "ui-homeview-swift",
+      "last_active_unit_status": "active",
+      "counts": {
+        "completed": 0,
+        "blocked": 0,
+        "pending": 2,
+        "deferred": 0,
+        "active": 1,
+        "total": 3
+      },
+      "last_stopped_reason": "Verification passed; waiting for explicit completion.",
+      "changed_paths": [
+        "target-output/HomeView.kt"
+      ],
+      "next_step": "Continue the current active unit."
+    },
+    "migration_plan_summary": {
+      "plan_id": "fixture-plan-active",
+      "active_unit_id": "ui-homeview-swift",
+      "completed_count": 0,
+      "blocked_count": 0,
+      "pending_count": 2,
+      "deferred_count": 0,
+      "active_count": 1,
+      "unit_count": 3,
+      "active_unit": {
+        "unit_id": "ui-homeview-swift",
+        "title": "Home view migration",
+        "source_paths": [
+          "Source/HomeView.swift"
+        ],
+        "target_paths": [
+          "target-output/HomeView.kt"
+        ],
+        "unit_type": "ui",
+        "priority": 100,
+        "status": "active",
+        "reason": "Verification passed; waiting for explicit completion.",
+        "changed_paths": [
+          "target-output/HomeView.kt"
+        ],
+        "build_status": "success",
+        "test_status": "skipped"
+      },
+      "units": [
+        {
+          "unit_id": "ui-homeview-swift",
+          "title": "Home view migration",
+          "source_paths": [
+            "Source/HomeView.swift"
+          ],
+          "target_paths": [
+            "target-output/HomeView.kt"
+          ],
+          "unit_type": "ui",
+          "priority": 100,
+          "status": "active",
+          "reason": "Verification passed; waiting for explicit completion.",
+          "changed_paths": [
+            "target-output/HomeView.kt"
+          ],
+          "build_status": "success",
+          "test_status": "skipped"
+        },
+        {
+          "unit_id": "asset-icons",
+          "title": "Icon assets",
+          "source_paths": [
+            "Assets/IconSet"
+          ],
+          "target_paths": [
+            "target-output/assets/icons"
+          ],
+          "unit_type": "asset",
+          "priority": 50,
+          "status": "pending"
+        },
+        {
+          "unit_id": "model-userprofile",
+          "title": "User profile model",
+          "source_paths": [
+            "Models/UserProfile.swift"
+          ],
+          "target_paths": [
+            "target-output/UserProfile.kt"
+          ],
+          "unit_type": "model",
+          "priority": 40,
+          "status": "pending"
+        }
+      ]
+    },
+    "plan_events": [
+      {
+        "event_type": "plan_loaded",
+        "unit_id": "ui-homeview-swift",
+        "status_after": "active",
+        "reason": "Loaded report fixture plan.",
+        "short_message": "Fixture plan loaded.",
+        "order": 1,
+        "timestamp": "2026-05-20T00:00:00Z"
+      },
+      {
+        "event_type": "active_unit_selected",
+        "unit_id": "ui-homeview-swift",
+        "status_after": "active",
+        "reason": "Active unit selected from fixture plan.",
+        "short_message": "Active fixture unit selected.",
+        "order": 2,
+        "timestamp": "2026-05-20T00:01:00Z"
+      },
+      {
+        "event_type": "active_unit_updated",
+        "unit_id": "ui-homeview-swift",
+        "status_before": "active",
+        "status_after": "active",
+        "reason": "Changed paths/build status refreshed.",
+        "short_message": "Runtime evidence refreshed.",
+        "order": 3,
+        "timestamp": "2026-05-20T00:02:00Z"
+      },
+      {
+        "event_type": "plan_write_succeeded",
+        "unit_id": "ui-homeview-swift",
+        "status_after": "active",
+        "reason": "Migration plan persisted to fixture report directory.",
+        "short_message": "Plan write succeeded.",
+        "order": 4,
+        "timestamp": "2026-05-20T00:03:00Z"
+      },
+      {
+        "event_type": "active_unit_updated",
+        "unit_id": "ui-homeview-swift",
+        "status_before": "active",
+        "status_after": "active",
+        "reason": "Verification passed; unit remains active for manual completion.",
+        "short_message": "Active unit remains active.",
+        "order": 5,
+        "timestamp": "2026-05-20T00:04:00Z"
+      }
+    ],
+    "repair_events": [
+      {
+        "event_id": 1,
+        "event_type": "build_finished",
+        "attempt_index": 0,
+        "check_type": "build",
+        "status": "success",
+        "short_message": "Fixture build passed.",
+        "affected_paths": [
+          "target-output/HomeView.kt"
+        ]
+      }
+    ]
+  },
+  "expect": {
+    "report_schema_version": "forgis.run_report.v5.0",
+    "active_unit_id": "ui-homeview-swift",
+    "recommended_keywords": [
+      "current active unit",
+      "build/test"
+    ],
+    "status": "active"
+  }
+}

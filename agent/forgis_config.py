@@ -21,6 +21,64 @@ DEFAULT_TARGET_BASE_BRANCH = "main"
 DEFAULT_RUN_LOG_FILENAME = "FORGIS_LOG.md"
 DEFAULT_MAX_ITERATIONS = 80
 DEFAULT_MAX_TOOL_RESULT_CHARS = 20_000
+DEFAULT_BUILD_TIMEOUT_SECONDS = 60
+DEFAULT_TEST_TIMEOUT_SECONDS = 60
+DEFAULT_MAX_COMMAND_OUTPUT_CHARS = 8_000
+DEFAULT_REPAIR_LOOP_ENABLED = False
+DEFAULT_MAX_REPAIR_ATTEMPTS = 2
+MAX_REPAIR_ATTEMPTS_LIMIT = 5
+DEFAULT_REPAIR_REQUIRES_DIFF_CHECK = True
+DEFAULT_REPAIR_REQUIRES_BUILD_OR_TEST = True
+DEFAULT_REPAIR_STOP_ON_SUCCESS = True
+DEFAULT_RUN_REPORT_ENABLED = True
+DEFAULT_RUN_REPORT_OUTPUT_DIR = ".forgis/reports"
+DEFAULT_RUN_REPORT_INCLUDE_EVENTS = True
+DEFAULT_RUN_REPORT_MAX_EVENTS = 100
+MAX_RUN_REPORT_EVENTS_LIMIT = 500
+DEFAULT_RUN_REPORT_MAX_CHARS = 200_000
+MAX_RUN_REPORT_MAX_CHARS_LIMIT = 1_000_000
+DEFAULT_RUN_REPORT_REQUIRED = False
+DEFAULT_SKILLS_ENABLED = True
+DEFAULT_SELECTED_SKILLS: tuple[str, ...] = ()
+DEFAULT_AUTO_SELECT_SKILLS = True
+DEFAULT_MAX_SKILL_CHARS = 12_000
+DEFAULT_MAX_TOTAL_SKILL_CHARS = 30_000
+MAX_SKILL_CHARS_LIMIT = 50_000
+MAX_TOTAL_SKILL_CHARS_LIMIT = 100_000
+DEFAULT_MIGRATION_SCHEDULER_ENABLED = False
+DEFAULT_MAX_MIGRATION_UNITS = 50
+MAX_MIGRATION_UNITS_LIMIT = 200
+DEFAULT_MIGRATION_UNIT_STRATEGY = "inventory"
+DEFAULT_MIGRATION_UNIT_PRIORITIZE_UI = True
+DEFAULT_MIGRATION_UNIT_INCLUDE_TESTS = True
+DEFAULT_MIGRATION_UNIT_INCLUDE_ASSETS = True
+DEFAULT_MIGRATION_PLAN_PERSISTENCE_ENABLED = True
+DEFAULT_MIGRATION_PLAN_OUTPUT_DIR = DEFAULT_RUN_REPORT_OUTPUT_DIR
+DEFAULT_MIGRATION_PLAN_FILENAME = "FORGIS_MIGRATION_PLAN.json"
+DEFAULT_MIGRATION_PLAN_RESUME_ENABLED = False
+DEFAULT_MIGRATION_PLAN_REQUIRED = False
+DEFAULT_MIGRATION_PLAN_AUTO_UPDATE_ENABLED = True
+DEFAULT_MIGRATION_PLAN_RESUME_SUMMARY_ENABLED = True
+DEFAULT_MIGRATION_PLAN_EVENT_LOG_MAX_EVENTS = 100
+MAX_MIGRATION_PLAN_EVENT_LOG_MAX_EVENTS = 500
+DEFAULT_MIGRATION_PLAN_AUDIT_SUMMARY_ENABLED = True
+DEFAULT_MIGRATION_PLAN_AUDIT_MAX_EVENTS = 10
+MAX_MIGRATION_PLAN_AUDIT_MAX_EVENTS = 50
+DEFAULT_MIGRATION_PLAN_AUTO_COMPLETE_ON_SUCCESS = False
+DEFAULT_MIGRATION_PLAN_REQUESTED_ACTIVE_UNIT_ID = ""
+DEFAULT_MIGRATION_PLAN_ALLOW_SWITCH_FROM_BLOCKED = True
+DEFAULT_MIGRATION_PLAN_ALLOW_SWITCH_FROM_COMPLETED = False
+DEFAULT_MIGRATION_PLAN_ALLOW_SWITCH_FROM_DEFERRED = True
+DEFAULT_MIGRATION_PLAN_SWITCH_REQUIRES_RESUME = True
+DEFAULT_MIGRATION_PLAN_SWITCH_REASON = ""
+DEFAULT_MIGRATION_PLAN_REQUESTED_UNIT_STATUS_UNIT_ID = ""
+DEFAULT_MIGRATION_PLAN_REQUESTED_UNIT_STATUS = ""
+DEFAULT_MIGRATION_PLAN_REQUESTED_UNIT_STATUS_REASON = ""
+DEFAULT_MIGRATION_PLAN_ALLOW_MANUAL_COMPLETE = True
+DEFAULT_MIGRATION_PLAN_ALLOW_MANUAL_BLOCK = True
+DEFAULT_MIGRATION_PLAN_ALLOW_MANUAL_DEFER = True
+DEFAULT_MIGRATION_PLAN_ALLOW_MANUAL_ACTIVATE = True
+DEFAULT_MIGRATION_PLAN_STATUS_UPDATE_REQUIRES_RESUME = True
 DEFAULT_EXECUTION_MODE = "tool_loop"
 STAGED_TRANSLATION_MODE = "staged_translation"
 DEFAULT_STAGED_MIN_TOTAL_ITERATIONS = 120
@@ -29,6 +87,12 @@ DEFAULT_STAGED_MAX_UNITS_PER_RUN = 12
 DEFAULT_STAGED_COMPARE_REPORT_DIR = "FORGIS_COMPARE_REPORTS"
 
 ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+SKILL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,80}$")
+MIGRATION_UNIT_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$")
+SECRET_SKILL_NAME_WORDS = re.compile(
+    r"(secret|token|credential|password|api[_-]?key|private|\.env|\.npmrc|\.pypirc|\.netrc)",
+    re.IGNORECASE,
+)
 
 CONFIG_FIELDS = {
     "source_repo",
@@ -50,6 +114,58 @@ CONFIG_FIELDS = {
     "max_tool_result_chars",
     "validation_commands",
     "success_checks",
+    "build_command",
+    "test_command",
+    "build_timeout_seconds",
+    "test_timeout_seconds",
+    "max_command_output_chars",
+    "repair_loop_enabled",
+    "max_repair_attempts",
+    "repair_requires_diff_check",
+    "repair_requires_build_or_test",
+    "repair_stop_on_success",
+    "run_report_enabled",
+    "run_report_output_dir",
+    "run_report_include_events",
+    "run_report_max_events",
+    "run_report_max_chars",
+    "run_report_required",
+    "skills_enabled",
+    "selected_skills",
+    "auto_select_skills",
+    "max_skill_chars",
+    "max_total_skill_chars",
+    "migration_scheduler_enabled",
+    "max_migration_units",
+    "migration_unit_strategy",
+    "migration_unit_prioritize_ui",
+    "migration_unit_include_tests",
+    "migration_unit_include_assets",
+    "migration_plan_persistence_enabled",
+    "migration_plan_output_dir",
+    "migration_plan_filename",
+    "migration_plan_resume_enabled",
+    "migration_plan_required",
+    "migration_plan_auto_update_enabled",
+    "migration_plan_resume_summary_enabled",
+    "migration_plan_event_log_max_events",
+    "migration_plan_audit_summary_enabled",
+    "migration_plan_audit_max_events",
+    "migration_plan_auto_complete_on_success",
+    "migration_plan_requested_active_unit_id",
+    "migration_plan_allow_switch_from_blocked",
+    "migration_plan_allow_switch_from_completed",
+    "migration_plan_allow_switch_from_deferred",
+    "migration_plan_switch_requires_resume",
+    "migration_plan_switch_reason",
+    "migration_plan_requested_unit_status_unit_id",
+    "migration_plan_requested_unit_status",
+    "migration_plan_requested_unit_status_reason",
+    "migration_plan_allow_manual_complete",
+    "migration_plan_allow_manual_block",
+    "migration_plan_allow_manual_defer",
+    "migration_plan_allow_manual_activate",
+    "migration_plan_status_update_requires_resume",
     "strict_mode",
     "execution_mode",
     "run_mode",
@@ -150,6 +266,58 @@ class ResolvedConfig:
     model_env: tuple[tuple[str, str], ...]
     max_iterations: int
     max_tool_result_chars: int
+    max_command_output_chars: int
+    build_command: tuple[str, ...]
+    test_command: tuple[str, ...]
+    build_timeout_seconds: int
+    test_timeout_seconds: int
+    repair_loop_enabled: bool
+    max_repair_attempts: int
+    repair_requires_diff_check: bool
+    repair_requires_build_or_test: bool
+    repair_stop_on_success: bool
+    run_report_enabled: bool
+    run_report_output_dir: str
+    run_report_include_events: bool
+    run_report_max_events: int
+    run_report_max_chars: int
+    run_report_required: bool
+    skills_enabled: bool
+    selected_skills: tuple[str, ...]
+    auto_select_skills: bool
+    max_skill_chars: int
+    max_total_skill_chars: int
+    migration_scheduler_enabled: bool
+    max_migration_units: int
+    migration_unit_strategy: str
+    migration_unit_prioritize_ui: bool
+    migration_unit_include_tests: bool
+    migration_unit_include_assets: bool
+    migration_plan_persistence_enabled: bool
+    migration_plan_output_dir: str
+    migration_plan_filename: str
+    migration_plan_resume_enabled: bool
+    migration_plan_required: bool
+    migration_plan_auto_update_enabled: bool
+    migration_plan_resume_summary_enabled: bool
+    migration_plan_event_log_max_events: int
+    migration_plan_audit_summary_enabled: bool
+    migration_plan_audit_max_events: int
+    migration_plan_auto_complete_on_success: bool
+    migration_plan_requested_active_unit_id: str
+    migration_plan_allow_switch_from_blocked: bool
+    migration_plan_allow_switch_from_completed: bool
+    migration_plan_allow_switch_from_deferred: bool
+    migration_plan_switch_requires_resume: bool
+    migration_plan_switch_reason: str
+    migration_plan_requested_unit_status_unit_id: str
+    migration_plan_requested_unit_status: str
+    migration_plan_requested_unit_status_reason: str
+    migration_plan_allow_manual_complete: bool
+    migration_plan_allow_manual_block: bool
+    migration_plan_allow_manual_defer: bool
+    migration_plan_allow_manual_activate: bool
+    migration_plan_status_update_requires_resume: bool
     validation_commands: tuple[str, ...]
     success_checks: tuple[dict[str, str], ...]
     strict_mode: bool
@@ -181,6 +349,64 @@ class ResolvedConfig:
             "RUN_AGENT": "true" if self.run_agent else "false",
             "MAX_ITERATIONS": str(self.max_iterations),
             "MAX_TOOL_RESULT_CHARS": str(self.max_tool_result_chars),
+            "MAX_COMMAND_OUTPUT_CHARS": str(self.max_command_output_chars),
+            "BUILD_COMMAND_JSON": json.dumps(
+                list(self.build_command),
+                ensure_ascii=False,
+            ),
+            "TEST_COMMAND_JSON": json.dumps(
+                list(self.test_command),
+                ensure_ascii=False,
+            ),
+            "BUILD_TIMEOUT_SECONDS": str(self.build_timeout_seconds),
+            "TEST_TIMEOUT_SECONDS": str(self.test_timeout_seconds),
+            "REPAIR_LOOP_ENABLED": "true" if self.repair_loop_enabled else "false",
+            "MAX_REPAIR_ATTEMPTS": str(self.max_repair_attempts),
+            "REPAIR_REQUIRES_DIFF_CHECK": "true" if self.repair_requires_diff_check else "false",
+            "REPAIR_REQUIRES_BUILD_OR_TEST": "true" if self.repair_requires_build_or_test else "false",
+            "REPAIR_STOP_ON_SUCCESS": "true" if self.repair_stop_on_success else "false",
+            "RUN_REPORT_ENABLED": "true" if self.run_report_enabled else "false",
+            "RUN_REPORT_OUTPUT_DIR": self.run_report_output_dir,
+            "RUN_REPORT_INCLUDE_EVENTS": "true" if self.run_report_include_events else "false",
+            "RUN_REPORT_MAX_EVENTS": str(self.run_report_max_events),
+            "RUN_REPORT_MAX_CHARS": str(self.run_report_max_chars),
+            "RUN_REPORT_REQUIRED": "true" if self.run_report_required else "false",
+            "SKILLS_ENABLED": "true" if self.skills_enabled else "false",
+            "SELECTED_SKILLS_JSON": json.dumps(list(self.selected_skills), ensure_ascii=False),
+            "AUTO_SELECT_SKILLS": "true" if self.auto_select_skills else "false",
+            "MAX_SKILL_CHARS": str(self.max_skill_chars),
+            "MAX_TOTAL_SKILL_CHARS": str(self.max_total_skill_chars),
+            "MIGRATION_SCHEDULER_ENABLED": "true" if self.migration_scheduler_enabled else "false",
+            "MAX_MIGRATION_UNITS": str(self.max_migration_units),
+            "MIGRATION_UNIT_STRATEGY": self.migration_unit_strategy,
+            "MIGRATION_UNIT_PRIORITIZE_UI": "true" if self.migration_unit_prioritize_ui else "false",
+            "MIGRATION_UNIT_INCLUDE_TESTS": "true" if self.migration_unit_include_tests else "false",
+            "MIGRATION_UNIT_INCLUDE_ASSETS": "true" if self.migration_unit_include_assets else "false",
+            "MIGRATION_PLAN_PERSISTENCE_ENABLED": "true" if self.migration_plan_persistence_enabled else "false",
+            "MIGRATION_PLAN_OUTPUT_DIR": self.migration_plan_output_dir,
+            "MIGRATION_PLAN_FILENAME": self.migration_plan_filename,
+            "MIGRATION_PLAN_RESUME_ENABLED": "true" if self.migration_plan_resume_enabled else "false",
+            "MIGRATION_PLAN_REQUIRED": "true" if self.migration_plan_required else "false",
+            "MIGRATION_PLAN_AUTO_UPDATE_ENABLED": "true" if self.migration_plan_auto_update_enabled else "false",
+            "MIGRATION_PLAN_RESUME_SUMMARY_ENABLED": "true" if self.migration_plan_resume_summary_enabled else "false",
+            "MIGRATION_PLAN_EVENT_LOG_MAX_EVENTS": str(self.migration_plan_event_log_max_events),
+            "MIGRATION_PLAN_AUDIT_SUMMARY_ENABLED": "true" if self.migration_plan_audit_summary_enabled else "false",
+            "MIGRATION_PLAN_AUDIT_MAX_EVENTS": str(self.migration_plan_audit_max_events),
+            "MIGRATION_PLAN_AUTO_COMPLETE_ON_SUCCESS": "true" if self.migration_plan_auto_complete_on_success else "false",
+            "MIGRATION_PLAN_REQUESTED_ACTIVE_UNIT_ID": self.migration_plan_requested_active_unit_id,
+            "MIGRATION_PLAN_ALLOW_SWITCH_FROM_BLOCKED": "true" if self.migration_plan_allow_switch_from_blocked else "false",
+            "MIGRATION_PLAN_ALLOW_SWITCH_FROM_COMPLETED": "true" if self.migration_plan_allow_switch_from_completed else "false",
+            "MIGRATION_PLAN_ALLOW_SWITCH_FROM_DEFERRED": "true" if self.migration_plan_allow_switch_from_deferred else "false",
+            "MIGRATION_PLAN_SWITCH_REQUIRES_RESUME": "true" if self.migration_plan_switch_requires_resume else "false",
+            "MIGRATION_PLAN_SWITCH_REASON": self.migration_plan_switch_reason,
+            "MIGRATION_PLAN_REQUESTED_UNIT_STATUS_UNIT_ID": self.migration_plan_requested_unit_status_unit_id,
+            "MIGRATION_PLAN_REQUESTED_UNIT_STATUS": self.migration_plan_requested_unit_status,
+            "MIGRATION_PLAN_REQUESTED_UNIT_STATUS_REASON": self.migration_plan_requested_unit_status_reason,
+            "MIGRATION_PLAN_ALLOW_MANUAL_COMPLETE": "true" if self.migration_plan_allow_manual_complete else "false",
+            "MIGRATION_PLAN_ALLOW_MANUAL_BLOCK": "true" if self.migration_plan_allow_manual_block else "false",
+            "MIGRATION_PLAN_ALLOW_MANUAL_DEFER": "true" if self.migration_plan_allow_manual_defer else "false",
+            "MIGRATION_PLAN_ALLOW_MANUAL_ACTIVATE": "true" if self.migration_plan_allow_manual_activate else "false",
+            "MIGRATION_PLAN_STATUS_UPDATE_REQUIRES_RESUME": "true" if self.migration_plan_status_update_requires_resume else "false",
             "MODEL_ENV_JSON": json.dumps(model_env, ensure_ascii=False, sort_keys=True),
             "VALIDATION_COMMANDS_JSON": json.dumps(
                 list(self.validation_commands),
@@ -256,6 +482,45 @@ def select_string_list(config: dict[str, Any], field: str) -> tuple[str, ...]:
         strings.append(clean_single_line(text, f"{field}[{index}]"))
 
     return dedupe_strings(strings)
+
+
+def validate_skill_name(value: str, label: str) -> str:
+    name = clean_single_line(value.strip(), label)
+    if not name:
+        raise ValueError(f"{label} must be a non-empty skill name.")
+    if "\x00" in name or "/" in name or "\\" in name:
+        raise ValueError(f"{label} must be a safe skill slug, not a path.")
+    if name.startswith(".") or name.startswith("~") or not SKILL_NAME_PATTERN.fullmatch(name):
+        raise ValueError(f"{label} must be a safe skill slug.")
+    if SECRET_SKILL_NAME_WORDS.search(name):
+        raise ValueError(f"{label} must not contain secret-like words.")
+    return name
+
+
+def select_skill_names(config: dict[str, Any]) -> tuple[str, ...]:
+    names = select_string_list(config, "selected_skills")
+    return tuple(validate_skill_name(name, f"selected_skills[{index}]") for index, name in enumerate(names))
+
+
+def select_command_array(config: dict[str, Any], field: str) -> tuple[str, ...]:
+    if field not in config or config[field] is None:
+        return ()
+    value = config[field]
+    if not isinstance(value, list):
+        raise ValueError(f"{field} must be a YAML list of command argument strings.")
+    if not value:
+        raise ValueError(f"{field} must not be an empty list when configured.")
+
+    args: list[str] = []
+    for index, item in enumerate(value):
+        text = non_empty(item)
+        if text is None:
+            raise ValueError(f"{field}[{index}] must be a non-empty string.")
+        cleaned = clean_single_line(text, f"{field}[{index}]")
+        if "\x00" in cleaned:
+            raise ValueError(f"{field}[{index}] contains an unsafe character.")
+        args.append(cleaned)
+    return tuple(args)
 
 
 def validate_env_name(value: str, label: str) -> str:
@@ -334,6 +599,20 @@ def select_int(
         raise ValueError(f"{field} must be an integer.") from exc
     if value < minimum:
         raise ValueError(f"{field} must be at least {minimum}.")
+    return value
+
+
+def select_bounded_int(
+    config: dict[str, Any],
+    field: str,
+    default: int,
+    *,
+    minimum: int,
+    maximum: int,
+) -> int:
+    value = select_int(config, field, default, minimum=minimum)
+    if value > maximum:
+        raise ValueError(f"{field} must be at most {maximum}.")
     return value
 
 
@@ -422,6 +701,122 @@ def validate_target_subdir_relative_path(value: Any, label: str) -> str:
     return raw.as_posix()
 
 
+def validate_run_report_output_dir(value: Any, target_subdir: str) -> str:
+    text = non_empty(value)
+    if text is None:
+        raise ValueError("run_report_output_dir must be a non-empty relative path.")
+    cleaned = clean_single_line(text, "run_report_output_dir").replace("\\", "/")
+    if cleaned.startswith("/") or cleaned.startswith("~"):
+        raise ValueError("run_report_output_dir must be relative to the Forgis runtime workspace.")
+    raw = PurePosixPath(cleaned.strip("/"))
+    if raw.is_absolute() or not raw.parts:
+        raise ValueError("run_report_output_dir must be relative to the Forgis runtime workspace.")
+    if any(part in {"", ".", "..", ".git"} for part in raw.parts):
+        raise ValueError(f"run_report_output_dir contains an unsafe path segment: {value}")
+    lowered_parts = {part.casefold() for part in raw.parts}
+    if lowered_parts & {"source", "source-repo", "target", "target-repo"}:
+        raise ValueError("run_report_output_dir must not point at a source or target checkout directory.")
+    target_parts = {part.casefold() for part in PurePosixPath(target_subdir).parts}
+    if lowered_parts & target_parts:
+        raise ValueError("run_report_output_dir must not point inside target_subdir.")
+    if any(
+        part.casefold() in {".env", ".netrc", ".npmrc", ".pypirc"}
+        or part.casefold().endswith((".pem", ".key", ".p12", ".pfx"))
+        or any(word in part.casefold() for word in ("secret", "credential", "private-key", "private_key", "token"))
+        for part in raw.parts
+    ):
+        raise ValueError("run_report_output_dir must not contain secret-like path segments.")
+    return raw.as_posix()
+
+
+def validate_migration_plan_output_dir(value: Any, target_subdir: str) -> str:
+    try:
+        return validate_run_report_output_dir(value, target_subdir)
+    except ValueError as exc:
+        raise ValueError(str(exc).replace("run_report_output_dir", "migration_plan_output_dir")) from exc
+
+
+def validate_migration_plan_filename(value: Any) -> str:
+    text = non_empty(value)
+    if text is None:
+        raise ValueError("migration_plan_filename must be a non-empty JSON file name.")
+    cleaned = clean_single_line(text, "migration_plan_filename")
+    if "/" in cleaned or "\\" in cleaned:
+        raise ValueError("migration_plan_filename must be a safe file name, not a path.")
+    if cleaned in {".", "..", ".git"} or cleaned.startswith("."):
+        raise ValueError("migration_plan_filename must be a safe JSON file name.")
+    if not cleaned.lower().endswith(".json"):
+        raise ValueError("migration_plan_filename must end with .json.")
+    lowered = cleaned.casefold()
+    if (
+        lowered in {".env", ".netrc", ".npmrc", ".pypirc"}
+        or lowered.endswith((".pem", ".key", ".p12", ".pfx"))
+        or any(word in lowered for word in ("secret", "credential", "private-key", "private_key", "token", "api_key", "apikey"))
+    ):
+        raise ValueError("migration_plan_filename must not contain secret-like words.")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,120}", cleaned):
+        raise ValueError("migration_plan_filename must be a safe JSON file name.")
+    return cleaned
+
+
+def validate_migration_plan_requested_active_unit_id(value: Any) -> str:
+    text = non_empty(value)
+    if text is None:
+        return DEFAULT_MIGRATION_PLAN_REQUESTED_ACTIVE_UNIT_ID
+    cleaned = clean_single_line(text, "migration_plan_requested_active_unit_id")
+    if "\x00" in cleaned or "/" in cleaned or "\\" in cleaned:
+        raise ValueError("migration_plan_requested_active_unit_id must be a safe migration unit id, not a path.")
+    if cleaned.startswith(".") or cleaned.startswith("~") or not MIGRATION_UNIT_ID_PATTERN.fullmatch(cleaned):
+        raise ValueError("migration_plan_requested_active_unit_id must be a safe migration unit id.")
+    if SECRET_SKILL_NAME_WORDS.search(cleaned):
+        raise ValueError("migration_plan_requested_active_unit_id must not contain secret-like words.")
+    return cleaned
+
+
+def validate_migration_plan_requested_unit_status_unit_id(value: Any) -> str:
+    text = non_empty(value)
+    if text is None:
+        return DEFAULT_MIGRATION_PLAN_REQUESTED_UNIT_STATUS_UNIT_ID
+    cleaned = clean_single_line(text, "migration_plan_requested_unit_status_unit_id")
+    if "\x00" in cleaned or "/" in cleaned or "\\" in cleaned:
+        raise ValueError("migration_plan_requested_unit_status_unit_id must be a safe migration unit id, not a path.")
+    if cleaned.startswith(".") or cleaned.startswith("~") or not MIGRATION_UNIT_ID_PATTERN.fullmatch(cleaned):
+        raise ValueError("migration_plan_requested_unit_status_unit_id must be a safe migration unit id.")
+    if SECRET_SKILL_NAME_WORDS.search(cleaned):
+        raise ValueError("migration_plan_requested_unit_status_unit_id must not contain secret-like words.")
+    return cleaned
+
+
+def validate_migration_plan_requested_unit_status(value: Any) -> str:
+    text = non_empty(value)
+    if text is None:
+        return DEFAULT_MIGRATION_PLAN_REQUESTED_UNIT_STATUS
+    cleaned = clean_single_line(text, "migration_plan_requested_unit_status")
+    if "\x00" in cleaned:
+        raise ValueError("migration_plan_requested_unit_status contains an unsafe character.")
+    return cleaned.strip().casefold()
+
+
+def validate_migration_plan_requested_unit_status_reason(value: Any) -> str:
+    text = non_empty(value)
+    if text is None:
+        return DEFAULT_MIGRATION_PLAN_REQUESTED_UNIT_STATUS_REASON
+    cleaned = clean_single_line(text, "migration_plan_requested_unit_status_reason")
+    if "\x00" in cleaned:
+        raise ValueError("migration_plan_requested_unit_status_reason contains an unsafe character.")
+    return cleaned
+
+
+def validate_migration_plan_switch_reason(value: Any) -> str:
+    text = non_empty(value)
+    if text is None:
+        return DEFAULT_MIGRATION_PLAN_SWITCH_REASON
+    cleaned = clean_single_line(text, "migration_plan_switch_reason")
+    if "\x00" in cleaned:
+        raise ValueError("migration_plan_switch_reason contains an unsafe character.")
+    return cleaned
+
+
 def select_progress_files(config: dict[str, Any]) -> ProgressFilesConfig:
     progress = select_mapping(config, "progress_files")
     return ProgressFilesConfig(
@@ -461,6 +856,20 @@ def select_execution_mode(config: dict[str, Any]) -> str:
     if mode not in aliases:
         raise ValueError("execution_mode must be either tool_loop or staged_translation.")
     return aliases[mode]
+
+
+def select_migration_unit_strategy(config: dict[str, Any]) -> str:
+    strategy = non_empty(config.get("migration_unit_strategy")) or DEFAULT_MIGRATION_UNIT_STRATEGY
+    strategy = clean_single_line(strategy, "migration_unit_strategy").casefold()
+    aliases = {
+        "inventory": "inventory",
+        "source_inventory": "inventory",
+        "task_text": "task_text",
+        "explicit_paths": "task_text",
+    }
+    if strategy not in aliases:
+        raise ValueError("migration_unit_strategy must be either inventory or task_text.")
+    return aliases[strategy]
 
 
 def select_staged_translation_config(config: dict[str, Any]) -> StagedTranslationConfig:
@@ -828,6 +1237,243 @@ def resolve_config(
     model_env = select_model_env(config)
     validation_commands = select_string_list(config, "validation_commands")
     success_checks = select_success_checks(config)
+    build_command = select_command_array(config, "build_command")
+    test_command = select_command_array(config, "test_command")
+    repair_loop_enabled = select_config_bool(
+        config,
+        "repair_loop_enabled",
+        DEFAULT_REPAIR_LOOP_ENABLED,
+    )
+    max_repair_attempts = select_bounded_int(
+        config,
+        "max_repair_attempts",
+        DEFAULT_MAX_REPAIR_ATTEMPTS,
+        minimum=0,
+        maximum=MAX_REPAIR_ATTEMPTS_LIMIT,
+    )
+    repair_requires_diff_check = select_config_bool(
+        config,
+        "repair_requires_diff_check",
+        DEFAULT_REPAIR_REQUIRES_DIFF_CHECK,
+    )
+    repair_requires_build_or_test = select_config_bool(
+        config,
+        "repair_requires_build_or_test",
+        DEFAULT_REPAIR_REQUIRES_BUILD_OR_TEST,
+    )
+    repair_stop_on_success = select_config_bool(
+        config,
+        "repair_stop_on_success",
+        DEFAULT_REPAIR_STOP_ON_SUCCESS,
+    )
+    run_report_enabled = select_config_bool(
+        config,
+        "run_report_enabled",
+        DEFAULT_RUN_REPORT_ENABLED,
+    )
+    run_report_output_dir = validate_run_report_output_dir(
+        config.get("run_report_output_dir", DEFAULT_RUN_REPORT_OUTPUT_DIR),
+        target_subdir_relative,
+    )
+    run_report_include_events = select_config_bool(
+        config,
+        "run_report_include_events",
+        DEFAULT_RUN_REPORT_INCLUDE_EVENTS,
+    )
+    run_report_max_events = select_bounded_int(
+        config,
+        "run_report_max_events",
+        DEFAULT_RUN_REPORT_MAX_EVENTS,
+        minimum=0,
+        maximum=MAX_RUN_REPORT_EVENTS_LIMIT,
+    )
+    run_report_max_chars = select_bounded_int(
+        config,
+        "run_report_max_chars",
+        DEFAULT_RUN_REPORT_MAX_CHARS,
+        minimum=1_000,
+        maximum=MAX_RUN_REPORT_MAX_CHARS_LIMIT,
+    )
+    run_report_required = select_config_bool(
+        config,
+        "run_report_required",
+        DEFAULT_RUN_REPORT_REQUIRED,
+    )
+    skills_enabled = select_config_bool(
+        config,
+        "skills_enabled",
+        DEFAULT_SKILLS_ENABLED,
+    )
+    selected_skills = select_skill_names(config)
+    auto_select_skills = select_config_bool(
+        config,
+        "auto_select_skills",
+        DEFAULT_AUTO_SELECT_SKILLS,
+    )
+    max_skill_chars = select_bounded_int(
+        config,
+        "max_skill_chars",
+        DEFAULT_MAX_SKILL_CHARS,
+        minimum=100,
+        maximum=MAX_SKILL_CHARS_LIMIT,
+    )
+    max_total_skill_chars = select_bounded_int(
+        config,
+        "max_total_skill_chars",
+        DEFAULT_MAX_TOTAL_SKILL_CHARS,
+        minimum=100,
+        maximum=MAX_TOTAL_SKILL_CHARS_LIMIT,
+    )
+    migration_scheduler_enabled = select_config_bool(
+        config,
+        "migration_scheduler_enabled",
+        DEFAULT_MIGRATION_SCHEDULER_ENABLED,
+    )
+    max_migration_units = select_bounded_int(
+        config,
+        "max_migration_units",
+        DEFAULT_MAX_MIGRATION_UNITS,
+        minimum=1,
+        maximum=MAX_MIGRATION_UNITS_LIMIT,
+    )
+    migration_unit_strategy = select_migration_unit_strategy(config)
+    migration_unit_prioritize_ui = select_config_bool(
+        config,
+        "migration_unit_prioritize_ui",
+        DEFAULT_MIGRATION_UNIT_PRIORITIZE_UI,
+    )
+    migration_unit_include_tests = select_config_bool(
+        config,
+        "migration_unit_include_tests",
+        DEFAULT_MIGRATION_UNIT_INCLUDE_TESTS,
+    )
+    migration_unit_include_assets = select_config_bool(
+        config,
+        "migration_unit_include_assets",
+        DEFAULT_MIGRATION_UNIT_INCLUDE_ASSETS,
+    )
+    migration_plan_persistence_enabled = select_config_bool(
+        config,
+        "migration_plan_persistence_enabled",
+        DEFAULT_MIGRATION_PLAN_PERSISTENCE_ENABLED,
+    )
+    migration_plan_output_dir = validate_migration_plan_output_dir(
+        config.get("migration_plan_output_dir", DEFAULT_MIGRATION_PLAN_OUTPUT_DIR),
+        target_subdir_relative,
+    )
+    migration_plan_filename = validate_migration_plan_filename(
+        config.get("migration_plan_filename", DEFAULT_MIGRATION_PLAN_FILENAME),
+    )
+    migration_plan_resume_enabled = select_config_bool(
+        config,
+        "migration_plan_resume_enabled",
+        DEFAULT_MIGRATION_PLAN_RESUME_ENABLED,
+    )
+    migration_plan_required = select_config_bool(
+        config,
+        "migration_plan_required",
+        DEFAULT_MIGRATION_PLAN_REQUIRED,
+    )
+    migration_plan_auto_update_enabled = select_config_bool(
+        config,
+        "migration_plan_auto_update_enabled",
+        DEFAULT_MIGRATION_PLAN_AUTO_UPDATE_ENABLED,
+    )
+    migration_plan_resume_summary_enabled = select_config_bool(
+        config,
+        "migration_plan_resume_summary_enabled",
+        DEFAULT_MIGRATION_PLAN_RESUME_SUMMARY_ENABLED,
+    )
+    migration_plan_event_log_max_events = select_bounded_int(
+        config,
+        "migration_plan_event_log_max_events",
+        DEFAULT_MIGRATION_PLAN_EVENT_LOG_MAX_EVENTS,
+        minimum=0,
+        maximum=MAX_MIGRATION_PLAN_EVENT_LOG_MAX_EVENTS,
+    )
+    migration_plan_audit_summary_enabled = select_config_bool(
+        config,
+        "migration_plan_audit_summary_enabled",
+        DEFAULT_MIGRATION_PLAN_AUDIT_SUMMARY_ENABLED,
+    )
+    migration_plan_audit_max_events = select_bounded_int(
+        config,
+        "migration_plan_audit_max_events",
+        DEFAULT_MIGRATION_PLAN_AUDIT_MAX_EVENTS,
+        minimum=0,
+        maximum=MAX_MIGRATION_PLAN_AUDIT_MAX_EVENTS,
+    )
+    migration_plan_auto_complete_on_success = select_config_bool(
+        config,
+        "migration_plan_auto_complete_on_success",
+        DEFAULT_MIGRATION_PLAN_AUTO_COMPLETE_ON_SUCCESS,
+    )
+    migration_plan_requested_active_unit_id = validate_migration_plan_requested_active_unit_id(
+        config.get("migration_plan_requested_active_unit_id", DEFAULT_MIGRATION_PLAN_REQUESTED_ACTIVE_UNIT_ID),
+    )
+    migration_plan_allow_switch_from_blocked = select_config_bool(
+        config,
+        "migration_plan_allow_switch_from_blocked",
+        DEFAULT_MIGRATION_PLAN_ALLOW_SWITCH_FROM_BLOCKED,
+    )
+    migration_plan_allow_switch_from_completed = select_config_bool(
+        config,
+        "migration_plan_allow_switch_from_completed",
+        DEFAULT_MIGRATION_PLAN_ALLOW_SWITCH_FROM_COMPLETED,
+    )
+    migration_plan_allow_switch_from_deferred = select_config_bool(
+        config,
+        "migration_plan_allow_switch_from_deferred",
+        DEFAULT_MIGRATION_PLAN_ALLOW_SWITCH_FROM_DEFERRED,
+    )
+    migration_plan_switch_requires_resume = select_config_bool(
+        config,
+        "migration_plan_switch_requires_resume",
+        DEFAULT_MIGRATION_PLAN_SWITCH_REQUIRES_RESUME,
+    )
+    migration_plan_switch_reason = validate_migration_plan_switch_reason(
+        config.get("migration_plan_switch_reason", DEFAULT_MIGRATION_PLAN_SWITCH_REASON),
+    )
+    migration_plan_requested_unit_status_unit_id = validate_migration_plan_requested_unit_status_unit_id(
+        config.get(
+            "migration_plan_requested_unit_status_unit_id",
+            DEFAULT_MIGRATION_PLAN_REQUESTED_UNIT_STATUS_UNIT_ID,
+        ),
+    )
+    migration_plan_requested_unit_status = validate_migration_plan_requested_unit_status(
+        config.get("migration_plan_requested_unit_status", DEFAULT_MIGRATION_PLAN_REQUESTED_UNIT_STATUS),
+    )
+    migration_plan_requested_unit_status_reason = validate_migration_plan_requested_unit_status_reason(
+        config.get(
+            "migration_plan_requested_unit_status_reason",
+            DEFAULT_MIGRATION_PLAN_REQUESTED_UNIT_STATUS_REASON,
+        ),
+    )
+    migration_plan_allow_manual_complete = select_config_bool(
+        config,
+        "migration_plan_allow_manual_complete",
+        DEFAULT_MIGRATION_PLAN_ALLOW_MANUAL_COMPLETE,
+    )
+    migration_plan_allow_manual_block = select_config_bool(
+        config,
+        "migration_plan_allow_manual_block",
+        DEFAULT_MIGRATION_PLAN_ALLOW_MANUAL_BLOCK,
+    )
+    migration_plan_allow_manual_defer = select_config_bool(
+        config,
+        "migration_plan_allow_manual_defer",
+        DEFAULT_MIGRATION_PLAN_ALLOW_MANUAL_DEFER,
+    )
+    migration_plan_allow_manual_activate = select_config_bool(
+        config,
+        "migration_plan_allow_manual_activate",
+        DEFAULT_MIGRATION_PLAN_ALLOW_MANUAL_ACTIVATE,
+    )
+    migration_plan_status_update_requires_resume = select_config_bool(
+        config,
+        "migration_plan_status_update_requires_resume",
+        DEFAULT_MIGRATION_PLAN_STATUS_UPDATE_REQUIRES_RESUME,
+    )
     strict_mode = select_config_bool(config, "strict_mode", False)
     execution_mode = select_execution_mode(config)
     staged_translation = select_staged_translation_config(config)
@@ -848,6 +1494,24 @@ def resolve_config(
         "max_tool_result_chars",
         DEFAULT_MAX_TOOL_RESULT_CHARS,
         minimum=100,
+    )
+    max_command_output_chars = select_int(
+        config,
+        "max_command_output_chars",
+        DEFAULT_MAX_COMMAND_OUTPUT_CHARS,
+        minimum=100,
+    )
+    build_timeout_seconds = select_int(
+        config,
+        "build_timeout_seconds",
+        DEFAULT_BUILD_TIMEOUT_SECONDS,
+        minimum=1,
+    )
+    test_timeout_seconds = select_int(
+        config,
+        "test_timeout_seconds",
+        DEFAULT_TEST_TIMEOUT_SECONDS,
+        minimum=1,
     )
 
     if not dry_run_value and not confirm_real_run:
@@ -885,6 +1549,58 @@ def resolve_config(
         model_env=model_env,
         max_iterations=max_iterations,
         max_tool_result_chars=max_tool_result_chars,
+        max_command_output_chars=max_command_output_chars,
+        build_command=build_command,
+        test_command=test_command,
+        build_timeout_seconds=build_timeout_seconds,
+        test_timeout_seconds=test_timeout_seconds,
+        repair_loop_enabled=repair_loop_enabled,
+        max_repair_attempts=max_repair_attempts,
+        repair_requires_diff_check=repair_requires_diff_check,
+        repair_requires_build_or_test=repair_requires_build_or_test,
+        repair_stop_on_success=repair_stop_on_success,
+        run_report_enabled=run_report_enabled,
+        run_report_output_dir=run_report_output_dir,
+        run_report_include_events=run_report_include_events,
+        run_report_max_events=run_report_max_events,
+        run_report_max_chars=run_report_max_chars,
+        run_report_required=run_report_required,
+        skills_enabled=skills_enabled,
+        selected_skills=selected_skills,
+        auto_select_skills=auto_select_skills,
+        max_skill_chars=max_skill_chars,
+        max_total_skill_chars=max_total_skill_chars,
+        migration_scheduler_enabled=migration_scheduler_enabled,
+        max_migration_units=max_migration_units,
+        migration_unit_strategy=migration_unit_strategy,
+        migration_unit_prioritize_ui=migration_unit_prioritize_ui,
+        migration_unit_include_tests=migration_unit_include_tests,
+        migration_unit_include_assets=migration_unit_include_assets,
+        migration_plan_persistence_enabled=migration_plan_persistence_enabled,
+        migration_plan_output_dir=migration_plan_output_dir,
+        migration_plan_filename=migration_plan_filename,
+        migration_plan_resume_enabled=migration_plan_resume_enabled,
+        migration_plan_required=migration_plan_required,
+        migration_plan_auto_update_enabled=migration_plan_auto_update_enabled,
+        migration_plan_resume_summary_enabled=migration_plan_resume_summary_enabled,
+        migration_plan_event_log_max_events=migration_plan_event_log_max_events,
+        migration_plan_audit_summary_enabled=migration_plan_audit_summary_enabled,
+        migration_plan_audit_max_events=migration_plan_audit_max_events,
+        migration_plan_auto_complete_on_success=migration_plan_auto_complete_on_success,
+        migration_plan_requested_active_unit_id=migration_plan_requested_active_unit_id,
+        migration_plan_allow_switch_from_blocked=migration_plan_allow_switch_from_blocked,
+        migration_plan_allow_switch_from_completed=migration_plan_allow_switch_from_completed,
+        migration_plan_allow_switch_from_deferred=migration_plan_allow_switch_from_deferred,
+        migration_plan_switch_requires_resume=migration_plan_switch_requires_resume,
+        migration_plan_switch_reason=migration_plan_switch_reason,
+        migration_plan_requested_unit_status_unit_id=migration_plan_requested_unit_status_unit_id,
+        migration_plan_requested_unit_status=migration_plan_requested_unit_status,
+        migration_plan_requested_unit_status_reason=migration_plan_requested_unit_status_reason,
+        migration_plan_allow_manual_complete=migration_plan_allow_manual_complete,
+        migration_plan_allow_manual_block=migration_plan_allow_manual_block,
+        migration_plan_allow_manual_defer=migration_plan_allow_manual_defer,
+        migration_plan_allow_manual_activate=migration_plan_allow_manual_activate,
+        migration_plan_status_update_requires_resume=migration_plan_status_update_requires_resume,
         validation_commands=validation_commands,
         success_checks=success_checks,
         strict_mode=strict_mode,
@@ -908,11 +1624,14 @@ def markdown_summary(resolved: ResolvedConfig) -> str:
         if resolved.validation_commands
         else "[none]"
     )
+    build_command = "configured" if resolved.build_command else "[none]"
+    test_command = "configured" if resolved.test_command else "[none]"
     success_checks = (
         f"{len(resolved.success_checks)} configured"
         if resolved.success_checks
         else "[none]"
     )
+    selected_skills = ", ".join(resolved.selected_skills) if resolved.selected_skills else "[auto/default]"
 
     return "\n".join(
         [
@@ -938,6 +1657,58 @@ def markdown_summary(resolved: ResolvedConfig) -> str:
             f"| Model env mapping | `{model_env}` |",
             f"| Max iterations | `{resolved.max_iterations}` |",
             f"| Max tool result chars | `{resolved.max_tool_result_chars}` |",
+            f"| Max command output chars | `{resolved.max_command_output_chars}` |",
+            f"| build_command | `{build_command}` |",
+            f"| test_command | `{test_command}` |",
+            f"| build_timeout_seconds | `{resolved.build_timeout_seconds}` |",
+            f"| test_timeout_seconds | `{resolved.test_timeout_seconds}` |",
+            f"| repair_loop_enabled | `{str(resolved.repair_loop_enabled).lower()}` |",
+            f"| max_repair_attempts | `{resolved.max_repair_attempts}` |",
+            f"| repair_requires_diff_check | `{str(resolved.repair_requires_diff_check).lower()}` |",
+            f"| repair_requires_build_or_test | `{str(resolved.repair_requires_build_or_test).lower()}` |",
+            f"| repair_stop_on_success | `{str(resolved.repair_stop_on_success).lower()}` |",
+            f"| run_report_enabled | `{str(resolved.run_report_enabled).lower()}` |",
+            f"| run_report_output_dir | `{resolved.run_report_output_dir}` |",
+            f"| run_report_include_events | `{str(resolved.run_report_include_events).lower()}` |",
+            f"| run_report_max_events | `{resolved.run_report_max_events}` |",
+            f"| run_report_max_chars | `{resolved.run_report_max_chars}` |",
+            f"| run_report_required | `{str(resolved.run_report_required).lower()}` |",
+            f"| skills_enabled | `{str(resolved.skills_enabled).lower()}` |",
+            f"| selected_skills | `{selected_skills}` |",
+            f"| auto_select_skills | `{str(resolved.auto_select_skills).lower()}` |",
+            f"| max_skill_chars | `{resolved.max_skill_chars}` |",
+            f"| max_total_skill_chars | `{resolved.max_total_skill_chars}` |",
+            f"| migration_scheduler_enabled | `{str(resolved.migration_scheduler_enabled).lower()}` |",
+            f"| max_migration_units | `{resolved.max_migration_units}` |",
+            f"| migration_unit_strategy | `{resolved.migration_unit_strategy}` |",
+            f"| migration_unit_prioritize_ui | `{str(resolved.migration_unit_prioritize_ui).lower()}` |",
+            f"| migration_unit_include_tests | `{str(resolved.migration_unit_include_tests).lower()}` |",
+            f"| migration_unit_include_assets | `{str(resolved.migration_unit_include_assets).lower()}` |",
+            f"| migration_plan_persistence_enabled | `{str(resolved.migration_plan_persistence_enabled).lower()}` |",
+            f"| migration_plan_output_dir | `{resolved.migration_plan_output_dir}` |",
+            f"| migration_plan_filename | `{resolved.migration_plan_filename}` |",
+            f"| migration_plan_resume_enabled | `{str(resolved.migration_plan_resume_enabled).lower()}` |",
+            f"| migration_plan_required | `{str(resolved.migration_plan_required).lower()}` |",
+            f"| migration_plan_auto_update_enabled | `{str(resolved.migration_plan_auto_update_enabled).lower()}` |",
+            f"| migration_plan_resume_summary_enabled | `{str(resolved.migration_plan_resume_summary_enabled).lower()}` |",
+            f"| migration_plan_event_log_max_events | `{resolved.migration_plan_event_log_max_events}` |",
+            f"| migration_plan_audit_summary_enabled | `{str(resolved.migration_plan_audit_summary_enabled).lower()}` |",
+            f"| migration_plan_audit_max_events | `{resolved.migration_plan_audit_max_events}` |",
+            f"| migration_plan_auto_complete_on_success | `{str(resolved.migration_plan_auto_complete_on_success).lower()}` |",
+            f"| migration_plan_requested_active_unit_id | `{resolved.migration_plan_requested_active_unit_id or '[none]'}` |",
+            f"| migration_plan_allow_switch_from_blocked | `{str(resolved.migration_plan_allow_switch_from_blocked).lower()}` |",
+            f"| migration_plan_allow_switch_from_completed | `{str(resolved.migration_plan_allow_switch_from_completed).lower()}` |",
+            f"| migration_plan_allow_switch_from_deferred | `{str(resolved.migration_plan_allow_switch_from_deferred).lower()}` |",
+            f"| migration_plan_switch_requires_resume | `{str(resolved.migration_plan_switch_requires_resume).lower()}` |",
+            f"| migration_plan_switch_reason | `{resolved.migration_plan_switch_reason or '[none]'}` |",
+            f"| migration_plan_requested_unit_status_unit_id | `{resolved.migration_plan_requested_unit_status_unit_id or '[none]'}` |",
+            f"| migration_plan_requested_unit_status | `{resolved.migration_plan_requested_unit_status or '[none]'}` |",
+            f"| migration_plan_requested_unit_status_reason | `{resolved.migration_plan_requested_unit_status_reason or '[none]'}` |",
+            f"| migration_plan_allow_manual_complete | `{str(resolved.migration_plan_allow_manual_complete).lower()}` |",
+            f"| migration_plan_allow_manual_block | `{str(resolved.migration_plan_allow_manual_block).lower()}` |",
+            f"| migration_plan_allow_manual_defer | `{str(resolved.migration_plan_allow_manual_defer).lower()}` |",
+            f"| migration_plan_allow_manual_activate | `{str(resolved.migration_plan_allow_manual_activate).lower()}` |",
+            f"| migration_plan_status_update_requires_resume | `{str(resolved.migration_plan_status_update_requires_resume).lower()}` |",
             f"| validation_commands | `{validation_commands}` |",
             f"| success_checks | `{success_checks}` |",
             f"| strict_mode | `{str(resolved.strict_mode).lower()}` |",

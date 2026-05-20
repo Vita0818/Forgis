@@ -1,0 +1,201 @@
+{
+  "name": "completed",
+  "final_summary": "Fixture unit is completed and ready for next manual selection.",
+  "repair_report_markdown": "# Fixture Repair Report\n\n- completed fixture keeps output short.\n",
+  "operation_log": [
+    {
+      "tool": "edit_file",
+      "path": "target-output/UserProfile.kt"
+    }
+  ],
+  "runtime_state": {
+    "build_runs": 1,
+    "test_runs": 1,
+    "last_build_status": "success",
+    "last_test_status": "success",
+    "repair_loop_enabled": false,
+    "max_repair_attempts": 2,
+    "repair_attempts_used": 0,
+    "repair_allowed": false,
+    "repair_success": true,
+    "stopped_reason": "success",
+    "repair_event_count": 1,
+    "changed_paths": [
+      "target-output/UserProfile.kt"
+    ],
+    "migration_scheduler_enabled": true,
+    "migration_plan_source": "loaded",
+    "migration_plan_path": "forgis-runtime/reports/FORGIS_MIGRATION_PLAN.json",
+    "migration_plan_load_status": "loaded",
+    "migration_plan_write_status": "written",
+    "plan_update_status": "updated",
+    "active_unit_id": "model-userprofile",
+    "active_unit_status": "completed",
+    "active_unit_reason": "Reviewer verified generated model mapping.",
+    "active_unit_switch": {
+      "status": "skipped",
+      "active_unit_id": "model-userprofile",
+      "message": "No requested active unit id was configured."
+    },
+    "manual_unit_status_update": {
+      "status": "updated",
+      "unit_id": "model-userprofile",
+      "previous_status": "active",
+      "requested_status": "completed",
+      "final_status": "completed",
+      "reason": "Reviewer verified generated model mapping.",
+      "message": "Manual migration unit status update applied."
+    },
+    "resume_summary": {
+      "plan_id": "fixture-plan-completed",
+      "active_unit_id": "model-userprofile",
+      "last_active_unit_status": "completed",
+      "counts": {
+        "completed": 1,
+        "blocked": 0,
+        "pending": 2,
+        "deferred": 0,
+        "active": 0,
+        "total": 3
+      },
+      "last_stopped_reason": "Reviewer verified generated model mapping.",
+      "changed_paths": [
+        "target-output/UserProfile.kt"
+      ],
+      "next_step": "Manually switch to the next pending unit."
+    },
+    "migration_plan_summary": {
+      "plan_id": "fixture-plan-completed",
+      "active_unit_id": "model-userprofile",
+      "completed_count": 1,
+      "blocked_count": 0,
+      "pending_count": 2,
+      "deferred_count": 0,
+      "active_count": 0,
+      "unit_count": 3,
+      "active_unit": {
+        "unit_id": "model-userprofile",
+        "title": "User profile model",
+        "source_paths": [
+          "Models/UserProfile.swift"
+        ],
+        "target_paths": [
+          "target-output/UserProfile.kt"
+        ],
+        "unit_type": "model",
+        "priority": 40,
+        "status": "completed",
+        "reason": "Reviewer verified generated model mapping.",
+        "changed_paths": [
+          "target-output/UserProfile.kt"
+        ],
+        "build_status": "success",
+        "test_status": "success"
+      },
+      "units": [
+        {
+          "unit_id": "ui-homeview-swift",
+          "title": "Home view migration",
+          "source_paths": [
+            "Source/HomeView.swift"
+          ],
+          "target_paths": [
+            "target-output/HomeView.kt"
+          ],
+          "unit_type": "ui",
+          "priority": 100,
+          "status": "pending"
+        },
+        {
+          "unit_id": "asset-icons",
+          "title": "Icon assets",
+          "source_paths": [
+            "Assets/IconSet"
+          ],
+          "target_paths": [
+            "target-output/assets/icons"
+          ],
+          "unit_type": "asset",
+          "priority": 50,
+          "status": "pending"
+        },
+        {
+          "unit_id": "model-userprofile",
+          "title": "User profile model",
+          "source_paths": [
+            "Models/UserProfile.swift"
+          ],
+          "target_paths": [
+            "target-output/UserProfile.kt"
+          ],
+          "unit_type": "model",
+          "priority": 40,
+          "status": "completed",
+          "reason": "Reviewer verified generated model mapping.",
+          "changed_paths": [
+            "target-output/UserProfile.kt"
+          ],
+          "build_status": "success",
+          "test_status": "success"
+        }
+      ]
+    },
+    "plan_events": [
+      {
+        "event_type": "unit_status_update_requested",
+        "unit_id": "model-userprofile",
+        "requested_status": "completed",
+        "reason": "Reviewer verified generated model mapping.",
+        "short_message": "Manual migration unit status update requested.",
+        "order": 1,
+        "timestamp": "2026-05-20T00:00:00Z"
+      },
+      {
+        "event_type": "unit_status_update_succeeded",
+        "unit_id": "model-userprofile",
+        "status_before": "active",
+        "status_after": "completed",
+        "previous_status": "active",
+        "requested_status": "completed",
+        "final_status": "completed",
+        "reason": "Reviewer verified generated model mapping.",
+        "short_message": "Manual migration unit status update applied.",
+        "order": 2,
+        "timestamp": "2026-05-20T00:01:00Z"
+      },
+      {
+        "event_type": "unit_completed",
+        "unit_id": "model-userprofile",
+        "status_before": "active",
+        "status_after": "completed",
+        "reason": "Reviewer verified generated model mapping.",
+        "short_message": "Active unit state is completed.",
+        "order": 3,
+        "timestamp": "2026-05-20T00:02:00Z"
+      }
+    ],
+    "repair_events": [
+      {
+        "event_id": 1,
+        "event_type": "repair_success",
+        "attempt_index": 0,
+        "check_type": "tests",
+        "status": "success",
+        "short_message": "Fixture verification passed.",
+        "affected_paths": [
+          "target-output/UserProfile.kt"
+        ]
+      }
+    ]
+  },
+  "expect": {
+    "report_schema_version": "forgis.run_report.v5.0",
+    "active_unit_id": "model-userprofile",
+    "reason": "Reviewer verified generated model mapping.",
+    "recommended_keywords": [
+      "manually switch",
+      "next pending unit"
+    ],
+    "completed_count": 1
+  }
+}
