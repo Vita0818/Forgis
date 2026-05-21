@@ -23,7 +23,15 @@ sys.path.insert(0, str(AGENT_DIR))
 from build_feedback import summarize_build_failure, summarize_command_result, summarize_test_failure
 from deepseek_agent import build_initial_messages, initial_messages, system_message
 from file_tools import FileToolSandbox, ToolError
-from forgis_config import resolve_config, require_path_inside_subdir
+from forgis_config import (
+    MAX_COMMAND_OUTPUT_CHARS_LIMIT,
+    MAX_ITERATIONS_LIMIT,
+    MAX_RUN_REPORT_EVENTS_LIMIT,
+    MAX_RUN_REPORT_MAX_CHARS_LIMIT,
+    MAX_TOOL_RESULT_CHARS_LIMIT,
+    resolve_config,
+    require_path_inside_subdir,
+)
 from guardrails import changed_read_only_paths, scan_secret_leaks, snapshot_paths, target_scope_violations
 from model_env import describe_model_env, parse_model_env_json, require_model_env_values
 from migration_scheduler import (
@@ -669,6 +677,51 @@ class ForgisConfigTests(unittest.TestCase):
                 self.write_config(target, extra=f"run_report_output_dir: {json.dumps(unsafe)}\n")
                 with self.assertRaisesRegex(ValueError, "run_report_output_dir"):
                     resolve_config(target_root=target, target_repo="owner/target-repo")
+
+    def test_long_run_sizing_values_accept_large_configs_and_reject_invalid_values(self) -> None:
+        user_requested_values = {
+            "max_iterations": 300,
+            "max_tool_result_chars": 200_000,
+            "max_command_output_chars": 80_000,
+            "run_report_max_events": 500,
+            "run_report_max_chars": 1_000_000,
+        }
+        hard_cap_values = {
+            "max_iterations": MAX_ITERATIONS_LIMIT,
+            "max_tool_result_chars": MAX_TOOL_RESULT_CHARS_LIMIT,
+            "max_command_output_chars": MAX_COMMAND_OUTPUT_CHARS_LIMIT,
+            "run_report_max_events": MAX_RUN_REPORT_EVENTS_LIMIT,
+            "run_report_max_chars": MAX_RUN_REPORT_MAX_CHARS_LIMIT,
+        }
+
+        with tempfile.TemporaryDirectory() as dirname:
+            target = Path(dirname)
+            self.write_config(
+                target,
+                extra="\n".join(f"{field}: {value}" for field, value in user_requested_values.items()) + "\n",
+            )
+            requested = resolve_config(target_root=target, target_repo="owner/target-repo")
+            for field, value in user_requested_values.items():
+                self.assertEqual(getattr(requested, field), value)
+
+            self.write_config(
+                target,
+                extra="\n".join(f"{field}: {value}" for field, value in hard_cap_values.items()) + "\n",
+            )
+            capped = resolve_config(target_root=target, target_repo="owner/target-repo")
+            for field, value in hard_cap_values.items():
+                self.assertEqual(getattr(capped, field), value)
+
+            for field, value in hard_cap_values.items():
+                self.write_config(target, extra=f"{field}: {value + 1}\n")
+                with self.assertRaisesRegex(ValueError, field):
+                    resolve_config(target_root=target, target_repo="owner/target-repo")
+
+            for field in hard_cap_values:
+                for invalid in ("0", "-1", "not-an-integer"):
+                    self.write_config(target, extra=f"{field}: {invalid}\n")
+                    with self.assertRaisesRegex(ValueError, field):
+                        resolve_config(target_root=target, target_repo="owner/target-repo")
 
     def test_skill_config_defaults_custom_values_and_safety(self) -> None:
         with tempfile.TemporaryDirectory() as dirname:
@@ -5017,6 +5070,11 @@ class ForgisConfigTests(unittest.TestCase):
             self.assertTrue(truncated["truncated"])
             self.assertLessEqual(len(truncated["stdout"]), 100)
 
+            large_truncated = sandbox.run_command(["echo", "x" * 70_000], max_output_chars=60_000)
+            self.assertTrue(large_truncated["truncated"])
+            self.assertGreater(len(large_truncated["stdout"]), 50_000)
+            self.assertLessEqual(len(large_truncated["stdout"]), 60_000)
+
             with self.assertRaisesRegex(ToolError, "not allowed"):
                 sandbox.run_command(["rm", "-rf", "."])
             with self.assertRaisesRegex(ToolError, "source repository"):
@@ -5583,6 +5641,8 @@ class ForgisConfigTests(unittest.TestCase):
             self.assertIn("migration_plan_auto_complete_on_success: false", text)
             self.assertIn("repair_loop_enabled: false", text)
             self.assertIn("swiftui_to_compose", text)
+            for sizing_value in ("5000", "5000000", "2000000", "10000", "20000000"):
+                self.assertIn(sizing_value, text)
 
             yaml_examples = "\n".join(self.yaml_code_blocks(text))
             for forbidden_yaml in (

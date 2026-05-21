@@ -58,6 +58,7 @@ SAFE_UNITTEST_TOKENS = {
 }
 SAFE_PATH_OPTION_PREVIOUS = {"-s", "-p", "-t"}
 COMMAND_PROFILES = {"basic", "build_test"}
+MAX_COMMAND_OUTPUT_CHARS_LIMIT = 2_000_000
 
 
 def command_basename(value: str) -> str:
@@ -192,7 +193,7 @@ def safe_run_command(
 ) -> dict[str, Any]:
     args = validate_command(command, profile=profile)
     timeout = max(1, min(int(timeout_seconds), 60))
-    output_limit = max(100, min(int(max_output_chars), 50_000))
+    output_limit = max(100, min(int(max_output_chars), MAX_COMMAND_OUTPUT_CHARS_LIMIT))
     started = time.monotonic()
 
     env = {
