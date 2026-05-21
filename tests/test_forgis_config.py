@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -131,6 +132,9 @@ class ForgisConfigTests(unittest.TestCase):
         start = workflow.index(marker)
         next_start = workflow.find("\n      - name: ", start + len(marker))
         return workflow[start:] if next_start == -1 else workflow[start:next_start]
+
+    def yaml_code_blocks(self, text: str) -> list[str]:
+        return re.findall(r"```yaml\n(.*?)\n```", text, flags=re.DOTALL)
 
     def write_config(self, target: Path, extra: str = "", *, task_text: str = "# Mock Task\n\nUse mock files only.") -> None:
         target.mkdir(parents=True, exist_ok=True)
@@ -495,6 +499,24 @@ class ForgisConfigTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(ValueError, "Unsupported"):
                 resolve_config(target_root=target, target_repo="owner/target-repo")
+
+    def test_default_model_uses_deepseek_api_model_id(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            target = Path(dirname)
+            target.mkdir(parents=True, exist_ok=True)
+            (target / "FORGIS_CONFIG.yml").write_text(
+                textwrap.dedent(
+                    """\
+                    source_repo: owner/source-repo
+                    target_branch: forgis/output
+                    """
+                ),
+                encoding="utf-8",
+            )
+            (target / "FORGIS_TASK.md").write_text("# Task\n", encoding="utf-8")
+
+            resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
+            self.assertEqual(resolved.model, "deepseek-v4-pro")
 
     def test_strict_mode_can_be_enabled_from_config(self) -> None:
         with tempfile.TemporaryDirectory() as dirname:
@@ -5511,17 +5533,74 @@ class ForgisConfigTests(unittest.TestCase):
             for marker in banned:
                 self.assertNotIn(marker, text, f"{marker} found in {path}")
 
-    def test_readme_mentions_aider_only_as_v5_non_goal(self) -> None:
+    def test_readme_mentions_aider_only_as_v5_non_goal_or_forbidden_config(self) -> None:
         readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
         readme_zh = (REPO_ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
         release_notes = (REPO_ROOT / "RELEASE_NOTES.md").read_text(encoding="utf-8")
         for text in (readme, readme_zh, release_notes):
             self.assertIn("Aider", text)
             lowered = text.casefold()
-            self.assertNotIn("agent_backend: aider", lowered)
             self.assertNotIn("run_aider", lowered)
             self.assertNotIn("install aider", lowered)
             self.assertNotIn("aider_compat", lowered)
+        for text in (readme, readme_zh):
+            self.assertIn("agent_backend: aider", text.casefold())
+            yaml_examples = "\n".join(self.yaml_code_blocks(text)).casefold()
+            self.assertNotIn("agent_backend: aider", yaml_examples)
+
+    def test_readme_forgis_config_guide_uses_valid_config_examples(self) -> None:
+        readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+        readme_zh = (REPO_ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
+        for text, heading, target_repo_phrase, target_stack_phrase, omit_phrase in (
+            (
+                readme,
+                "FORGIS_CONFIG.yml Configuration Guide",
+                "workflow input or CLI",
+                "describe Android / Kotlin / Jetpack Compose in `FORGIS_TASK.md`",
+                "omit the field",
+            ),
+            (
+                readme_zh,
+                "FORGIS_CONFIG.yml 配置指南",
+                "workflow 输入 `target_repo`",
+                "Android / Kotlin / Jetpack Compose 应写进 `FORGIS_TASK.md`",
+                "直接省略字段",
+            ),
+        ):
+            self.assertIn(heading, text)
+            self.assertIn(target_repo_phrase, text)
+            self.assertIn(target_stack_phrase, text)
+            self.assertIn(omit_phrase, text)
+            self.assertIn("source_ref: main", text)
+            self.assertIn("target_branch: forgis/kikaria-android", text)
+            self.assertIn("target_base_branch: main", text)
+            self.assertIn("target_subdir: Kikaria-Android", text)
+            self.assertIn("execution_mode: tool_loop", text)
+            self.assertIn("model: deepseek-v4-pro", text)
+            self.assertIn("model: deepseek-v4-flash", text)
+            self.assertIn("DEEPSEEK_API_KEY: DEEPSEEK_API_KEY", text)
+            self.assertIn("migration_plan_resume_enabled: false", text)
+            self.assertIn("migration_plan_auto_complete_on_success: false", text)
+            self.assertIn("repair_loop_enabled: false", text)
+            self.assertIn("swiftui_to_compose", text)
+
+            yaml_examples = "\n".join(self.yaml_code_blocks(text))
+            for forbidden_yaml in (
+                "target_repo:",
+                "target_stack:",
+                "source_branch:",
+                "target_repo_url:",
+                "source_repo_url:",
+                "target_path:",
+                "source_path:",
+                "agent_backend: aider",
+                "build_command: []",
+                "test_command: []",
+                "model: deepseek/deepseek-v4-pro",
+            ):
+                self.assertNotIn(forbidden_yaml, yaml_examples)
+            self.assertNotIn("build_command: []", yaml_examples)
+            self.assertNotIn("test_command: []", yaml_examples)
 
     def test_readme_v49_manual_audit_examples_are_present(self) -> None:
         readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
