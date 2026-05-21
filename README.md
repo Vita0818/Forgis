@@ -155,6 +155,18 @@ Common defaults:
 - `migration_plan_auto_complete_on_success: false`
 - `migration_plan_audit_summary_enabled: true`
 
+Long-running migrations can explicitly raise runtime sizing fields while the defaults stay moderate:
+
+| Field | Default | Maximum |
+| --- | ---: | ---: |
+| `max_iterations` | `80` | `5000` |
+| `max_tool_result_chars` | `20000` | `5000000` |
+| `max_command_output_chars` | `8000` | `2000000` |
+| `run_report_max_events` | `100` | `10000` |
+| `run_report_max_chars` | `200000` | `20000000` |
+
+Larger values are useful for long real migrations, but they increase log size, report size, memory use, token exposure to the model, and total run time. They do not change tool permissions, command allowlists, report redaction, or the reports-only artifact boundary.
+
 `target_branch` is the output branch in the target repository, not the base branch. Use a feature branch such as `forgis/kikaria-android` for real runs, and keep `target_base_branch: main` for the PR base.
 
 ### Build and Test Commands

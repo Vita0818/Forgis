@@ -20,10 +20,13 @@ DEFAULT_API_FORMAT = "openai-compatible"
 DEFAULT_TARGET_BASE_BRANCH = "main"
 DEFAULT_RUN_LOG_FILENAME = "FORGIS_LOG.md"
 DEFAULT_MAX_ITERATIONS = 80
+MAX_ITERATIONS_LIMIT = 5_000
 DEFAULT_MAX_TOOL_RESULT_CHARS = 20_000
+MAX_TOOL_RESULT_CHARS_LIMIT = 5_000_000
 DEFAULT_BUILD_TIMEOUT_SECONDS = 60
 DEFAULT_TEST_TIMEOUT_SECONDS = 60
 DEFAULT_MAX_COMMAND_OUTPUT_CHARS = 8_000
+MAX_COMMAND_OUTPUT_CHARS_LIMIT = 2_000_000
 DEFAULT_REPAIR_LOOP_ENABLED = False
 DEFAULT_MAX_REPAIR_ATTEMPTS = 2
 MAX_REPAIR_ATTEMPTS_LIMIT = 5
@@ -34,9 +37,9 @@ DEFAULT_RUN_REPORT_ENABLED = True
 DEFAULT_RUN_REPORT_OUTPUT_DIR = ".forgis/reports"
 DEFAULT_RUN_REPORT_INCLUDE_EVENTS = True
 DEFAULT_RUN_REPORT_MAX_EVENTS = 100
-MAX_RUN_REPORT_EVENTS_LIMIT = 500
+MAX_RUN_REPORT_EVENTS_LIMIT = 10_000
 DEFAULT_RUN_REPORT_MAX_CHARS = 200_000
-MAX_RUN_REPORT_MAX_CHARS_LIMIT = 1_000_000
+MAX_RUN_REPORT_MAX_CHARS_LIMIT = 20_000_000
 DEFAULT_RUN_REPORT_REQUIRED = False
 DEFAULT_SKILLS_ENABLED = True
 DEFAULT_SELECTED_SKILLS: tuple[str, ...] = ()
@@ -1284,7 +1287,7 @@ def resolve_config(
         config,
         "run_report_max_events",
         DEFAULT_RUN_REPORT_MAX_EVENTS,
-        minimum=0,
+        minimum=1,
         maximum=MAX_RUN_REPORT_EVENTS_LIMIT,
     )
     run_report_max_chars = select_bounded_int(
@@ -1483,23 +1486,26 @@ def resolve_config(
             DEFAULT_MAX_ITERATIONS,
             staged_translation.min_total_iterations,
         )
-    max_iterations = select_int(
+    max_iterations = select_bounded_int(
         config,
         "max_iterations",
         default_max_iterations,
         minimum=1,
+        maximum=MAX_ITERATIONS_LIMIT,
     )
-    max_tool_result_chars = select_int(
+    max_tool_result_chars = select_bounded_int(
         config,
         "max_tool_result_chars",
         DEFAULT_MAX_TOOL_RESULT_CHARS,
         minimum=100,
+        maximum=MAX_TOOL_RESULT_CHARS_LIMIT,
     )
-    max_command_output_chars = select_int(
+    max_command_output_chars = select_bounded_int(
         config,
         "max_command_output_chars",
         DEFAULT_MAX_COMMAND_OUTPUT_CHARS,
         minimum=100,
+        maximum=MAX_COMMAND_OUTPUT_CHARS_LIMIT,
     )
     build_timeout_seconds = select_int(
         config,

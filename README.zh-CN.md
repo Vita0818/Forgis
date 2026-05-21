@@ -179,6 +179,18 @@ confirm_real_run: false
 - `migration_plan_auto_complete_on_success: false`
 - `migration_plan_audit_summary_enabled: true`
 
+长时间真实迁移任务可以显式调大运行量字段，但默认值仍保持温和：
+
+| 字段 | 默认值 | 最大允许值 |
+| --- | ---: | ---: |
+| `max_iterations` | `80` | `5000` |
+| `max_tool_result_chars` | `20000` | `5000000` |
+| `max_command_output_chars` | `8000` | `2000000` |
+| `run_report_max_events` | `100` | `10000` |
+| `run_report_max_chars` | `200000` | `20000000` |
+
+较大的值适合长任务，但会增加日志体积、报告体积、内存使用、模型 token 暴露和总运行时间。它们不会改变工具权限、命令 allowlist、report redaction 或 reports-only artifact 边界。
+
 `target_branch` 是目标仓库里的输出分支 / PR head branch，不是 base branch。真实运行建议使用 `forgis/kikaria-android` 这类功能分支，并用 `target_base_branch: main` 指向 PR base。
 
 ### build_command / test_command
