@@ -25,111 +25,115 @@ target_repo: owner/target-repo
 
 Every other setting comes from `FORGIS_CONFIG.yml` at the target repository root.
 
-## Config
+## FORGIS_CONFIG.yml Configuration Guide
 
-`FORGIS_CONFIG.yml` must exist, must be non-empty YAML, and must contain the required values. The configured task file must also exist and be non-empty.
+`FORGIS_CONFIG.yml` must exist at the target repository root, must be non-empty YAML, and must use only supported Forgis fields. Unknown fields fail during the Resolve Forgis config step before the model runs.
+
+Keep three kinds of information separate:
+
+- **GitHub Actions input / CLI, not config:** `target_repo`.
+- **`FORGIS_CONFIG.yml`:** repository refs, output branch/subdir, task file path, DeepSeek connection fields, run switches, skills, reports, repair-loop settings, and migration-plan settings.
+- **`FORGIS_TASK.md`:** product and migration instructions, such as Android / Kotlin / Jetpack Compose, target stack, UI style, information architecture, migration scope, privacy rules, and "write only inside `target_subdir`" business constraints.
+
+Do not put these fields or values in `FORGIS_CONFIG.yml`:
+
+- `target_repo`; pass it through the workflow input or CLI `--target-repo`.
+- `target_stack`; describe Android / Kotlin / Jetpack Compose in `FORGIS_TASK.md`.
+- `source_branch`; use `source_ref`.
+- `target_repo_url`, `source_repo_url`, `target_path`, or `source_path`.
+- `agent_backend: aider`; v5.0 supports only `agent_backend: deepseek`.
+- `build_command: []` or `test_command: []`; omit the field when no command is configured.
+- `model: deepseek/deepseek-v4-pro`; use DeepSeek's accepted model id `deepseek-v4-pro` or `deepseek-v4-flash`.
+
+Minimum runnable config:
 
 ```yaml
-source_repo: owner/source-repo
+source_repo: Vita0818/Kikaria
 source_ref: main
-
-target_subdir: target-output
+target_branch: forgis/kikaria-android
+target_base_branch: main
+target_subdir: Kikaria-Android
 task_prompt_path: FORGIS_TASK.md
 
 agent_backend: deepseek
-model: provider/model-name
+model: deepseek-v4-pro
 api_base: https://api.deepseek.com
 api_format: openai-compatible
-
-target_branch: forgis/output
-target_base_branch: main
-
-run_log_path: target-output/FORGIS_LOG.md
-
-dry_run: true
-run_agent: false
-confirm_real_run: false
-
 model_env:
   DEEPSEEK_API_KEY: DEEPSEEK_API_KEY
 
-max_iterations: 80
-max_tool_result_chars: 20000
 execution_mode: tool_loop
-
-build_command: []
-test_command: []
-build_timeout_seconds: 60
-test_timeout_seconds: 60
-max_command_output_chars: 8000
-
-repair_loop_enabled: false
-max_repair_attempts: 2
-repair_requires_diff_check: true
-repair_requires_build_or_test: true
-repair_stop_on_success: true
+dry_run: false
+run_agent: true
+confirm_real_run: true
 
 run_report_enabled: true
-run_report_output_dir: .forgis/reports
-run_report_include_events: true
-run_report_max_events: 100
-run_report_max_chars: 200000
-run_report_required: false
+```
+
+Recommended first-run config for migrating Kikaria to Android / Kotlin / Jetpack Compose:
+
+```yaml
+source_repo: Vita0818/Kikaria
+source_ref: main
+
+target_branch: forgis/kikaria-android
+target_base_branch: main
+target_subdir: Kikaria-Android
+task_prompt_path: FORGIS_TASK.md
+
+agent_backend: deepseek
+model: deepseek-v4-pro
+api_base: https://api.deepseek.com
+api_format: openai-compatible
+model_env:
+  DEEPSEEK_API_KEY: DEEPSEEK_API_KEY
+
+execution_mode: tool_loop
+dry_run: false
+run_agent: true
+confirm_real_run: true
 
 skills_enabled: true
-selected_skills: []
-auto_select_skills: true
-max_skill_chars: 12000
-max_total_skill_chars: 30000
+auto_select_skills: false
+selected_skills:
+  - migration_general
+  - swiftui_to_compose
+  - ui_style_preservation
+  - build_repair
 
-migration_scheduler_enabled: false
-max_migration_units: 50
-migration_unit_strategy: inventory
-migration_unit_prioritize_ui: true
-migration_unit_include_tests: true
-migration_unit_include_assets: true
+run_report_enabled: true
+
+migration_scheduler_enabled: true
 migration_plan_persistence_enabled: true
-migration_plan_output_dir: .forgis/reports
-migration_plan_filename: FORGIS_MIGRATION_PLAN.json
 migration_plan_resume_enabled: false
-migration_plan_required: false
 migration_plan_auto_update_enabled: true
-migration_plan_resume_summary_enabled: true
-migration_plan_event_log_max_events: 100
-migration_plan_audit_summary_enabled: true
-migration_plan_audit_max_events: 10
 migration_plan_auto_complete_on_success: false
-migration_plan_requested_active_unit_id: ""
-migration_plan_allow_switch_from_blocked: true
-migration_plan_allow_switch_from_completed: false
-migration_plan_allow_switch_from_deferred: true
-migration_plan_switch_requires_resume: true
-migration_plan_switch_reason: ""
-migration_plan_requested_unit_status_unit_id: ""
-migration_plan_requested_unit_status: ""
-migration_plan_requested_unit_status_reason: ""
-migration_plan_allow_manual_complete: true
-migration_plan_allow_manual_block: true
-migration_plan_allow_manual_defer: true
-migration_plan_allow_manual_activate: true
-migration_plan_status_update_requires_resume: true
+migration_plan_audit_summary_enabled: true
 
-validation_commands: []
-success_checks: []
+repair_loop_enabled: false
+```
+
+For a config-only smoke test, keep the same fields but use:
+
+```yaml
+dry_run: true
+run_agent: false
+confirm_real_run: false
 ```
 
 Required values:
 
 - `source_repo`
 - `target_branch`
-- workflow input `target_repo`
+- workflow input or CLI value `target_repo`
 
-Defaults:
+Common defaults:
 
 - `source_ref: main`
 - `target_subdir: target-output`
 - `task_prompt_path: FORGIS_TASK.md`
 - `agent_backend: deepseek`
+- `model: deepseek-v4-pro`
 - `api_base: https://api.deepseek.com`
 - `api_format: openai-compatible`
 - `target_base_branch: main`
@@ -140,60 +144,83 @@ Defaults:
 - `max_iterations: 80`
 - `max_tool_result_chars: 20000`
 - `execution_mode: tool_loop`
-- `build_command: []`
-- `test_command: []`
-- `build_timeout_seconds: 60`
-- `test_timeout_seconds: 60`
-- `max_command_output_chars: 8000`
+- no `build_command` or `test_command` unless explicitly configured
 - `repair_loop_enabled: false`
-- `max_repair_attempts: 2`
-- `repair_requires_diff_check: true`
-- `repair_requires_build_or_test: true`
-- `repair_stop_on_success: true`
 - `run_report_enabled: true`
-- `run_report_output_dir: .forgis/reports`
-- `run_report_include_events: true`
-- `run_report_max_events: 100`
-- `run_report_max_chars: 200000`
-- `run_report_required: false`
 - `skills_enabled: true`
-- `selected_skills: []`
 - `auto_select_skills: true`
-- `max_skill_chars: 12000`
-- `max_total_skill_chars: 30000`
 - `migration_scheduler_enabled: false`
-- `max_migration_units: 50`
-- `migration_unit_strategy: inventory`
-- `migration_unit_prioritize_ui: true`
-- `migration_unit_include_tests: true`
-- `migration_unit_include_assets: true`
 - `migration_plan_persistence_enabled: true`
-- `migration_plan_output_dir: .forgis/reports`
-- `migration_plan_filename: FORGIS_MIGRATION_PLAN.json`
 - `migration_plan_resume_enabled: false`
-- `migration_plan_required: false`
-- `migration_plan_auto_update_enabled: true`
-- `migration_plan_resume_summary_enabled: true`
-- `migration_plan_event_log_max_events: 100`
-- `migration_plan_audit_summary_enabled: true`
-- `migration_plan_audit_max_events: 10`
 - `migration_plan_auto_complete_on_success: false`
-- `migration_plan_requested_active_unit_id: ""`
-- `migration_plan_allow_switch_from_blocked: true`
-- `migration_plan_allow_switch_from_completed: false`
-- `migration_plan_allow_switch_from_deferred: true`
-- `migration_plan_switch_requires_resume: true`
-- `migration_plan_switch_reason: ""`
-- `migration_plan_requested_unit_status_unit_id: ""`
-- `migration_plan_requested_unit_status: ""`
-- `migration_plan_requested_unit_status_reason: ""`
-- `migration_plan_allow_manual_complete: true`
-- `migration_plan_allow_manual_block: true`
-- `migration_plan_allow_manual_defer: true`
-- `migration_plan_allow_manual_activate: true`
-- `migration_plan_status_update_requires_resume: true`
+- `migration_plan_audit_summary_enabled: true`
 
-Only `agent_backend: deepseek` is supported. Other backend values fail fast.
+`target_branch` is the output branch in the target repository, not the base branch. Use a feature branch such as `forgis/kikaria-android` for real runs, and keep `target_base_branch: main` for the PR base.
+
+### Build and Test Commands
+
+`build_command` and `test_command` are optional. If you do not want Forgis to run build/test feedback, omit both fields entirely.
+
+When configured, each command must be a non-empty YAML array of command arguments:
+
+```yaml
+build_command:
+  - python3
+  - -m
+  - py_compile
+  - app.py
+
+test_command:
+  - python3
+  - -m
+  - unittest
+  - discover
+```
+
+Forgis does not accept shell strings, shell expansion, glob patterns, absolute paths, `..`, pipes, redirects, or command chaining in these arrays. The safe command runner rejects shell interpreters, `rm`, `sudo`, `chmod`, `chown`, `curl`, `wget`, `ssh`, `scp`, `git`, and other uncontrolled commands.
+
+For the first Android migration run, omit `build_command` and `test_command`. The Gradle project may not exist yet, and v5.0 does not recommend putting `./gradlew` into these fields unless the command runner explicitly allows it and tests cover that behavior.
+
+### DeepSeek Model and Secrets
+
+Use one of DeepSeek's accepted model ids:
+
+```yaml
+model: deepseek-v4-pro
+```
+
+or:
+
+```yaml
+model: deepseek-v4-flash
+```
+
+Real model calls also need a secret mapping:
+
+```yaml
+model_env:
+  DEEPSEEK_API_KEY: DEEPSEEK_API_KEY
+```
+
+Never put the actual API key value in `FORGIS_CONFIG.yml`.
+
+### FORGIS_TASK.md Example
+
+Put target-stack and product instructions in `FORGIS_TASK.md`, not in config:
+
+```markdown
+# Kikaria Android Migration
+
+Migrate current Kikaria to Android Kotlin Jetpack Compose.
+
+Write generated code only under `Kikaria-Android`.
+
+Preserve information architecture, core flows, visual hierarchy, and interaction intent.
+
+Do not hard-code user names, local paths, secrets, or private data.
+
+First run scope: create the Android/Compose foundation and core screens; leave TODOs for deferred areas.
+```
 
 ## Optional Staged Translation Mode
 

@@ -9,6 +9,7 @@ Forgis v5.0 final freezes the current safe report and migration-plan surfaces:
 Main included capabilities:
 
 - DeepSeek tool loop with safe virtual-path file tools.
+- Clarified `FORGIS_CONFIG.yml` guidance for v5.0: `target_repo` is workflow/CLI input, `source_ref` replaces unsupported `source_branch`, target-stack instructions belong in `FORGIS_TASK.md`, DeepSeek examples use `deepseek-v4-pro` / `deepseek-v4-flash`, and omitted build/test commands are represented by leaving `build_command` / `test_command` unset.
 - Bounded search, diff, edit, command, build, and test feedback tools.
 - Limited repair loop, repair events, Markdown/JSON reports, and GitHub Step Summary.
 - Local dynamic skills, migration units, plan persistence/resume, manual active-unit switch, manual unit status update, and Migration Plan Audit Summary.
