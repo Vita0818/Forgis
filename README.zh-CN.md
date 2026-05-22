@@ -292,6 +292,18 @@ confirm_real_run: true
 
 真实运行会消耗模型 API 额度。`dry_run=false` 但缺少 `confirm_real_run=true` 会直接失败；`run_agent=false` 会跳过 DeepSeek。
 
+## PR 分支冲突处理
+
+Forgis 不会使用无条件 force push。如果配置的 `target_branch` 在 `origin` 上不存在，`create_pr.sh` 会保持原有行为：从 `target_base_branch` 创建本地输出分支，提交 agent output，推送该分支，并以它作为 PR head。
+
+如果 `origin/$target_branch` 已存在，Forgis 不会覆盖旧分支，而是把本次运行结果推送到唯一 fallback branch。GitHub Actions 中 fallback 名称为：
+
+```text
+${target_branch}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}
+```
+
+PR head 始终使用实际推送的分支。日志会打印配置的 target branch、远端分支是否已存在、实际 push branch，以及 PR head branch。
+
 ## DeepSeek tool loop 和实时日志
 
 真实运行时，Forgis 会把任务交给 DeepSeek，并允许它通过工具逐步读取和写入文件。日志会显示：

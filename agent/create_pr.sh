@@ -67,7 +67,25 @@ echo "Preparing target branch: $TARGET_BRANCH"
 git fetch origin "$TARGET_BASE_BRANCH:refs/remotes/origin/$TARGET_BASE_BRANCH"
 BASE_REF="origin/$TARGET_BASE_BRANCH"
 
-git checkout -B "$TARGET_BRANCH"
+REMOTE_TARGET_BRANCH_EXISTS="false"
+if git ls-remote --exit-code --heads origin "$TARGET_BRANCH" >/dev/null 2>&1; then
+  REMOTE_TARGET_BRANCH_EXISTS="true"
+fi
+
+PUSH_BRANCH="$TARGET_BRANCH"
+if [[ "$REMOTE_TARGET_BRANCH_EXISTS" == "true" ]]; then
+  FALLBACK_RUN_ID="${GITHUB_RUN_ID:-$(date +%s)}"
+  FALLBACK_RUN_ATTEMPT="${GITHUB_RUN_ATTEMPT:-1}"
+  PUSH_BRANCH="${TARGET_BRANCH}-run-${FALLBACK_RUN_ID}-${FALLBACK_RUN_ATTEMPT}"
+  echo "Remote target branch exists: origin/$TARGET_BRANCH"
+  echo "Using fallback branch because pushing $TARGET_BRANCH from $TARGET_BASE_BRANCH may be non-fast-forward."
+else
+  echo "Remote target branch does not exist: origin/$TARGET_BRANCH"
+fi
+echo "Actual push branch: $PUSH_BRANCH"
+echo "PR head branch: $PUSH_BRANCH"
+
+git checkout -B "$PUSH_BRANCH" "$BASE_REF"
 
 python3 "$SCRIPT_DIR/guardrails.py" check-target-scope \
   --target "$TARGET_REPO_DIR" \
@@ -98,18 +116,18 @@ if [[ "$CONFIRM_REAL_RUN_LOWER" != "true" ]]; then
   exit 1
 fi
 
-echo "Pushing branch: $TARGET_BRANCH"
-git push -u origin "$TARGET_BRANCH"
+echo "Pushing branch: $PUSH_BRANCH"
+git push -u origin "$PUSH_BRANCH"
 
 echo "Creating pull request..."
 
-if gh pr view "$TARGET_BRANCH" --repo "$TARGET_REPO" >/dev/null 2>&1; then
-  echo "Pull request already exists for branch: $TARGET_BRANCH"
+if gh pr view "$PUSH_BRANCH" --repo "$TARGET_REPO" >/dev/null 2>&1; then
+  echo "Pull request already exists for branch: $PUSH_BRANCH"
 else
   gh pr create \
     --repo "$TARGET_REPO" \
     --base "$TARGET_BASE_BRANCH" \
-    --head "$TARGET_BRANCH" \
+    --head "$PUSH_BRANCH" \
     --title "Forgis task output" \
     --body-file "$RUN_LOG_PATH"
 fi

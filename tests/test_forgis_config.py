@@ -135,6 +135,69 @@ class ForgisConfigTests(unittest.TestCase):
         self.run_cmd(["git", "add", "."], cwd=root)
         self.run_cmd(["git", "commit", "-q", "-m", message], cwd=root)
 
+    def install_fake_create_pr_tools(self, fake_bin: Path) -> None:
+        fake_bin.mkdir(parents=True, exist_ok=True)
+        git_script = fake_bin / "git"
+        git_script.write_text(
+            textwrap.dedent(
+                """\
+                #!/usr/bin/env bash
+                set -euo pipefail
+                printf 'git' >> "$CALLS_FILE"
+                for arg in "$@"; do
+                  printf ' %s' "$arg" >> "$CALLS_FILE"
+                done
+                printf '\\n' >> "$CALLS_FILE"
+
+                case "${1:-}" in
+                  config|fetch|checkout|add|commit|push)
+                    exit 0
+                    ;;
+                  status)
+                    printf ' M target-output/result.txt\\n'
+                    exit 0
+                    ;;
+                  ls-remote)
+                    if [[ "${REMOTE_TARGET_EXISTS:-false}" == "true" ]]; then
+                      exit 0
+                    fi
+                    exit 2
+                    ;;
+                  diff)
+                    exit 1
+                    ;;
+                  *)
+                    exit 0
+                    ;;
+                esac
+                """
+            ),
+            encoding="utf-8",
+        )
+        git_script.chmod(0o755)
+
+        gh_script = fake_bin / "gh"
+        gh_script.write_text(
+            textwrap.dedent(
+                """\
+                #!/usr/bin/env bash
+                set -euo pipefail
+                printf 'gh' >> "$CALLS_FILE"
+                for arg in "$@"; do
+                  printf ' %s' "$arg" >> "$CALLS_FILE"
+                done
+                printf '\\n' >> "$CALLS_FILE"
+
+                if [[ "${1:-}" == "pr" && "${2:-}" == "view" ]]; then
+                  exit 1
+                fi
+                exit 0
+                """
+            ),
+            encoding="utf-8",
+        )
+        gh_script.chmod(0o755)
+
     def workflow_step_block(self, workflow: str, name: str) -> str:
         marker = f"      - name: {name}\n"
         start = workflow.index(marker)
@@ -5563,6 +5626,86 @@ class ForgisConfigTests(unittest.TestCase):
             result = self.run_cmd(["bash", str(AGENT_DIR / "create_pr.sh")], env=env)
             self.assertIn("Skipping git add, commit, push, and pull request creation.", result.stdout)
             self.assertFalse(called.exists())
+
+    def test_create_pr_uses_target_branch_when_remote_branch_is_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            target = root / "target"
+            (target / "target-output").mkdir(parents=True)
+            (target / "target-output/result.txt").write_text("ok\n", encoding="utf-8")
+            (target / "FORGIS_CONFIG.yml").write_text("source_repo: owner/source\n", encoding="utf-8")
+            (target / "FORGIS_TASK.md").write_text("# Task\n", encoding="utf-8")
+            calls = root / "calls.txt"
+            fake_bin = root / "fake-bin"
+            self.install_fake_create_pr_tools(fake_bin)
+
+            env = {
+                **os.environ,
+                "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
+                "CALLS_FILE": str(calls),
+                "REMOTE_TARGET_EXISTS": "false",
+                "TARGET_REPO_DIR": str(target),
+                "TARGET_REPO": "owner/target-repo",
+                "TARGET_BRANCH": "forgis/output",
+                "TARGET_BASE_BRANCH": "main",
+                "TARGET_SUBDIR": "target-output",
+                "DRY_RUN": "false",
+                "CONFIRM_REAL_RUN": "true",
+            }
+
+            result = self.run_cmd(["bash", str(AGENT_DIR / "create_pr.sh")], env=env)
+            calls_text = calls.read_text(encoding="utf-8")
+            self.assertIn("Remote target branch does not exist: origin/forgis/output", result.stdout)
+            self.assertIn("Actual push branch: forgis/output", result.stdout)
+            self.assertIn("PR head branch: forgis/output", result.stdout)
+            self.assertIn("git checkout -B forgis/output origin/main", calls_text)
+            self.assertIn("git push -u origin forgis/output", calls_text)
+            self.assertIn("gh pr create --repo owner/target-repo --base main --head forgis/output", calls_text)
+            self.assertNotIn("--force", calls_text)
+
+    def test_create_pr_uses_fallback_branch_when_remote_branch_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            target = root / "target"
+            (target / "target-output").mkdir(parents=True)
+            (target / "target-output/result.txt").write_text("ok\n", encoding="utf-8")
+            (target / "FORGIS_CONFIG.yml").write_text("source_repo: owner/source\n", encoding="utf-8")
+            (target / "FORGIS_TASK.md").write_text("# Task\n", encoding="utf-8")
+            calls = root / "calls.txt"
+            fake_bin = root / "fake-bin"
+            self.install_fake_create_pr_tools(fake_bin)
+
+            env = {
+                **os.environ,
+                "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
+                "CALLS_FILE": str(calls),
+                "REMOTE_TARGET_EXISTS": "true",
+                "TARGET_REPO_DIR": str(target),
+                "TARGET_REPO": "owner/target-repo",
+                "TARGET_BRANCH": "forgis/output",
+                "TARGET_BASE_BRANCH": "main",
+                "TARGET_SUBDIR": "target-output",
+                "DRY_RUN": "false",
+                "CONFIRM_REAL_RUN": "true",
+                "GITHUB_RUN_ID": "12345",
+                "GITHUB_RUN_ATTEMPT": "2",
+            }
+
+            result = self.run_cmd(["bash", str(AGENT_DIR / "create_pr.sh")], env=env)
+            calls_text = calls.read_text(encoding="utf-8")
+            fallback_branch = "forgis/output-run-12345-2"
+            self.assertIn("Remote target branch exists: origin/forgis/output", result.stdout)
+            self.assertIn("Using fallback branch because pushing forgis/output", result.stdout)
+            self.assertIn(f"Actual push branch: {fallback_branch}", result.stdout)
+            self.assertIn(f"PR head branch: {fallback_branch}", result.stdout)
+            self.assertIn(f"git checkout -B {fallback_branch} origin/main", calls_text)
+            self.assertIn(f"git push -u origin {fallback_branch}", calls_text)
+            self.assertIn(
+                f"gh pr create --repo owner/target-repo --base main --head {fallback_branch}",
+                calls_text,
+            )
+            self.assertNotIn("git push -u origin forgis/output\n", calls_text)
+            self.assertNotIn("--force", calls_text)
 
     def test_no_platform_specific_judgment_in_forgis_body(self) -> None:
         banned = (
