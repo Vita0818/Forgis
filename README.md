@@ -627,6 +627,18 @@ Rules:
 - DeepSeek runs only when effective `run_agent` is true.
 - Push and pull request creation are skipped unless the run is confirmed and not dry.
 
+## Pull Request Branch Collisions
+
+Forgis never uses an unconditional force push. If the configured `target_branch` does not exist on `origin`, `create_pr.sh` keeps the normal behavior: create the local output branch from `target_base_branch`, commit the agent output, push that branch, and open the PR from it.
+
+If `origin/$target_branch` already exists, Forgis pushes the current run to a unique fallback branch instead of overwriting the existing branch. In GitHub Actions the fallback name is:
+
+```text
+${target_branch}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}
+```
+
+The PR head is always the branch that was actually pushed. The log prints the configured target branch, whether the remote branch already existed, the actual push branch, and the PR head branch.
+
 ## Task File
 
 The task file is the source of execution instructions for DeepSeek. Forgis does not rewrite it into a larger strategy prompt and does not preload source repository contents.

@@ -11,6 +11,7 @@ Main included capabilities:
 - DeepSeek tool loop with safe virtual-path file tools.
 - Clarified `FORGIS_CONFIG.yml` guidance for v5.0: `target_repo` is workflow/CLI input, `source_ref` replaces unsupported `source_branch`, target-stack instructions belong in `FORGIS_TASK.md`, DeepSeek examples use `deepseek-v4-pro` / `deepseek-v4-flash`, and omitted build/test commands are represented by leaving `build_command` / `test_command` unset.
 - Long-run sizing fields keep moderate defaults but allow much larger explicit values: `max_iterations` up to `5000`, `max_tool_result_chars` up to `5000000`, `max_command_output_chars` up to `2000000`, `run_report_max_events` up to `10000`, and `run_report_max_chars` up to `20000000`.
+- Safe PR branch collision handling: if `origin/$target_branch` already exists, `create_pr.sh` pushes the current run to `${target_branch}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}` and uses that fallback branch as the PR head instead of force-pushing over the existing branch.
 - Bounded search, diff, edit, command, build, and test feedback tools.
 - Limited repair loop, repair events, Markdown/JSON reports, and GitHub Step Summary.
 - Local dynamic skills, migration units, plan persistence/resume, manual active-unit switch, manual unit status update, and Migration Plan Audit Summary.
