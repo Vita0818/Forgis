@@ -124,10 +124,64 @@ echo "Creating pull request..."
 if gh pr view "$PUSH_BRANCH" --repo "$TARGET_REPO" >/dev/null 2>&1; then
   echo "Pull request already exists for branch: $PUSH_BRANCH"
 else
+  COMMIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || true)"
+  ACTIONS_RUN_URL=""
+  if [[ -n "${GITHUB_SERVER_URL:-}" && -n "${GITHUB_REPOSITORY:-}" && -n "${GITHUB_RUN_ID:-}" ]]; then
+    ACTIONS_RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+  fi
+
+  PR_BODY_TMPDIR="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
+  mkdir -p "$PR_BODY_TMPDIR"
+  PR_BODY_FILE="$(mktemp "$PR_BODY_TMPDIR/forgis-pr-body.XXXXXX.md")"
+  SHORT_PR_BODY_FILE="$(mktemp "$PR_BODY_TMPDIR/forgis-pr-body-short.XXXXXX.md")"
+  PR_CREATE_OUTPUT_FILE="$(mktemp "$PR_BODY_TMPDIR/forgis-pr-create.XXXXXX.log")"
+  trap 'rm -f "${PR_BODY_FILE:-}" "${SHORT_PR_BODY_FILE:-}" "${PR_CREATE_OUTPUT_FILE:-}"' EXIT
+
+  python3 "$SCRIPT_DIR/pr_body.py" \
+    --output "$PR_BODY_FILE" \
+    --target-branch "$TARGET_BRANCH" \
+    --push-branch "$PUSH_BRANCH" \
+    --target-base-branch "$TARGET_BASE_BRANCH" \
+    --target-subdir "$TARGET_SUBDIR" \
+    --commit-sha "$COMMIT_SHA" \
+    --dry-run "$DRY_RUN_NORMALIZED" \
+    --confirm-real-run "$CONFIRM_REAL_RUN" \
+    --remote-target-branch-exists "$REMOTE_TARGET_BRANCH_EXISTS" \
+    --run-url "$ACTIONS_RUN_URL" \
+    --run-log-path "$RUN_LOG_PATH"
+
+  set +e
   gh pr create \
     --repo "$TARGET_REPO" \
     --base "$TARGET_BASE_BRANCH" \
     --head "$PUSH_BRANCH" \
     --title "Forgis task output" \
-    --body-file "$RUN_LOG_PATH"
+    --body-file "$PR_BODY_FILE" >"$PR_CREATE_OUTPUT_FILE" 2>&1
+  PR_CREATE_STATUS=$?
+  set -e
+  cat "$PR_CREATE_OUTPUT_FILE"
+
+  if [[ "$PR_CREATE_STATUS" -ne 0 ]]; then
+    if grep -qiE "body is too long|maximum is 65536|createPullRequest" "$PR_CREATE_OUTPUT_FILE"; then
+      echo "Pull request body was rejected as too long. Retrying with a minimal Forgis body."
+      python3 "$SCRIPT_DIR/pr_body.py" \
+        --mode short \
+        --output "$SHORT_PR_BODY_FILE" \
+        --target-branch "$TARGET_BRANCH" \
+        --push-branch "$PUSH_BRANCH" \
+        --target-base-branch "$TARGET_BASE_BRANCH" \
+        --target-subdir "$TARGET_SUBDIR" \
+        --commit-sha "$COMMIT_SHA" \
+        --run-url "$ACTIONS_RUN_URL"
+
+      gh pr create \
+        --repo "$TARGET_REPO" \
+        --base "$TARGET_BASE_BRANCH" \
+        --head "$PUSH_BRANCH" \
+        --title "Forgis task output" \
+        --body-file "$SHORT_PR_BODY_FILE"
+    else
+      exit "$PR_CREATE_STATUS"
+    fi
+  fi
 fi

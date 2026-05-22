@@ -69,6 +69,7 @@ from repair_report import (
     render_repair_report,
     write_github_step_summary,
 )
+from pr_body import PR_BODY_MAX_CHARS, PR_BODY_SHORT_MAX_CHARS, build_pr_body, build_short_pr_body
 from run_report import (
     RUN_REPORT_JSON_FILENAME,
     RUN_REPORT_MARKDOWN_FILENAME,
@@ -153,6 +154,10 @@ class ForgisConfigTests(unittest.TestCase):
                   config|fetch|checkout|add|commit|push)
                     exit 0
                     ;;
+                  rev-parse)
+                    printf 'abc1234\\n'
+                    exit 0
+                    ;;
                   status)
                     printf ' M target-output/result.txt\\n'
                     exit 0
@@ -190,6 +195,24 @@ class ForgisConfigTests(unittest.TestCase):
 
                 if [[ "${1:-}" == "pr" && "${2:-}" == "view" ]]; then
                   exit 1
+                fi
+                if [[ "${1:-}" == "pr" && "${2:-}" == "create" ]]; then
+                  args=("$@")
+                  body_file=""
+                  for ((index=0; index<${#args[@]}; index++)); do
+                    if [[ "${args[$index]}" == "--body-file" ]]; then
+                      body_file="${args[$((index + 1))]:-}"
+                    fi
+                  done
+                  if [[ -n "$body_file" && -n "${PR_BODY_LENGTHS_FILE:-}" ]]; then
+                    bytes=$(wc -c < "$body_file")
+                    printf '%s\\n' "$bytes" >> "$PR_BODY_LENGTHS_FILE"
+                  fi
+                  if [[ "${GH_FAIL_BODY_TOO_LONG_ONCE:-false}" == "true" && ! -f "${GH_FAIL_MARKER:-}" ]]; then
+                    touch "$GH_FAIL_MARKER"
+                    printf 'pull request create failed: GraphQL: Body is too long (maximum is 65536 characters)\\n' >&2
+                    exit 1
+                  fi
                 fi
                 exit 0
                 """
@@ -5627,15 +5650,58 @@ class ForgisConfigTests(unittest.TestCase):
             self.assertIn("Skipping git add, commit, push, and pull request creation.", result.stdout)
             self.assertFalse(called.exists())
 
+    def test_pr_body_is_bounded_and_points_to_reports_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            log_path = Path(dirname) / "FORGIS_LOG.md"
+            log_path.write_text("final_summary\n" + ("long output\n" * 20_000), encoding="utf-8")
+
+            body = build_pr_body(
+                target_branch="forgis/output",
+                push_branch="forgis/output-run-123-1",
+                target_base_branch="main",
+                target_subdir="target-output",
+                commit_sha="abc1234",
+                dry_run="false",
+                confirm_real_run="true",
+                remote_target_branch_exists="true",
+                run_url="https://github.example/owner/repo/actions/runs/123",
+                run_log_path=str(log_path),
+            )
+            self.assertLessEqual(len(body), PR_BODY_MAX_CHARS)
+            self.assertIn("PR head / pushed branch: `forgis/output-run-123-1`", body)
+            self.assertIn("Target base branch: `main`", body)
+            self.assertIn("Target subdir: `target-output`", body)
+            self.assertIn("Commit: `abc1234`", body)
+            self.assertIn("forgis-reports", body)
+            self.assertIn("FORGIS_RUN_REPORT.md", body)
+            self.assertIn("FORGIS_RUN_REPORT.json", body)
+            self.assertIn("FORGIS_MIGRATION_PLAN.json", body)
+            self.assertIn("Truncated. See forgis-reports artifact for the full report.", body)
+            self.assertNotIn("long output\n" * 1000, body)
+
+            short_body = build_short_pr_body(
+                target_branch="forgis/output",
+                push_branch="forgis/output-run-123-1",
+                target_base_branch="main",
+                target_subdir="target-output",
+                commit_sha="abc1234",
+                run_url="https://github.example/owner/repo/actions/runs/123",
+            )
+            self.assertLessEqual(len(short_body), PR_BODY_SHORT_MAX_CHARS)
+            self.assertIn("forgis-reports", short_body)
+            self.assertNotIn("Short Run Log Excerpt", short_body)
+
     def test_create_pr_uses_target_branch_when_remote_branch_is_absent(self) -> None:
         with tempfile.TemporaryDirectory() as dirname:
             root = Path(dirname)
             target = root / "target"
             (target / "target-output").mkdir(parents=True)
             (target / "target-output/result.txt").write_text("ok\n", encoding="utf-8")
+            (target / "target-output/FORGIS_LOG.md").write_text("x" * 100_000, encoding="utf-8")
             (target / "FORGIS_CONFIG.yml").write_text("source_repo: owner/source\n", encoding="utf-8")
             (target / "FORGIS_TASK.md").write_text("# Task\n", encoding="utf-8")
             calls = root / "calls.txt"
+            body_lengths = root / "body-lengths.txt"
             fake_bin = root / "fake-bin"
             self.install_fake_create_pr_tools(fake_bin)
 
@@ -5643,6 +5709,7 @@ class ForgisConfigTests(unittest.TestCase):
                 **os.environ,
                 "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
                 "CALLS_FILE": str(calls),
+                "PR_BODY_LENGTHS_FILE": str(body_lengths),
                 "REMOTE_TARGET_EXISTS": "false",
                 "TARGET_REPO_DIR": str(target),
                 "TARGET_REPO": "owner/target-repo",
@@ -5661,7 +5728,11 @@ class ForgisConfigTests(unittest.TestCase):
             self.assertIn("git checkout -B forgis/output origin/main", calls_text)
             self.assertIn("git push -u origin forgis/output", calls_text)
             self.assertIn("gh pr create --repo owner/target-repo --base main --head forgis/output", calls_text)
+            self.assertNotIn("--body-file target-output/FORGIS_LOG.md", calls_text)
             self.assertNotIn("--force", calls_text)
+            body_sizes = [int(line.strip()) for line in body_lengths.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(body_sizes), 1)
+            self.assertLessEqual(body_sizes[0], PR_BODY_MAX_CHARS)
 
     def test_create_pr_uses_fallback_branch_when_remote_branch_exists(self) -> None:
         with tempfile.TemporaryDirectory() as dirname:
@@ -5669,6 +5740,7 @@ class ForgisConfigTests(unittest.TestCase):
             target = root / "target"
             (target / "target-output").mkdir(parents=True)
             (target / "target-output/result.txt").write_text("ok\n", encoding="utf-8")
+            (target / "target-output/FORGIS_LOG.md").write_text("summary\n", encoding="utf-8")
             (target / "FORGIS_CONFIG.yml").write_text("source_repo: owner/source\n", encoding="utf-8")
             (target / "FORGIS_TASK.md").write_text("# Task\n", encoding="utf-8")
             calls = root / "calls.txt"
@@ -5704,7 +5776,57 @@ class ForgisConfigTests(unittest.TestCase):
                 f"gh pr create --repo owner/target-repo --base main --head {fallback_branch}",
                 calls_text,
             )
+            self.assertNotIn("--body-file target-output/FORGIS_LOG.md", calls_text)
             self.assertNotIn("git push -u origin forgis/output\n", calls_text)
+            self.assertNotIn("--force", calls_text)
+
+    def test_create_pr_retries_with_short_body_when_github_rejects_body_length(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            target = root / "target"
+            (target / "target-output").mkdir(parents=True)
+            (target / "target-output/result.txt").write_text("ok\n", encoding="utf-8")
+            (target / "target-output/FORGIS_LOG.md").write_text("oversized\n" * 30_000, encoding="utf-8")
+            (target / "FORGIS_CONFIG.yml").write_text("source_repo: owner/source\n", encoding="utf-8")
+            (target / "FORGIS_TASK.md").write_text("# Task\n", encoding="utf-8")
+            calls = root / "calls.txt"
+            body_lengths = root / "body-lengths.txt"
+            fail_marker = root / "failed-once"
+            fake_bin = root / "fake-bin"
+            self.install_fake_create_pr_tools(fake_bin)
+
+            env = {
+                **os.environ,
+                "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
+                "CALLS_FILE": str(calls),
+                "PR_BODY_LENGTHS_FILE": str(body_lengths),
+                "GH_FAIL_BODY_TOO_LONG_ONCE": "true",
+                "GH_FAIL_MARKER": str(fail_marker),
+                "REMOTE_TARGET_EXISTS": "true",
+                "TARGET_REPO_DIR": str(target),
+                "TARGET_REPO": "owner/target-repo",
+                "TARGET_BRANCH": "forgis/output",
+                "TARGET_BASE_BRANCH": "main",
+                "TARGET_SUBDIR": "target-output",
+                "DRY_RUN": "false",
+                "CONFIRM_REAL_RUN": "true",
+                "GITHUB_RUN_ID": "12345",
+                "GITHUB_RUN_ATTEMPT": "2",
+                "GITHUB_SERVER_URL": "https://github.example",
+                "GITHUB_REPOSITORY": "owner/workflow-repo",
+            }
+
+            result = self.run_cmd(["bash", str(AGENT_DIR / "create_pr.sh")], env=env)
+            calls_text = calls.read_text(encoding="utf-8")
+            body_sizes = [int(line.strip()) for line in body_lengths.read_text(encoding="utf-8").splitlines()]
+            self.assertIn("Pull request body was rejected as too long. Retrying with a minimal Forgis body.", result.stdout)
+            self.assertEqual(calls_text.count("gh pr create"), 2)
+            self.assertEqual(len(body_sizes), 2)
+            self.assertLessEqual(body_sizes[0], PR_BODY_MAX_CHARS)
+            self.assertLessEqual(body_sizes[1], PR_BODY_SHORT_MAX_CHARS)
+            fallback_branch = "forgis/output-run-12345-2"
+            self.assertIn(f"gh pr create --repo owner/target-repo --base main --head {fallback_branch}", calls_text)
+            self.assertNotIn("--body-file target-output/FORGIS_LOG.md", calls_text)
             self.assertNotIn("--force", calls_text)
 
     def test_no_platform_specific_judgment_in_forgis_body(self) -> None:
