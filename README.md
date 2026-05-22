@@ -639,6 +639,14 @@ ${target_branch}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}
 
 The PR head is always the branch that was actually pushed. The log prints the configured target branch, whether the remote branch already existed, the actual push branch, and the PR head branch.
 
+## Pull Request Body Size
+
+Forgis keeps PR bodies short and bounded. `create_pr.sh` generates a summary body capped at 30,000 characters, well below GitHub's GraphQL `createPullRequest` limit. The body includes the configured target branch, actual pushed branch, target base branch, target subdir, commit hash when available, run mode, Actions run link when available, and a pointer to the `forgis-reports` artifact.
+
+Full `FORGIS_RUN_REPORT.md`, `FORGIS_RUN_REPORT.json`, `FORGIS_MIGRATION_PLAN.json`, full diffs, tool operation logs, large model summaries, and large build/test output are not copied into the PR body. Download the `forgis-reports` artifact for the complete safe reports.
+
+If GitHub still rejects the body as too long, Forgis automatically retries once with a minimal body capped at 3,000 characters. This retry still uses the actual pushed branch as the PR head.
+
 ## Task File
 
 The task file is the source of execution instructions for DeepSeek. Forgis does not rewrite it into a larger strategy prompt and does not preload source repository contents.

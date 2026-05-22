@@ -304,6 +304,14 @@ ${target_branch}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}
 
 PR head 始终使用实际推送的分支。日志会打印配置的 target branch、远端分支是否已存在、实际 push branch，以及 PR head branch。
 
+## PR body 长度限制
+
+Forgis 会保持 PR body 短小且有硬上限。`create_pr.sh` 生成的摘要 body 最多 30,000 字符，显著低于 GitHub GraphQL `createPullRequest` 限制。body 会包含配置的 target branch、实际 push branch、target base branch、target subdir、可取得的 commit hash、运行模式、可取得的 Actions run 链接，以及 `forgis-reports` artifact 提示。
+
+完整 `FORGIS_RUN_REPORT.md`、`FORGIS_RUN_REPORT.json`、`FORGIS_MIGRATION_PLAN.json`、完整 diff、tool operation log、大段模型 summary 和大段 build/test output 不会写进 PR body。完整安全报告请下载 `forgis-reports` artifact。
+
+如果 GitHub 仍然因为 body 过长拒绝创建 PR，Forgis 会自动用最多 3,000 字符的极短 body 重试一次。重试时仍然使用实际 push branch 作为 PR head。
+
 ## DeepSeek tool loop 和实时日志
 
 真实运行时，Forgis 会把任务交给 DeepSeek，并允许它通过工具逐步读取和写入文件。日志会显示：
