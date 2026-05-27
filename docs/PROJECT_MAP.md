@@ -1,0 +1,118 @@
+# 项目地图
+
+最近自查日期：2026-05-26
+
+## 顶层目录树
+
+```text
+.
+├── .github/workflows/
+│   ├── migrate.yml
+│   └── validate-forgis.yml
+├── agent/
+├── docs/
+│   ├── DS_GUIDE_Swift_Kotlin.md
+│   ├── ARCHITECTURE.md
+│   ├── CURRENT_STATE.md
+│   ├── DO_NOT_BREAK.md
+│   ├── PROJECT_MAP.md
+│   └── TESTING.md
+├── prompts/
+│   └── system_agent_v3.md
+├── reports/
+├── rules/
+│   ├── profiles/
+│   └── stacks/
+├── skills/
+├── tests/
+│   ├── fixtures/reports/
+│   └── test_forgis_config.py
+├── tmp/
+├── README.md
+├── README.zh-CN.md
+├── RELEASE_NOTES.md
+├── requirements.txt
+└── AGENTS.md
+```
+
+`reports/`、`tmp/`、`.DS_Store` 等由 `.gitignore` 排除，不应视为源码入口。`rules/profiles/` 与 `rules/stacks/` 当前没有可见规则文件，含义需要后续确认。
+
+## 关键目录职责
+
+- `agent/`：Forgis 核心 Python 和 shell 运行时。包括配置解析、DeepSeek client、受控文件工具、tool loop、staged translation、guardrails、报告、PR body 和 GitHub Actions 辅助脚本。
+- `.github/workflows/`：CI 与主运行工作流。`migrate.yml` 是真实 Forgis 运行链路，`validate-forgis.yml` 是本仓库脚本验证链路。
+- `skills/`：仓库本地可注入的短技能文档。`agent/skill_loader.py` 只允许从仓库本地 `skills/*.md` 读取安全 slug。
+- `prompts/`：Agent 系统提示词。`agent/deepseek_agent.py` 优先读取 `prompts/system_agent_v3.md`，失败时回落到内置 legacy prompt。
+- `tests/`：单文件 unittest 测试套件和报告 fixture。当前核心行为集中在 `tests/test_forgis_config.py`。
+- `tests/fixtures/reports/`：run report / migration plan audit 的 active、blocked、completed、deferred 状态 fixture。
+- `docs/`：项目说明与迁移参考文档。`DS_GUIDE_Swift_Kotlin.md` 是迁移策略参考，不是运行时自动规则。
+- `reports/`：生成报告目录占位或本地输出位置，当前未发现跟踪文件。
+- `tmp/`：本地烟测和临时输出，按 `.gitignore` 视为生成物。
+- `rules/`：当前仅有空目录结构，未能确认运行时是否使用，标记为需要后续确认。
+
+## 关键文件清单
+
+- `agent/forgis_config.py`：解析 `FORGIS_CONFIG.yml`、支持字段、默认值、路径安全、真实运行 gate、`ResolvedConfig.env()` 输出。
+- `agent/forge.py`：CLI 控制器入口，校验 source/target 目录并输出运行摘要。
+- `agent/resolve_config.py`：GitHub Actions 中解析目标仓库配置并写入 `$GITHUB_ENV` / `$GITHUB_OUTPUT`。
+- `agent/deepseek_agent.py`：系统提示词、工具 schema、DeepSeek OpenAI-compatible chat client。
+- `agent/tool_loop.py`：默认 tool loop 主流程，处理 dry-run/run-agent gate、工具调用、runtime state、repair loop、report 和 migration plan。
+- `agent/staged_translation.py`：`execution_mode=staged_translation` 的控制器，按 overview、per_file、stabilization 和微阶段 gate 推进。
+- `agent/file_tools.py`：虚拟路径沙箱和工具实现。读 `source/`、`target/`、`target_subdir/`，写入仅限 `target_subdir`。
+- `agent/command_runner.py`：保守命令 allowlist。基础命令和 build/test profile 都在这里限制。
+- `agent/build_runner.py` / `agent/build_feedback.py`：配置驱动 build/test 执行与失败摘要、脱敏。
+- `agent/guardrails.py`：read-only snapshot、target scope、source clean、dry-run clean、secret leak 检查。
+- `agent/validate_target_output.py`：目标输出快照、meaningful change 与 `success_checks` 验证。
+- `agent/model_env.py`：`model_env` JSON 解析、环境变量映射与缺失 secret 检查，避免打印真实值。
+- `agent/run_report.py`：`FORGIS_RUN_REPORT.md/json` 渲染与安全写入，schema 为 `forgis.run_report.v5.0`。
+- `agent/migration_units.py`、`agent/migration_scheduler.py`、`agent/migration_state.py`、`agent/migration_plan_store.py`、`agent/plan_audit.py`：迁移单元、计划持久化、状态转换、resume 与 audit summary。
+- `agent/repair_loop.py`、`agent/repair_report.py`、`agent/runtime_controller.py`：修复循环状态机、报告渲染与运行时观测状态。
+- `agent/source_inventory.py`：源仓库扫描、过滤生成物/二进制/secret-like 文件、按优先级排序。
+- `agent/skill_loader.py`：本地技能选择、加载、长度限制和 secret-like 内容检查。
+- `agent/build_target.sh`：GitHub Actions 中运行 `validation_commands` 的脚本，作用域限定在目标仓库 `target_subdir`。
+- `agent/create_pr.sh`：真实运行后的 target branch 准备、提交、push 和 PR 创建。已有远程分支时改用 fallback branch，避免 force push。
+- `agent/pr_body.py`：有界 PR body 生成，超长时可生成 short body。
+- `.github/workflows/migrate.yml`：完整运行工作流。
+- `.github/workflows/validate-forgis.yml`：验证工作流，包含 py_compile、unittest、bash syntax、controller smoke test、`git diff --check`。
+
+## 入口文件
+
+- 手动 GitHub Actions 入口：`.github/workflows/migrate.yml`，输入只有 `target_repo`。
+- 配置解析入口：`python forgis/agent/resolve_config.py --target ... --target-repo ...`。
+- 控制器入口：`python forgis/agent/forge.py --source ... --target ... --target-repo ...`。
+- 默认模型循环入口：`python forgis/agent/tool_loop.py --source ... --target ... --target-repo ...`。
+- 目标输出验证入口：`python forgis/agent/validate_target_output.py snapshot|validate ...`。
+- guardrail 入口：`python forgis/agent/guardrails.py snapshot-readonly|check-readonly|check-target-scope|check-source-clean|check-dry-run-clean|check-secret-leaks ...`。
+- 本地测试入口：`python3 -m unittest tests/test_forgis_config.py`。
+
+## 配置文件
+
+- `requirements.txt`：当前仅声明 `PyYAML>=6.0.2`。
+- `.gitignore`：忽略 Python 缓存、虚拟环境、`.env`、日志、`reports/`、`forgis-runtime/`、`tmp/`、证书和 secrets 目录。
+- 目标仓库运行配置不是本仓库文件，而是目标仓库根目录的 `FORGIS_CONFIG.yml`。`agent/forgis_config.py` 固定该文件名，且拒绝未知字段。
+- 目标仓库任务文件默认 `FORGIS_TASK.md`，可由 `task_prompt_path` 指定，但必须位于目标仓库根内且非空。
+
+## 测试目录
+
+- `tests/test_forgis_config.py`：覆盖配置解析、工作流约束、工具沙箱、staged translation、migration plan、report、guardrails、PR body 等。
+- `tests/fixtures/reports/*.json`：报告 fixture 和 golden-like 样本。
+- `tests/__init__.py`：测试包标记文件。
+
+## 资源目录
+
+- `skills/*.md`：本地技能文本，包括 `migration_general`、`swiftui_to_compose`、`swiftui_to_harmonyos`、`ui_style_preservation`、`build_repair`。
+- `prompts/system_agent_v3.md`：运行时系统提示词。
+- `docs/DS_GUIDE_Swift_Kotlin.md`：SwiftUI 到 Kotlin/Compose 迁移风险文档。
+
+## 生成物和缓存目录
+
+- `tmp/`：本地烟测、临时 manifest、bundle、log 片段。当前工作区存在但被忽略。
+- `reports/`：当前为空目录，`.gitignore` 只保留可能的 `.gitkeep`，但本轮未发现跟踪文件。
+- `forgis-runtime/`：GitHub Actions 运行时目录，被忽略；v5.0 artifact 只上传 `forgis-runtime/reports/**`。
+- Python `__pycache__/`、`.venv/`、`venv/`、`.env`、secret/cert 文件都属于禁止扫描或禁止提交对象。
+
+## 不确定项
+
+- `rules/profiles/` 与 `rules/stacks/` 当前为空，未在已读源码中发现明确加载逻辑。标记为 `需要后续确认`。
+- `reports/` 目录当前为空且被忽略，是否需要保留 `.gitkeep` 未能从当前跟踪文件确认。
+- README 提到的某些历史版本章节用于说明演进，不一定代表当前新增能力；以 `agent/` 源码和 `RELEASE_NOTES.md` v5.0 为准。
