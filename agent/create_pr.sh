@@ -129,6 +129,15 @@ else
   if [[ -n "${GITHUB_SERVER_URL:-}" && -n "${GITHUB_REPOSITORY:-}" && -n "${GITHUB_RUN_ID:-}" ]]; then
     ACTIONS_RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
   fi
+  RUN_REPORT_JSON_PATH="${RUN_REPORT_JSON_PATH:-}"
+  if [[ -z "$RUN_REPORT_JSON_PATH" && -n "${GITHUB_WORKSPACE:-}" && -f "$GITHUB_WORKSPACE/forgis-runtime/deepseek_status.env" ]]; then
+    # shellcheck disable=SC1090
+    source "$GITHUB_WORKSPACE/forgis-runtime/deepseek_status.env"
+    RUN_REPORT_JSON_PATH="${report_json_path:-}"
+  fi
+  if [[ -z "$RUN_REPORT_JSON_PATH" && -n "${GITHUB_WORKSPACE:-}" ]]; then
+    RUN_REPORT_JSON_PATH="$GITHUB_WORKSPACE/forgis-runtime/reports/FORGIS_RUN_REPORT.json"
+  fi
 
   PR_BODY_TMPDIR="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
   mkdir -p "$PR_BODY_TMPDIR"
@@ -148,7 +157,8 @@ else
     --confirm-real-run "$CONFIRM_REAL_RUN" \
     --remote-target-branch-exists "$REMOTE_TARGET_BRANCH_EXISTS" \
     --run-url "$ACTIONS_RUN_URL" \
-    --run-log-path "$RUN_LOG_PATH"
+    --run-log-path "$RUN_LOG_PATH" \
+    --run-report-json-path "$RUN_REPORT_JSON_PATH"
 
   set +e
   gh pr create \
@@ -172,7 +182,8 @@ else
         --target-base-branch "$TARGET_BASE_BRANCH" \
         --target-subdir "$TARGET_SUBDIR" \
         --commit-sha "$COMMIT_SHA" \
-        --run-url "$ACTIONS_RUN_URL"
+        --run-url "$ACTIONS_RUN_URL" \
+        --run-report-json-path "$RUN_REPORT_JSON_PATH"
 
       gh pr create \
         --repo "$TARGET_REPO" \

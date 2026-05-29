@@ -315,6 +315,92 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "inspect_visual_reference",
+            "description": (
+                "Inspect one reference screenshot image through the configured visual provider. "
+                "Use only Forgis virtual image paths; do not send source code, text files, secrets, or config."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Forgis virtual image path under source/, target/, or target_subdir/.",
+                        "pattern": "^(?!/)(?!~)(?![A-Za-z]:[\\\\/])(?!.*(?:^|/)\\.\\.(?:/|$)).+\\.(png|jpg|jpeg|webp)$",
+                    },
+                    "goal": {
+                        "type": "string",
+                        "description": "Short visual inspection goal. Do not include code, secrets, or full file contents.",
+                        "maxLength": 500,
+                    },
+                },
+                "required": ["path", "goal"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "inspect_visual_actual",
+            "description": (
+                "Inspect one actual rendered target screenshot image through the configured visual provider. "
+                "Use only Forgis virtual image paths; do not send source code, text files, secrets, or config."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Forgis virtual image path under target/ or target_subdir/.",
+                        "pattern": "^(?!/)(?!~)(?![A-Za-z]:[\\\\/])(?!.*(?:^|/)\\.\\.(?:/|$)).+\\.(png|jpg|jpeg|webp)$",
+                    },
+                    "goal": {
+                        "type": "string",
+                        "description": "Short visual inspection goal. Do not include code, secrets, or full file contents.",
+                        "maxLength": 500,
+                    },
+                },
+                "required": ["path", "goal"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "compare_visual_screenshots",
+            "description": (
+                "Compare a reference screenshot image and an actual rendered target screenshot image. "
+                "This is visual-only and must not be used for source code, text files, secrets, or config."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reference_path": {
+                        "type": "string",
+                        "description": "Forgis virtual reference image path under source/, target/, or target_subdir/.",
+                        "pattern": "^(?!/)(?!~)(?![A-Za-z]:[\\\\/])(?!.*(?:^|/)\\.\\.(?:/|$)).+\\.(png|jpg|jpeg|webp)$",
+                    },
+                    "actual_path": {
+                        "type": "string",
+                        "description": "Forgis virtual actual screenshot path under target/ or target_subdir/.",
+                        "pattern": "^(?!/)(?!~)(?![A-Za-z]:[\\\\/])(?!.*(?:^|/)\\.\\.(?:/|$)).+\\.(png|jpg|jpeg|webp)$",
+                    },
+                    "goal": {
+                        "type": "string",
+                        "description": "Short visual comparison goal. Do not include code, secrets, or full file contents.",
+                        "maxLength": 500,
+                    },
+                },
+                "required": ["reference_path", "actual_path", "goal"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "run_command",
             "description": "Run a conservative allowlisted command inside target_subdir without shell=True.",
             "parameters": {

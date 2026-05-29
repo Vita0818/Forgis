@@ -32,6 +32,8 @@ jobs:
           test -f agent/file_tools.py
           test -f agent/tool_loop.py
           test -f agent/validate_target_output.py
+          test -f agent/visual_evidence.py
+          test -f agent/qwen_vision.py
           test -f agent/build_target.sh
           test -f agent/create_pr.sh
           test -f .github/workflows/migrate.yml
@@ -49,7 +51,7 @@ jobs:
 
       - name: Check Python syntax
         run: |
-          python -m py_compile agent/forge.py agent/forgis_config.py agent/resolve_config.py agent/guardrails.py agent/write_run_log.py agent/model_env.py agent/deepseek_agent.py agent/file_tools.py agent/tool_loop.py
+          python -m py_compile agent/forge.py agent/forgis_config.py agent/resolve_config.py agent/guardrails.py agent/write_run_log.py agent/model_env.py agent/deepseek_agent.py agent/file_tools.py agent/tool_loop.py agent/visual_evidence.py agent/qwen_vision.py
 
       - name: Run Forgis tests
         run: |

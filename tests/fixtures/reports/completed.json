@@ -189,7 +189,7 @@
     ]
   },
   "expect": {
-    "report_schema_version": "forgis.run_report.v5.0",
+    "report_schema_version": "forgis.run_report.v6.0",
     "active_unit_id": "model-userprofile",
     "reason": "Reviewer verified generated model mapping.",
     "recommended_keywords": [

@@ -88,6 +88,21 @@ DEFAULT_STAGED_MIN_TOTAL_ITERATIONS = 120
 DEFAULT_STAGED_MIN_PROCESSED_UNITS = 3
 DEFAULT_STAGED_MAX_UNITS_PER_RUN = 12
 DEFAULT_STAGED_COMPARE_REPORT_DIR = "FORGIS_COMPARE_REPORTS"
+DEFAULT_VISUAL_VALIDATION_ENABLED = "auto"
+DEFAULT_VISUAL_VALIDATION_PROVIDER = "qwen"
+DEFAULT_MAX_VISUAL_ITERATIONS = 2
+MAX_VISUAL_ITERATIONS_LIMIT = 2
+VISUAL_VALIDATION_ENABLED_VALUES = frozenset({"auto", "true", "false"})
+VISUAL_VALIDATION_PROVIDERS = frozenset({"qwen"})
+VISUAL_VALIDATION_FIELDS = frozenset(
+    {
+        "enabled",
+        "provider",
+        "max_visual_iterations",
+        "require_reference_first",
+        "upload_visual_artifact",
+    }
+)
 
 ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 SKILL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,80}$")
@@ -172,6 +187,7 @@ CONFIG_FIELDS = {
     "strict_mode",
     "execution_mode",
     "run_mode",
+    "visual_validation",
     "staged_translation",
 }
 
@@ -180,6 +196,15 @@ REQUIRED_FIELDS = {
     "target_repo",
     "target_branch",
 }
+
+
+@dataclasses.dataclass(frozen=True)
+class VisualValidationConfig:
+    enabled: str
+    provider: str
+    max_visual_iterations: int
+    require_reference_first: bool
+    upload_visual_artifact: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -325,6 +350,7 @@ class ResolvedConfig:
     success_checks: tuple[dict[str, str], ...]
     strict_mode: bool
     execution_mode: str
+    visual_validation: VisualValidationConfig
     staged_translation: StagedTranslationConfig
 
     def env(self) -> dict[str, str]:
@@ -421,6 +447,15 @@ class ResolvedConfig:
             ),
             "STRICT_MODE": "true" if self.strict_mode else "false",
             "EXECUTION_MODE": self.execution_mode,
+            "FORGIS_VISUAL_VALIDATION_ENABLED": self.visual_validation.enabled,
+            "FORGIS_VISUAL_VALIDATION_PROVIDER": self.visual_validation.provider,
+            "FORGIS_VISUAL_MAX_ITERATIONS": str(self.visual_validation.max_visual_iterations),
+            "FORGIS_VISUAL_REQUIRE_REFERENCE_FIRST": (
+                "true" if self.visual_validation.require_reference_first else "false"
+            ),
+            "FORGIS_VISUAL_UPLOAD_ARTIFACT": (
+                "true" if self.visual_validation.upload_visual_artifact else "false"
+            ),
             "STAGED_TRANSLATION_JSON": json.dumps(
                 dataclasses.asdict(self.staged_translation),
                 ensure_ascii=False,
@@ -650,6 +685,90 @@ def select_nested_bool(config: dict[str, Any], field: str, default: bool, *, pre
     if field not in config or config[field] is None:
         return default
     return parse_bool(config[field], f"{prefix}.{field}")
+
+
+def select_strict_nested_bool(config: dict[str, Any], field: str, default: bool, *, prefix: str) -> bool:
+    if field not in config or config[field] is None:
+        return default
+    value = config[field]
+    if not isinstance(value, bool):
+        raise ValueError(f"{prefix}.{field} must be a boolean value.")
+    return value
+
+
+def select_visual_validation_enabled(config: dict[str, Any]) -> str:
+    if "enabled" not in config or config["enabled"] is None:
+        return DEFAULT_VISUAL_VALIDATION_ENABLED
+    value = config["enabled"]
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    text = non_empty(value)
+    if text is None:
+        raise ValueError("visual_validation.enabled must be one of: auto, true, false.")
+    cleaned = clean_single_line(text, "visual_validation.enabled").casefold()
+    if cleaned not in VISUAL_VALIDATION_ENABLED_VALUES:
+        raise ValueError("visual_validation.enabled must be one of: auto, true, false.")
+    return cleaned
+
+
+def select_visual_validation_provider(config: dict[str, Any]) -> str:
+    if "provider" not in config or config["provider"] is None:
+        return DEFAULT_VISUAL_VALIDATION_PROVIDER
+    text = non_empty(config["provider"])
+    if text is None:
+        raise ValueError("visual_validation.provider must be qwen.")
+    provider = clean_single_line(text, "visual_validation.provider").casefold()
+    if provider not in VISUAL_VALIDATION_PROVIDERS:
+        raise ValueError("visual_validation.provider must be qwen.")
+    return provider
+
+
+def select_visual_validation_iterations(config: dict[str, Any]) -> int:
+    if "max_visual_iterations" not in config or config["max_visual_iterations"] is None:
+        return DEFAULT_MAX_VISUAL_ITERATIONS
+    value = config["max_visual_iterations"]
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("visual_validation.max_visual_iterations must be an integer.")
+    if value < 0 or value > MAX_VISUAL_ITERATIONS_LIMIT:
+        raise ValueError(
+            "visual_validation.max_visual_iterations must be between 0 and "
+            f"{MAX_VISUAL_ITERATIONS_LIMIT}."
+        )
+    return value
+
+
+def select_visual_validation_config(config: dict[str, Any]) -> VisualValidationConfig:
+    visual = config.get("visual_validation")
+    if visual is None:
+        visual = {}
+    if not isinstance(visual, dict):
+        raise ValueError("visual_validation must be a YAML mapping.")
+
+    unsupported = sorted(str(key) for key in visual if key not in VISUAL_VALIDATION_FIELDS)
+    if unsupported:
+        raise ValueError(
+            "visual_validation contains unsupported field(s): "
+            + ", ".join(unsupported)
+            + ". Phase 2 only accepts non-secret control fields."
+        )
+
+    return VisualValidationConfig(
+        enabled=select_visual_validation_enabled(visual),
+        provider=select_visual_validation_provider(visual),
+        max_visual_iterations=select_visual_validation_iterations(visual),
+        require_reference_first=select_strict_nested_bool(
+            visual,
+            "require_reference_first",
+            True,
+            prefix="visual_validation",
+        ),
+        upload_visual_artifact=select_strict_nested_bool(
+            visual,
+            "upload_visual_artifact",
+            False,
+            prefix="visual_validation",
+        ),
+    )
 
 
 def select_globs(config: dict[str, Any], field: str, default: tuple[str, ...], *, prefix: str) -> tuple[str, ...]:
@@ -1477,6 +1596,7 @@ def resolve_config(
         "migration_plan_status_update_requires_resume",
         DEFAULT_MIGRATION_PLAN_STATUS_UPDATE_REQUIRES_RESUME,
     )
+    visual_validation = select_visual_validation_config(config)
     strict_mode = select_config_bool(config, "strict_mode", False)
     execution_mode = select_execution_mode(config)
     staged_translation = select_staged_translation_config(config)
@@ -1611,6 +1731,7 @@ def resolve_config(
         success_checks=success_checks,
         strict_mode=strict_mode,
         execution_mode=execution_mode,
+        visual_validation=visual_validation,
         staged_translation=staged_translation,
     )
 
@@ -1654,6 +1775,11 @@ def markdown_summary(resolved: ResolvedConfig) -> str:
             f"| Target branch | `{resolved.target_branch}` |",
             f"| Agent backend | `{resolved.agent_backend}` |",
             f"| Execution mode | `{resolved.execution_mode}` |",
+            f"| visual_validation.enabled | `{resolved.visual_validation.enabled}` |",
+            f"| visual_validation.provider | `{resolved.visual_validation.provider}` |",
+            f"| visual_validation.max_visual_iterations | `{resolved.visual_validation.max_visual_iterations}` |",
+            f"| visual_validation.require_reference_first | `{str(resolved.visual_validation.require_reference_first).lower()}` |",
+            f"| visual_validation.upload_visual_artifact | `{str(resolved.visual_validation.upload_visual_artifact).lower()}` |",
             f"| Task prompt path | `{resolved.task_prompt_path}` |",
             f"| Target subdir | `{resolved.target_subdir}` |",
             f"| Run log path | `{resolved.run_log_path}` |",

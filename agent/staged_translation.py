@@ -29,9 +29,13 @@ from tool_loop import (
     log_tool_loop_finished,
     message_from_response,
     parse_tool_arguments,
+    read_task_text_for_migration_scheduler,
     safe_log,
     sanitize_log_path,
     tool_call_log_details,
+    visual_provider_env,
+    visual_run_id,
+    visual_runtime_root,
 )
 
 
@@ -1072,6 +1076,7 @@ def run_staged_translation_loop(
     environ: dict[str, str] | None = None,
     client_factory: ClientFactory | None = None,
     skill_selection: SkillSelection | None = None,
+    report_allowed_root: Path | None = None,
 ) -> ToolLoopResult:
     env = dict(os.environ if environ is None else environ)
     all_units = collect_source_inventory(source_root, config.staged_translation.source_inventory)
@@ -1081,6 +1086,7 @@ def run_staged_translation_loop(
     if not active_units:
         raise RuntimeError("staged_translation active source unit queue is empty.")
 
+    visual_env = visual_provider_env(config, env)
     sandbox = FileToolSandbox(
         source_root=source_root,
         target_root=target_root,
@@ -1093,10 +1099,25 @@ def run_staged_translation_loop(
         build_timeout_seconds=config.build_timeout_seconds,
         test_timeout_seconds=config.test_timeout_seconds,
         max_command_output_chars=config.max_command_output_chars,
+        visual_validation_enabled=config.visual_validation.enabled,
+        visual_validation_provider=config.visual_validation.provider,
+        max_visual_iterations=config.visual_validation.max_visual_iterations,
+        visual_evidence_runtime_root=visual_runtime_root(
+            report_allowed_root=report_allowed_root,
+            target_root=target_root,
+            environ=env,
+        ),
+        visual_evidence_run_id=visual_run_id(env),
+        target_repo=config.target_repo,
+        qwen_api_key=visual_env.get("qwen_api_key") or None,
+        qwen_api_base=visual_env.get("qwen_api_base") or None,
+        qwen_model=visual_env.get("qwen_model") or None,
     )
     runtime = RuntimeController()
     effective_skill_selection = skill_selection or build_skill_selection(config, target_root=target_root)
     runtime.attach_skills(effective_skill_selection.as_runtime_state())
+    runtime.attach_visual_config(config.visual_validation)
+    runtime.attach_visual_task_text(read_task_text_for_migration_scheduler(target_root, config))
     state = StagedState()
     initialize_progress_artifacts(
         sandbox=sandbox,
@@ -1180,6 +1201,7 @@ def run_staged_translation_loop(
                         reasons=reasons,
                     )
                     status = "low-impact" if reasons and config.strict_mode else "completed"
+                    status = runtime.visual_effective_status(status)
                     safe_log(
                         "final_summary accepted"
                         + (f" with low-impact warning reasons={len(reasons)}" if reasons else "")
@@ -1352,9 +1374,10 @@ def run_staged_translation_loop(
         tool_call_count=tool_call_count,
         sandbox=sandbox,
     )
+    status = runtime.visual_effective_status("max-iterations")
     return ToolLoopResult(
         executed=True,
-        status="max-iterations",
+        status=status,
         final_summary=final_summary_with_warnings(
             (
                 f"Staged translation stopped after max_iterations={config.max_iterations}; "

@@ -16,11 +16,12 @@ from migration_state import (
 )
 from plan_audit import build_migration_plan_audit_summary
 from repair_report import sanitize_failure_summary, sanitize_markdown, sanitize_path, sanitize_paths, sanitize_text
+from visual_evidence import NO_VISUAL_EVIDENCE, VISUAL_EVIDENCE_STATES
 
 
 RUN_REPORT_MARKDOWN_FILENAME = "FORGIS_RUN_REPORT.md"
 RUN_REPORT_JSON_FILENAME = "FORGIS_RUN_REPORT.json"
-RUN_REPORT_SCHEMA_VERSION = "forgis.run_report.v5.0"
+RUN_REPORT_SCHEMA_VERSION = "forgis.run_report.v6.0"
 DEFAULT_RUN_REPORT_MAX_CHARS = 200_000
 MAX_RUN_REPORT_FILE_CHARS = 1_000_000
 MAX_JSON_TEXT_CHARS = 1_000
@@ -41,6 +42,10 @@ DROP_JSON_KEYS = {
     "reasoning_content",
     "api_key",
     "authorization",
+    "headers",
+    "base64",
+    "image_bytes",
+    "raw_provider_response",
 }
 FORBIDDEN_REPORT_DIR_NAMES = {"source", "source-repo", "target", "target-repo"}
 
@@ -151,6 +156,13 @@ def config_summary(config: ResolvedConfig) -> dict[str, Any]:
         "migration_plan_allow_manual_defer": bool(config.migration_plan_allow_manual_defer),
         "migration_plan_allow_manual_activate": bool(config.migration_plan_allow_manual_activate),
         "migration_plan_status_update_requires_resume": bool(config.migration_plan_status_update_requires_resume),
+        "visual_validation": {
+            "enabled": sanitize_text(config.visual_validation.enabled, limit=20),
+            "provider": sanitize_text(config.visual_validation.provider, limit=80),
+            "max_visual_iterations": int(config.visual_validation.max_visual_iterations),
+            "require_reference_first": bool(config.visual_validation.require_reference_first),
+            "upload_visual_artifact": bool(config.visual_validation.upload_visual_artifact),
+        },
     }
 
 
@@ -183,6 +195,8 @@ def _stopped_reason(runtime_state: dict[str, Any]) -> str:
 
 def final_recommendation(runtime_state: dict[str, Any]) -> str:
     stopped_reason = _stopped_reason(runtime_state)
+    if runtime_state.get("visual_gate_status") == "VISUAL_REPORT_INCOMPLETE":
+        return "Provide valid visual evidence or record an explicit visual blocker before claiming visual validation."
     if runtime_state.get("repair_success") or stopped_reason == "success":
         return "Review the diff and run the full project CI before merging."
     if stopped_reason == "max_attempts_reached":
@@ -291,6 +305,60 @@ def _safe_json_value(value: Any, *, text_limit: int = MAX_JSON_TEXT_CHARS) -> An
     return sanitize_text(value, limit=text_limit)
 
 
+def _safe_visual_list(value: Any, *, limit: int = 40) -> list[str]:
+    raw_values = value if isinstance(value, (list, tuple, set)) else []
+    output: list[str] = []
+    seen: set[str] = set()
+    for item in raw_values:
+        clean = _safe_runtime_path_value(item, limit=220)
+        if not clean or clean in seen:
+            continue
+        seen.add(clean)
+        output.append(clean)
+        if len(output) >= limit:
+            break
+    return output
+
+
+def visual_validation_summary(config: ResolvedConfig, runtime_state: dict[str, Any]) -> dict[str, Any]:
+    state = sanitize_text(runtime_state.get("valid_visual_evidence") or NO_VISUAL_EVIDENCE, limit=80)
+    if state not in VISUAL_EVIDENCE_STATES:
+        state = NO_VISUAL_EVIDENCE
+    tools = _safe_name_list(runtime_state.get("visual_tools_called"))
+    blocker = sanitize_text(runtime_state.get("actual_screenshot_blocker") or "", limit=120)
+    limitations = sanitize_text(runtime_state.get("visual_validation_limitations") or "", limit=1000)
+    if state == "REFERENCE_ONLY" and "not full rendered visual validation" not in limitations:
+        limitations = (
+            limitations + "; reference-only; not full rendered visual validation."
+            if limitations
+            else "reference-only; not full rendered visual validation."
+        )
+    if blocker and "provider" not in limitations.casefold():
+        limitations = (limitations + "; " if limitations else "") + "Provider or screenshot path blocker is recorded."
+    required = bool(runtime_state.get("visual_required"))
+    if config.visual_validation.enabled == "true":
+        required = True
+    if config.visual_validation.enabled == "false":
+        required = False
+    return {
+        "required": required,
+        "provider": sanitize_text(runtime_state.get("visual_provider") or config.visual_validation.provider, limit=80) or "qwen",
+        "called": bool(tools),
+        "valid_visual_evidence": state,
+        "compare_screenshots_completed": bool(runtime_state.get("compare_screenshots_completed")),
+        "reference_screenshots_used": _safe_visual_list(runtime_state.get("reference_screenshots_used")),
+        "actual_screenshots": _safe_visual_list(runtime_state.get("actual_screenshots")),
+        "vision_tools_called": tools,
+        "vision_result_summary": sanitize_text(runtime_state.get("vision_result_summary") or "", limit=1000),
+        "actual_screenshot_blocker": blocker,
+        "visual_validation_limitations": limitations,
+        "fixes_from_qwen_result": sanitize_text(runtime_state.get("fixes_from_qwen_result") or "", limit=1000),
+        "remaining_ui_differences": sanitize_text(runtime_state.get("remaining_ui_differences") or "", limit=1000),
+        "gate_status": sanitize_text(runtime_state.get("visual_gate_status") or "not_required", limit=80),
+        "required_reason": sanitize_text(runtime_state.get("visual_validation_required_reason") or "", limit=240),
+    }
+
+
 def render_run_report_json(
     *,
     config: ResolvedConfig,
@@ -351,6 +419,7 @@ def render_run_report_json(
         max_events=config.migration_plan_audit_max_events,
         enabled=config.migration_plan_audit_summary_enabled,
     )
+    visual_validation = visual_validation_summary(config, runtime_state)
     data: dict[str, Any] = {
         "schema_version": RUN_REPORT_SCHEMA_VERSION,
         "metadata": _safe_json_value(metadata or {}),
@@ -403,6 +472,7 @@ def render_run_report_json(
             "last_test_status": sanitize_text(runtime_state.get("last_test_status") or "unknown", limit=80),
             "last_failure_summary": last_failure,
         },
+        "visual_validation": visual_validation,
         "repair_loop": {
             "enabled": bool(runtime_state.get("repair_loop_enabled")),
             "max_repair_attempts": int(runtime_state.get("max_repair_attempts") or 0),
@@ -515,6 +585,7 @@ def render_run_report_markdown(
         max_events=config.migration_plan_audit_max_events,
         enabled=config.migration_plan_audit_summary_enabled,
     )
+    visual_validation = visual_validation_summary(config, runtime_state)
 
     lines: list[str] = [
         "# Forgis Run Report",
@@ -557,6 +628,8 @@ def render_run_report_markdown(
                 ("migration_plan_resume_enabled", str(config.migration_plan_resume_enabled).lower()),
                 ("migration_plan_audit_summary_enabled", str(config.migration_plan_audit_summary_enabled).lower()),
                 ("migration_plan_audit_max_events", config.migration_plan_audit_max_events),
+                ("visual_validation_enabled", config.visual_validation.enabled),
+                ("visual_validation_provider", config.visual_validation.provider),
             ]
         ),
         "",
@@ -757,6 +830,27 @@ def render_run_report_markdown(
             ]
         ),
         "",
+        "## Visual Validation",
+        "",
+        *_markdown_table(
+            [
+                ("required", str(bool(visual_validation.get("required"))).lower()),
+                ("provider", visual_validation.get("provider") or "qwen"),
+                ("called", str(bool(visual_validation.get("called"))).lower()),
+                ("valid_visual_evidence", visual_validation.get("valid_visual_evidence") or "NO"),
+                ("compare_screenshots_completed", str(bool(visual_validation.get("compare_screenshots_completed"))).lower()),
+                ("vision_tools_called", ", ".join(visual_validation.get("vision_tools_called") or []) or "none"),
+                (
+                    "reference_screenshots_used",
+                    ", ".join(visual_validation.get("reference_screenshots_used") or []) or "none",
+                ),
+                ("actual_screenshots", ", ".join(visual_validation.get("actual_screenshots") or []) or "none"),
+                ("actual_screenshot_blocker", visual_validation.get("actual_screenshot_blocker") or "none"),
+                ("visual_validation_limitations", visual_validation.get("visual_validation_limitations") or "none"),
+                ("gate_status", visual_validation.get("gate_status") or "not_required"),
+            ]
+        ),
+        "",
         "## Repair",
         "",
         *_markdown_table(
@@ -855,6 +949,7 @@ def _json_text_limited(data: dict[str, Any], *, max_chars: int) -> str:
         "truncation_note": f"FORGIS_RUN_REPORT.json exceeded {max_chars} characters.",
         "tool_loop": limited.get("tool_loop", {}),
         "repair_loop": limited.get("repair_loop", {}),
+        "visual_validation": limited.get("visual_validation", {}),
         "migration_plan_audit_summary": limited.get("migration_plan_audit_summary", {}),
         "stopped_reason": limited.get("stopped_reason", "unknown"),
         "final_recommendation": limited.get("final_recommendation", ""),
