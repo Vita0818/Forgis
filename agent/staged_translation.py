@@ -1101,6 +1101,10 @@ def run_staged_translation_loop(
         max_command_output_chars=config.max_command_output_chars,
         visual_validation_enabled=config.visual_validation.enabled,
         visual_validation_provider=config.visual_validation.provider,
+        visual_validation_mode=config.visual_validation.mode,
+        reference_screenshot_dirs=config.visual_validation.reference_screenshot_dirs,
+        actual_screenshot_dirs=config.visual_validation.actual_screenshot_dirs,
+        require_actual_for_full_validation=config.visual_validation.require_actual_for_full_validation,
         max_visual_iterations=config.visual_validation.max_visual_iterations,
         visual_evidence_runtime_root=visual_runtime_root(
             report_allowed_root=report_allowed_root,

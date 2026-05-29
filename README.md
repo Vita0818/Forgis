@@ -44,7 +44,7 @@ Do not put these fields or values in `FORGIS_CONFIG.yml`:
 - `agent_backend: aider`; Forgis currently supports only `agent_backend: deepseek`.
 - `build_command: []` or `test_command: []`; omit the field when no command is configured.
 - `model: deepseek/deepseek-v4-pro`; use DeepSeek's accepted model id `deepseek-v4-pro` or `deepseek-v4-flash`.
-- Qwen API keys, tokens, image paths, evidence roots, or screenshot paths in `FORGIS_CONFIG.yml`. v6.0 accepts only the non-secret `visual_validation` control block documented below; Qwen credentials/base/model may be supplied only through explicit runtime environment variables and are never written to reports.
+- Qwen API keys, tokens, evidence roots, screenshot file paths, or secret local paths in `FORGIS_CONFIG.yml`. v6.0 accepts only the non-secret `visual_validation` control block documented below; reference/actual screenshot directories must be target-repo-relative read-only inputs. Qwen credentials/base/model may be supplied only through explicit runtime environment variables and are never written to reports.
 
 Minimum runnable config:
 
@@ -120,8 +120,13 @@ Optional Qwen Visual Evidence Mode control block for v6.0:
 visual_validation:
   enabled: auto
   provider: qwen
+  mode: reference_guidance
+  reference_screenshot_dirs:
+    - forgis-reference-screenshots
+  actual_screenshot_dirs: []
   max_visual_iterations: 2
   require_reference_first: true
+  require_actual_for_full_validation: false
   upload_visual_artifact: false
 ```
 
@@ -168,8 +173,12 @@ Common defaults:
 - `migration_plan_audit_summary_enabled: true`
 - `visual_validation.enabled: auto`
 - `visual_validation.provider: qwen`
+- `visual_validation.mode: reference_guidance`
+- `visual_validation.reference_screenshot_dirs: []`
+- `visual_validation.actual_screenshot_dirs: []`
 - `visual_validation.max_visual_iterations: 2`
 - `visual_validation.require_reference_first: true`
+- `visual_validation.require_actual_for_full_validation: false`
 - `visual_validation.upload_visual_artifact: false`
 
 Long-running migrations can explicitly raise runtime sizing fields while the defaults stay moderate:
@@ -233,13 +242,15 @@ model_env:
 
 Never put the actual API key value in `FORGIS_CONFIG.yml`.
 
-### Qwen Visual Evidence Mode (v6.0 closed loop)
+### Qwen Visual Evidence Mode (v6.0 reference guidance)
 
-Forgis v6.0 connects the Qwen Visual Evidence Mode closed loop: `docs/QWEN_VISUAL_MODE.md`, the local skill `skills/qwen_visual_mode.md`, strict parsing for the optional `visual_validation` config block, `agent/visual_evidence.py` for evidence paths/state, `agent/qwen_vision.py` as a mockable provider adapter with safe real HTTP transport, three visual tools (`inspect_visual_reference`, `inspect_visual_actual`, `compare_visual_screenshots`), sandbox dispatch, runtime visual state, run report / PR body visual summaries, and a gate that marks incomplete visual evidence instead of claiming validation. The run report schema is now `forgis.run_report.v6.0` because `visual_validation` is a stable top-level report block.
+Forgis v6.0 connects Qwen Visual Evidence Mode as a reference-guided migration loop; the full contract lives in `docs/QWEN_VISUAL_MODE.md`. The user places source-app reference screenshots in the target repository and declares the directories with `visual_validation.reference_screenshot_dirs`. The main Agent can call `list_visual_references`, then `inspect_visual_reference`, and use Qwen's visual guidance for layout, hierarchy, color, typography, spacing, radius, component relationships, and product feel while DeepSeek/Forgis still performs code edits, builds, tests, and reporting. The run report schema remains `forgis.run_report.v6.0` because `visual_validation` is a stable top-level report block.
 
-Qwen is a visual understanding provider, not a code migration agent. The main agent remains responsible for reading source, editing code, builds, tests, and the final report. The visual mode contract is reference-first: reference-only inspection is allowed, but it is not full rendered visual validation. Never send source code, secrets, tokens, `.env`, certificates, private keys, provisioning profiles, or private local configuration to Qwen. Unit tests mock the provider and do not access the network; real Qwen HTTP calls occur only when `QWEN_API_KEY` is explicitly present, with optional `QWEN_API_BASE` and `QWEN_VISION_MODEL`. Forgis still does not implement automatic screenshot capture, visual artifact upload, multi-provider support, or a UI dashboard; those are Phase 8+ concerns.
+The implementation uses `agent/visual_evidence.py` for evidence state/path safety and `agent/qwen_vision.py` for the mockable provider adapter. Automatic screenshot acquisition remains a Phase 8+ concern.
 
-`visual_validation.enabled=auto` is deterministic and conservative: it becomes required when `qwen_visual_mode` is selected, when task text contains strong visual/UI/screenshot keywords, or after any visual tool is called. Pure code, backend, config, build, or unit-test-only tasks do not become visually gated unless one of those signals appears.
+Qwen is a visual understanding provider, not a code migration agent. Qwen reads only approved screenshot images through sandboxed virtual paths; it must not read source code, modify files, run commands, or receive secrets, tokens, `.env`, certificates, private keys, provisioning profiles, raw image bytes/base64 in reports, or private local configuration. `actual_screenshot_dirs` and `compare_visual_screenshots` are optional enhancements when the user already has rendered target screenshots. Reference-only guidance is valid migration guidance, but it is not full rendered visual validation. Unit tests mock the provider and do not access the network; real Qwen HTTP calls occur only when `QWEN_API_KEY` is explicitly present, with optional `QWEN_API_BASE` and `QWEN_VISION_MODEL`. Forgis still does not implement automatic simulator/device/window screenshots, visual artifact upload, multi-provider support, arbitrary shell, or a UI dashboard.
+
+`visual_validation.enabled=auto` is deterministic and conservative: it becomes required when `qwen_visual_mode` is selected, after any visual tool is called, or when `reference_screenshot_dirs` are configured and task text contains strong visual/UI/screenshot keywords. Pure code, backend, config, build, or unit-test-only tasks do not become visually gated unless one of those signals appears.
 
 ### FORGIS_TASK.md Example
 

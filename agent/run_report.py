@@ -159,8 +159,12 @@ def config_summary(config: ResolvedConfig) -> dict[str, Any]:
         "visual_validation": {
             "enabled": sanitize_text(config.visual_validation.enabled, limit=20),
             "provider": sanitize_text(config.visual_validation.provider, limit=80),
+            "mode": sanitize_text(config.visual_validation.mode, limit=80),
+            "reference_screenshot_dirs": sanitize_paths(config.visual_validation.reference_screenshot_dirs),
+            "actual_screenshot_dirs": sanitize_paths(config.visual_validation.actual_screenshot_dirs),
             "max_visual_iterations": int(config.visual_validation.max_visual_iterations),
             "require_reference_first": bool(config.visual_validation.require_reference_first),
+            "require_actual_for_full_validation": bool(config.visual_validation.require_actual_for_full_validation),
             "upload_visual_artifact": bool(config.visual_validation.upload_visual_artifact),
         },
     }
@@ -327,11 +331,22 @@ def visual_validation_summary(config: ResolvedConfig, runtime_state: dict[str, A
     tools = _safe_name_list(runtime_state.get("visual_tools_called"))
     blocker = sanitize_text(runtime_state.get("actual_screenshot_blocker") or "", limit=120)
     limitations = sanitize_text(runtime_state.get("visual_validation_limitations") or "", limit=1000)
+    mode = sanitize_text(runtime_state.get("visual_mode") or config.visual_validation.mode, limit=80)
+    if mode not in {"reference_guidance", "compare"}:
+        mode = "reference_guidance"
+    guidance_completed = bool(runtime_state.get("guidance_completed"))
+    full_rendered_validation = bool(runtime_state.get("full_rendered_validation"))
     if state == "REFERENCE_ONLY" and "not full rendered visual validation" not in limitations:
         limitations = (
             limitations + "; reference-only; not full rendered visual validation."
             if limitations
             else "reference-only; not full rendered visual validation."
+        )
+    if guidance_completed and not full_rendered_validation and "reference-guided migration" not in limitations:
+        limitations = (
+            limitations + "; reference-guided migration; not full rendered visual validation."
+            if limitations
+            else "reference-guided migration; not full rendered visual validation."
         )
     if blocker and "provider" not in limitations.casefold():
         limitations = (limitations + "; " if limitations else "") + "Provider or screenshot path blocker is recorded."
@@ -341,11 +356,21 @@ def visual_validation_summary(config: ResolvedConfig, runtime_state: dict[str, A
     if config.visual_validation.enabled == "false":
         required = False
     return {
+        "mode": mode,
         "required": required,
         "provider": sanitize_text(runtime_state.get("visual_provider") or config.visual_validation.provider, limit=80) or "qwen",
         "called": bool(tools),
+        "reference_screenshot_dirs": _safe_visual_list(
+            runtime_state.get("reference_screenshot_dirs") or config.visual_validation.reference_screenshot_dirs,
+        ),
+        "reference_screenshots_found": _safe_visual_list(runtime_state.get("reference_screenshots_found")),
         "valid_visual_evidence": state,
+        "guidance_completed": guidance_completed,
         "compare_screenshots_completed": bool(runtime_state.get("compare_screenshots_completed")),
+        "full_rendered_validation": full_rendered_validation,
+        "actual_screenshot_dirs": _safe_visual_list(
+            runtime_state.get("actual_screenshot_dirs") or config.visual_validation.actual_screenshot_dirs,
+        ),
         "reference_screenshots_used": _safe_visual_list(runtime_state.get("reference_screenshots_used")),
         "actual_screenshots": _safe_visual_list(runtime_state.get("actual_screenshots")),
         "vision_tools_called": tools,
@@ -832,17 +857,46 @@ def render_run_report_markdown(
         "",
         "## Visual Validation",
         "",
+        *(
+            ["Reference-guided visual migration completed.", ""]
+            if visual_validation.get("guidance_completed")
+            else []
+        ),
+        *(
+            [
+                "Full rendered visual validation was not performed because no actual screenshots were provided.",
+                "",
+            ]
+            if visual_validation.get("guidance_completed") and not visual_validation.get("full_rendered_validation")
+            and not visual_validation.get("actual_screenshots")
+            else []
+        ),
         *_markdown_table(
             [
+                ("mode", visual_validation.get("mode") or "reference_guidance"),
                 ("required", str(bool(visual_validation.get("required"))).lower()),
                 ("provider", visual_validation.get("provider") or "qwen"),
                 ("called", str(bool(visual_validation.get("called"))).lower()),
+                (
+                    "reference_screenshot_dirs",
+                    ", ".join(visual_validation.get("reference_screenshot_dirs") or []) or "none",
+                ),
+                (
+                    "reference_screenshots_found",
+                    ", ".join(visual_validation.get("reference_screenshots_found") or []) or "none",
+                ),
                 ("valid_visual_evidence", visual_validation.get("valid_visual_evidence") or "NO"),
+                ("guidance_completed", str(bool(visual_validation.get("guidance_completed"))).lower()),
                 ("compare_screenshots_completed", str(bool(visual_validation.get("compare_screenshots_completed"))).lower()),
+                ("full_rendered_validation", str(bool(visual_validation.get("full_rendered_validation"))).lower()),
                 ("vision_tools_called", ", ".join(visual_validation.get("vision_tools_called") or []) or "none"),
                 (
                     "reference_screenshots_used",
                     ", ".join(visual_validation.get("reference_screenshots_used") or []) or "none",
+                ),
+                (
+                    "actual_screenshot_dirs",
+                    ", ".join(visual_validation.get("actual_screenshot_dirs") or []) or "none",
                 ),
                 ("actual_screenshots", ", ".join(visual_validation.get("actual_screenshots") or []) or "none"),
                 ("actual_screenshot_blocker", visual_validation.get("actual_screenshot_blocker") or "none"),

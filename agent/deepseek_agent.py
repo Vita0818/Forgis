@@ -315,9 +315,33 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "list_visual_references",
+            "description": (
+                "List configured reference screenshot images for reference-guided visual migration. "
+                "This is visual-only: it returns Forgis virtual image paths and never returns source code, "
+                "text files, secrets, raw image bytes, or base64."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Maximum reference screenshot paths to return.",
+                        "minimum": 1,
+                        "maximum": 200,
+                    }
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "inspect_visual_reference",
             "description": (
-                "Inspect one reference screenshot image through the configured visual provider. "
+                "Inspect one reference screenshot image through the configured visual provider for visual guidance. "
                 "Use only Forgis virtual image paths; do not send source code, text files, secrets, or config."
             ),
             "parameters": {
