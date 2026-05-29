@@ -162,7 +162,7 @@
     "repair_events": []
   },
   "expect": {
-    "report_schema_version": "forgis.run_report.v5.0",
+    "report_schema_version": "forgis.run_report.v6.0",
     "active_unit_id": "asset-icons",
     "reason": "Icon export package is not ready for migration.",
     "recommended_keywords": [

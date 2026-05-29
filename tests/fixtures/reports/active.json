@@ -199,7 +199,7 @@
     ]
   },
   "expect": {
-    "report_schema_version": "forgis.run_report.v5.0",
+    "report_schema_version": "forgis.run_report.v6.0",
     "active_unit_id": "ui-homeview-swift",
     "recommended_keywords": [
       "current active unit",

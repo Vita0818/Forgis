@@ -1,6 +1,6 @@
 # 项目地图
 
-最近自查日期：2026-05-26
+最近自查日期：2026-05-29
 
 ## 顶层目录树
 
@@ -10,12 +10,15 @@
 │   ├── migrate.yml
 │   └── validate-forgis.yml
 ├── agent/
+│   ├── visual_evidence.py
+│   └── qwen_vision.py
 ├── docs/
 │   ├── DS_GUIDE_Swift_Kotlin.md
 │   ├── ARCHITECTURE.md
 │   ├── CURRENT_STATE.md
 │   ├── DO_NOT_BREAK.md
 │   ├── PROJECT_MAP.md
+│   ├── QWEN_VISUAL_MODE.md
 │   └── TESTING.md
 ├── prompts/
 │   └── system_agent_v3.md
@@ -64,14 +67,18 @@
 - `agent/guardrails.py`：read-only snapshot、target scope、source clean、dry-run clean、secret leak 检查。
 - `agent/validate_target_output.py`：目标输出快照、meaningful change 与 `success_checks` 验证。
 - `agent/model_env.py`：`model_env` JSON 解析、环境变量映射与缺失 secret 检查，避免打印真实值。
-- `agent/run_report.py`：`FORGIS_RUN_REPORT.md/json` 渲染与安全写入，schema 为 `forgis.run_report.v5.0`。
+- `agent/visual_evidence.py`：v6.0 Phase 3 视觉证据目录/状态 helper，负责 runtime 目录结构、状态枚举、阻塞原因、图片路径校验和可序列化摘要。不调用 Qwen，不读源码，不写业务文件。
+- `agent/qwen_vision.py`：v6.0 Qwen provider adapter。缺少 API key 时安全 blocker；显式 `QWEN_API_KEY` 下可用标准库 HTTP transport；测试通过 mock `_post_qwen_vision_payload` 或 HTTP 层，返回有界脱敏 `QwenVisionResult`。
+- `agent/run_report.py`：`FORGIS_RUN_REPORT.md/json` 渲染与安全写入，schema 为 `forgis.run_report.v6.0`，始终包含 `visual_validation` 块。
 - `agent/migration_units.py`、`agent/migration_scheduler.py`、`agent/migration_state.py`、`agent/migration_plan_store.py`、`agent/plan_audit.py`：迁移单元、计划持久化、状态转换、resume 与 audit summary。
 - `agent/repair_loop.py`、`agent/repair_report.py`、`agent/runtime_controller.py`：修复循环状态机、报告渲染与运行时观测状态。
 - `agent/source_inventory.py`：源仓库扫描、过滤生成物/二进制/secret-like 文件、按优先级排序。
 - `agent/skill_loader.py`：本地技能选择、加载、长度限制和 secret-like 内容检查。
+- `docs/QWEN_VISUAL_MODE.md`：v6.0 Qwen Visual Evidence Mode 契约文档，说明 provider 边界、reference-first、证据状态、证据目录、mock-first provider adapter、真实 transport 启用条件、视觉 tool schema、report/PR 字段和 runtime gate。
+- `skills/qwen_visual_mode.md`：可显式注入主 Agent 的短 skill，只记录 Qwen 视觉 provider 的安全边界。
 - `agent/build_target.sh`：GitHub Actions 中运行 `validation_commands` 的脚本，作用域限定在目标仓库 `target_subdir`。
 - `agent/create_pr.sh`：真实运行后的 target branch 准备、提交、push 和 PR 创建。已有远程分支时改用 fallback branch，避免 force push。
-- `agent/pr_body.py`：有界 PR body 生成，超长时可生成 short body。
+- `agent/pr_body.py`：有界 PR body 生成，超长时可生成 short body；从 run report 中摘取脱敏 Visual Validation 摘要。
 - `.github/workflows/migrate.yml`：完整运行工作流。
 - `.github/workflows/validate-forgis.yml`：验证工作流，包含 py_compile、unittest、bash syntax、controller smoke test、`git diff --check`。
 
@@ -91,6 +98,8 @@
 - `.gitignore`：忽略 Python 缓存、虚拟环境、`.env`、日志、`reports/`、`forgis-runtime/`、`tmp/`、证书和 secrets 目录。
 - 目标仓库运行配置不是本仓库文件，而是目标仓库根目录的 `FORGIS_CONFIG.yml`。`agent/forgis_config.py` 固定该文件名，且拒绝未知字段。
 - 目标仓库任务文件默认 `FORGIS_TASK.md`，可由 `task_prompt_path` 指定，但必须位于目标仓库根内且非空。
+- v6.0 Phase 2 新增可选 `visual_validation` 配置块，只包含 `enabled`、`provider`、`max_visual_iterations`、`require_reference_first`、`upload_visual_artifact`。
+- v6.0 已接通视觉工具 schema、`FileToolSandbox` 分发、runtime visual state/gate、run report / PR body 视觉字段和显式 env 下的 Qwen HTTP transport。仍不自动截图、不上传 visual artifact、不支持多 provider。
 
 ## 测试目录
 
@@ -100,9 +109,10 @@
 
 ## 资源目录
 
-- `skills/*.md`：本地技能文本，包括 `migration_general`、`swiftui_to_compose`、`swiftui_to_harmonyos`、`ui_style_preservation`、`build_repair`。
+- `skills/*.md`：本地技能文本，包括 `migration_general`、`swiftui_to_compose`、`swiftui_to_harmonyos`、`ui_style_preservation`、`build_repair`、`qwen_visual_mode`。
 - `prompts/system_agent_v3.md`：运行时系统提示词。
 - `docs/DS_GUIDE_Swift_Kotlin.md`：SwiftUI 到 Kotlin/Compose 迁移风险文档。
+- `docs/QWEN_VISUAL_MODE.md`：Qwen Visual Evidence Mode 的长期维护说明。当前 v6.0 已接入受控视觉工具、报告字段、gate 和真实 provider transport；截图采集、artifact 上传和多 provider 仍未实现。
 
 ## 生成物和缓存目录
 

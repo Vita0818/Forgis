@@ -32,7 +32,7 @@ Every other setting comes from `FORGIS_CONFIG.yml` at the target repository root
 Keep three kinds of information separate:
 
 - **GitHub Actions input / CLI, not config:** `target_repo`.
-- **`FORGIS_CONFIG.yml`:** repository refs, output branch/subdir, task file path, DeepSeek connection fields, run switches, skills, reports, repair-loop settings, and migration-plan settings.
+- **`FORGIS_CONFIG.yml`:** repository refs, output branch/subdir, task file path, DeepSeek connection fields, run switches, skills, reports, repair-loop settings, migration-plan settings, and non-secret visual-validation switches.
 - **`FORGIS_TASK.md`:** product and migration instructions, such as Android / Kotlin / Jetpack Compose, target stack, UI style, information architecture, migration scope, privacy rules, and "write only inside `target_subdir`" business constraints.
 
 Do not put these fields or values in `FORGIS_CONFIG.yml`:
@@ -41,9 +41,10 @@ Do not put these fields or values in `FORGIS_CONFIG.yml`:
 - `target_stack`; describe Android / Kotlin / Jetpack Compose in `FORGIS_TASK.md`.
 - `source_branch`; use `source_ref`.
 - `target_repo_url`, `source_repo_url`, `target_path`, or `source_path`.
-- `agent_backend: aider`; v5.0 supports only `agent_backend: deepseek`.
+- `agent_backend: aider`; Forgis currently supports only `agent_backend: deepseek`.
 - `build_command: []` or `test_command: []`; omit the field when no command is configured.
 - `model: deepseek/deepseek-v4-pro`; use DeepSeek's accepted model id `deepseek-v4-pro` or `deepseek-v4-flash`.
+- Qwen API keys, tokens, image paths, evidence roots, or screenshot paths in `FORGIS_CONFIG.yml`. v6.0 accepts only the non-secret `visual_validation` control block documented below; Qwen credentials/base/model may be supplied only through explicit runtime environment variables and are never written to reports.
 
 Minimum runnable config:
 
@@ -113,6 +114,17 @@ migration_plan_audit_summary_enabled: true
 repair_loop_enabled: false
 ```
 
+Optional Qwen Visual Evidence Mode control block for v6.0:
+
+```yaml
+visual_validation:
+  enabled: auto
+  provider: qwen
+  max_visual_iterations: 2
+  require_reference_first: true
+  upload_visual_artifact: false
+```
+
 For a config-only smoke test, keep the same fields but use:
 
 ```yaml
@@ -154,6 +166,11 @@ Common defaults:
 - `migration_plan_resume_enabled: false`
 - `migration_plan_auto_complete_on_success: false`
 - `migration_plan_audit_summary_enabled: true`
+- `visual_validation.enabled: auto`
+- `visual_validation.provider: qwen`
+- `visual_validation.max_visual_iterations: 2`
+- `visual_validation.require_reference_first: true`
+- `visual_validation.upload_visual_artifact: false`
 
 Long-running migrations can explicitly raise runtime sizing fields while the defaults stay moderate:
 
@@ -215,6 +232,14 @@ model_env:
 ```
 
 Never put the actual API key value in `FORGIS_CONFIG.yml`.
+
+### Qwen Visual Evidence Mode (v6.0 closed loop)
+
+Forgis v6.0 connects the Qwen Visual Evidence Mode closed loop: `docs/QWEN_VISUAL_MODE.md`, the local skill `skills/qwen_visual_mode.md`, strict parsing for the optional `visual_validation` config block, `agent/visual_evidence.py` for evidence paths/state, `agent/qwen_vision.py` as a mockable provider adapter with safe real HTTP transport, three visual tools (`inspect_visual_reference`, `inspect_visual_actual`, `compare_visual_screenshots`), sandbox dispatch, runtime visual state, run report / PR body visual summaries, and a gate that marks incomplete visual evidence instead of claiming validation. The run report schema is now `forgis.run_report.v6.0` because `visual_validation` is a stable top-level report block.
+
+Qwen is a visual understanding provider, not a code migration agent. The main agent remains responsible for reading source, editing code, builds, tests, and the final report. The visual mode contract is reference-first: reference-only inspection is allowed, but it is not full rendered visual validation. Never send source code, secrets, tokens, `.env`, certificates, private keys, provisioning profiles, or private local configuration to Qwen. Unit tests mock the provider and do not access the network; real Qwen HTTP calls occur only when `QWEN_API_KEY` is explicitly present, with optional `QWEN_API_BASE` and `QWEN_VISION_MODEL`. Forgis still does not implement automatic screenshot capture, visual artifact upload, multi-provider support, or a UI dashboard; those are Phase 8+ concerns.
+
+`visual_validation.enabled=auto` is deterministic and conservative: it becomes required when `qwen_visual_mode` is selected, when task text contains strong visual/UI/screenshot keywords, or after any visual tool is called. Pure code, backend, config, build, or unit-test-only tasks do not become visually gated unless one of those signals appears.
 
 ### FORGIS_TASK.md Example
 
@@ -643,7 +668,7 @@ The PR head is always the branch that was actually pushed. The log prints the co
 
 Forgis keeps PR bodies short and bounded. `create_pr.sh` generates a summary body capped at 30,000 characters, well below GitHub's GraphQL `createPullRequest` limit. The body includes the configured target branch, actual pushed branch, target base branch, target subdir, commit hash when available, run mode, Actions run link when available, and a pointer to the `forgis-reports` artifact.
 
-Full `FORGIS_RUN_REPORT.md`, `FORGIS_RUN_REPORT.json`, `FORGIS_MIGRATION_PLAN.json`, full diffs, tool operation logs, large model summaries, and large build/test output are not copied into the PR body. Download the `forgis-reports` artifact for the complete safe reports.
+Full `FORGIS_RUN_REPORT.md`, `FORGIS_RUN_REPORT.json`, `FORGIS_MIGRATION_PLAN.json`, full diffs, tool operation logs, large model summaries, provider raw responses, screenshot bytes/base64, and large build/test output are not copied into the PR body. The PR body includes only a bounded Visual Validation summary from the run report. Download the `forgis-reports` artifact for the complete safe reports.
 
 If GitHub still rejects the body as too long, Forgis automatically retries once with a minimal body capped at 3,000 characters. This retry still uses the actual pushed branch as the PR head.
 

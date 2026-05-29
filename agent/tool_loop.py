@@ -207,6 +207,10 @@ def tool_call_log_details(name: str, arguments: dict[str, Any] | None) -> str:
     parts: list[str] = []
     if "path" in arguments:
         parts.append(f"path={sanitize_log_path(arguments.get('path'))}")
+    if "reference_path" in arguments:
+        parts.append(f"reference_path={sanitize_log_path(arguments.get('reference_path'))}")
+    if "actual_path" in arguments:
+        parts.append(f"actual_path={sanitize_log_path(arguments.get('actual_path'))}")
     if "root" in arguments:
         parts.append(f"root={sanitize_log_path(arguments.get('root'))}")
     if "cwd" in arguments:
@@ -293,6 +297,39 @@ def effective_migration_plan_output_dir(
     if "migration_plan_output_dir" in config.config_keys or report_output_dir is None or not str(report_output_dir).strip():
         return config.migration_plan_output_dir
     return report_output_dir
+
+
+def visual_runtime_root(
+    *,
+    report_allowed_root: Path | None,
+    target_root: Path,
+    environ: dict[str, str],
+) -> Path:
+    raw_root = report_allowed_root or Path(environ.get("GITHUB_WORKSPACE", "") or target_root.parent)
+    root = raw_root.resolve()
+    if root.name == "forgis-runtime":
+        return root
+    return root / "forgis-runtime"
+
+
+def visual_run_id(environ: dict[str, str]) -> str:
+    return environ.get("GITHUB_RUN_ID") or environ.get("FORGIS_RUN_ID") or "local"
+
+
+def visual_provider_env(config: ResolvedConfig, environ: dict[str, str]) -> dict[str, str]:
+    mapped_secret_names = {runtime: secret for runtime, secret in config.model_env}
+
+    def env_value(runtime_name: str) -> str:
+        secret_name = mapped_secret_names.get(runtime_name)
+        if secret_name:
+            return environ.get(secret_name, "")
+        return environ.get(runtime_name, "")
+
+    return {
+        "qwen_api_key": env_value("QWEN_API_KEY"),
+        "qwen_api_base": env_value("QWEN_API_BASE"),
+        "qwen_model": env_value("QWEN_VISION_MODEL"),
+    }
 
 
 def migration_plan_persistence_state(
@@ -678,6 +715,7 @@ def skipped_result(
     status: str,
     final_summary: str,
     config: ResolvedConfig,
+    visual_task_text: str = "",
     skill_selection: SkillSelection | None = None,
     migration_plan: MigrationPlan | None = None,
     resume_summary: dict[str, Any] | None = None,
@@ -687,6 +725,8 @@ def skipped_result(
     runtime = RuntimeController()
     if skill_selection is not None:
         runtime.attach_skills(skill_selection.as_runtime_state())
+    runtime.attach_visual_config(config.visual_validation)
+    runtime.attach_visual_task_text(visual_task_text)
     attach_migration_state(
         runtime,
         migration_plan,
@@ -1024,6 +1064,7 @@ def run_tool_loop(
     run_metadata: dict[str, Any] | None = None,
 ) -> ToolLoopResult:
     env = dict(os.environ if environ is None else environ)
+    task_text = read_task_text_for_migration_scheduler(target_root, config)
     skill_selection = build_skill_selection(config, target_root=target_root)
     log_skill_selection(skill_selection)
     migration_preparation = prepare_migration_plan(
@@ -1041,6 +1082,7 @@ def run_tool_loop(
             status="skipped-dry-run",
             final_summary="dry_run=true; DeepSeek was not called.",
             config=config,
+            visual_task_text=task_text,
             skill_selection=skill_selection,
             migration_plan=migration_plan,
             resume_summary=migration_preparation.resume_summary,
@@ -1063,6 +1105,7 @@ def run_tool_loop(
             status="skipped-run-agent-false",
             final_summary="run_agent=false; DeepSeek was not called.",
             config=config,
+            visual_task_text=task_text,
             skill_selection=skill_selection,
             migration_plan=migration_plan,
             resume_summary=migration_preparation.resume_summary,
@@ -1090,6 +1133,7 @@ def run_tool_loop(
             environ=env,
             client_factory=client_factory,
             skill_selection=skill_selection,
+            report_allowed_root=report_allowed_root,
         )
         if migration_plan is not None:
             state = dict(staged_result.runtime_state or {})
@@ -1115,6 +1159,7 @@ def run_tool_loop(
             run_metadata=run_metadata,
         )
 
+    visual_env = visual_provider_env(config, env)
     sandbox = FileToolSandbox(
         source_root=source_root,
         target_root=target_root,
@@ -1127,9 +1172,24 @@ def run_tool_loop(
         build_timeout_seconds=config.build_timeout_seconds,
         test_timeout_seconds=config.test_timeout_seconds,
         max_command_output_chars=config.max_command_output_chars,
+        visual_validation_enabled=config.visual_validation.enabled,
+        visual_validation_provider=config.visual_validation.provider,
+        max_visual_iterations=config.visual_validation.max_visual_iterations,
+        visual_evidence_runtime_root=visual_runtime_root(
+            report_allowed_root=report_allowed_root,
+            target_root=target_root,
+            environ=env,
+        ),
+        visual_evidence_run_id=visual_run_id(env),
+        target_repo=config.target_repo,
+        qwen_api_key=visual_env.get("qwen_api_key") or None,
+        qwen_api_base=visual_env.get("qwen_api_base") or None,
+        qwen_model=visual_env.get("qwen_model") or None,
     )
     runtime = RuntimeController()
     runtime.attach_skills(skill_selection.as_runtime_state())
+    runtime.attach_visual_config(config.visual_validation)
+    runtime.attach_visual_task_text(task_text)
     attach_migration_state(
         runtime,
         migration_plan,
@@ -1204,13 +1264,14 @@ def run_tool_loop(
                 sandbox=sandbox,
             )
             operation_log = sandbox.operation_log()
+            loop_status = runtime.visual_effective_status("completed")
             finalize_active_unit_state(
                 runtime=runtime,
                 repair_loop=repair_loop,
                 operation_log=operation_log,
                 migration_plan=migration_plan,
                 config=config,
-                tool_loop_status="completed",
+                tool_loop_status=loop_status,
                 resume_summary=migration_preparation.resume_summary,
                 active_unit_switch=migration_preparation.active_unit_switch,
                 manual_unit_status_update=migration_preparation.manual_unit_status_update,
@@ -1218,7 +1279,7 @@ def run_tool_loop(
             state, report, compact = report_payload(runtime, repair_loop, operation_log)
             result = ToolLoopResult(
                 executed=True,
-                status="completed",
+                status=loop_status,
                 final_summary=summary or "DeepSeek returned no final summary.",
                 iterations=iteration,
                 tool_call_count=tool_call_count,
@@ -1345,13 +1406,14 @@ def run_tool_loop(
         sandbox=sandbox,
     )
     operation_log = sandbox.operation_log()
+    loop_status = runtime.visual_effective_status("max-iterations")
     finalize_active_unit_state(
         runtime=runtime,
         repair_loop=repair_loop,
         operation_log=operation_log,
         migration_plan=migration_plan,
         config=config,
-        tool_loop_status="max-iterations",
+        tool_loop_status=loop_status,
         resume_summary=migration_preparation.resume_summary,
         active_unit_switch=migration_preparation.active_unit_switch,
         manual_unit_status_update=migration_preparation.manual_unit_status_update,
@@ -1359,7 +1421,7 @@ def run_tool_loop(
     state, report, compact = report_payload(runtime, repair_loop, operation_log)
     result = ToolLoopResult(
         executed=True,
-        status="max-iterations",
+        status=loop_status,
         final_summary=f"DeepSeek tool loop stopped after max_iterations={config.max_iterations}.",
         iterations=config.max_iterations,
         tool_call_count=tool_call_count,

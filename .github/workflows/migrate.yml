@@ -127,6 +127,9 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
+          QWEN_API_BASE: ${{ vars.QWEN_API_BASE }}
+          QWEN_VISION_MODEL: ${{ vars.QWEN_VISION_MODEL }}
         run: |
           if [[ "$RUN_AGENT" != "true" ]]; then
             echo "RUN_AGENT is false. Skipping DeepSeek execution."

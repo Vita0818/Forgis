@@ -7,23 +7,37 @@ import stat
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+import qwen_vision
 from build_runner import run_build as run_configured_build, run_tests as run_configured_tests
 from command_runner import CommandRunnerError, safe_run_command
 from forgis_config import (
     DEFAULT_CONFIG_PATH,
     DEFAULT_MAX_TOOL_RESULT_CHARS,
     DEFAULT_TASK_PROMPT_PATH,
+    DEFAULT_VISUAL_VALIDATION_ENABLED,
+    DEFAULT_VISUAL_VALIDATION_PROVIDER,
     resolve_inside_root,
     resolve_target_subdir,
 )
 from git_tools import GitToolError, git_diff as target_git_diff, git_status as target_git_status
+from visual_evidence import (
+    HOST_ENV_BLOCKED,
+    QWEN_PERMISSION_GATED,
+    VISUAL_VALIDATION_DISABLED,
+    classify_visual_evidence,
+    create_visual_evidence_paths,
+    sanitize_visual_path_label,
+    sanitize_visual_text,
+    validate_visual_image_path,
+)
 
 
 READ_TOOLS = {"list_dir", "tree", "read_file", "file_exists", "search_text", "git_status", "git_diff"}
 WRITE_TOOLS = {"mkdir", "write_file", "append_file", "delete_file", "edit_file", "apply_patch"}
 COMMAND_TOOLS = {"run_command", "run_build", "run_tests"}
+VISUAL_TOOLS = {"inspect_visual_reference", "inspect_visual_actual", "compare_visual_screenshots"}
 OBSERVATION_TOOLS = READ_TOOLS | COMMAND_TOOLS
-ALL_TOOLS = READ_TOOLS | WRITE_TOOLS | COMMAND_TOOLS
+ALL_TOOLS = READ_TOOLS | WRITE_TOOLS | COMMAND_TOOLS | VISUAL_TOOLS
 
 SECRET_NAMES = {
     ".env",
@@ -104,6 +118,15 @@ class FileToolSandbox:
         build_timeout_seconds: int = 60,
         test_timeout_seconds: int = 60,
         max_command_output_chars: int | None = None,
+        visual_validation_enabled: str = DEFAULT_VISUAL_VALIDATION_ENABLED,
+        visual_validation_provider: str = DEFAULT_VISUAL_VALIDATION_PROVIDER,
+        max_visual_iterations: int = 2,
+        visual_evidence_runtime_root: str | Path | None = None,
+        visual_evidence_run_id: str = "local",
+        target_repo: str = "local/target",
+        qwen_api_key: str | None = None,
+        qwen_api_base: str | None = None,
+        qwen_model: str | None = None,
     ) -> None:
         self.source_root = source_root.resolve()
         self.target_root = target_root.resolve()
@@ -132,6 +155,16 @@ class FileToolSandbox:
         self.build_timeout_seconds = build_timeout_seconds
         self.test_timeout_seconds = test_timeout_seconds
         self.max_command_output_chars = max_result_chars if max_command_output_chars is None else max_command_output_chars
+        self.visual_validation_enabled = str(visual_validation_enabled or DEFAULT_VISUAL_VALIDATION_ENABLED).casefold()
+        self.visual_validation_provider = str(visual_validation_provider or DEFAULT_VISUAL_VALIDATION_PROVIDER).casefold()
+        self.max_visual_iterations = max(0, min(int(max_visual_iterations), 2))
+        self.visual_evidence_runtime_root = Path(visual_evidence_runtime_root) if visual_evidence_runtime_root else self.target_root.parent / "forgis-runtime"
+        self.visual_evidence_run_id = str(visual_evidence_run_id or "local")
+        self.target_repo = str(target_repo or "local/target")
+        self.qwen_api_key = qwen_api_key
+        self.qwen_api_base = qwen_api_base
+        self.qwen_model = qwen_model
+        self.visual_tool_calls = 0
         self.operations: list[ToolOperation] = []
         self.read_count = 0
         self.write_count = 0
@@ -681,6 +714,222 @@ class FileToolSandbox:
             max_output_chars=self.max_command_output_chars,
         )
 
+    def _visual_blocked_result(
+        self,
+        *,
+        tool_name: str,
+        mode: str,
+        blocker: str,
+        summary: str,
+        reference_paths: tuple[str, ...] = (),
+        actual_paths: tuple[str, ...] = (),
+        limitations: tuple[str, ...] = (),
+    ) -> dict[str, Any]:
+        reference = tuple(sanitize_visual_path_label(path) for path in reference_paths)
+        actual = tuple(sanitize_visual_path_label(path) for path in actual_paths)
+        return {
+            "ok": False,
+            "tool": tool_name,
+            "status": "blocked",
+            "provider": self.visual_validation_provider or "qwen",
+            "mode": mode,
+            "summary": sanitize_visual_text(summary, limit=600),
+            "findings": [],
+            "limitations": [sanitize_visual_text(item, limit=300) for item in limitations if str(item).strip()],
+            "blocker": blocker,
+            "visual_state": classify_visual_evidence(reference, actual),
+            "reference_screenshots_used": list(reference),
+            "actual_screenshots": list(actual),
+            "compare_screenshots_completed": False,
+        }
+
+    def _ensure_visual_enabled(self, tool_name: str, mode: str) -> dict[str, Any] | None:
+        if self.visual_validation_enabled == "false":
+            return self._visual_blocked_result(
+                tool_name=tool_name,
+                mode=mode,
+                blocker=VISUAL_VALIDATION_DISABLED,
+                summary="visual_validation.enabled=false; visual provider tools are disabled.",
+                limitations=("No screenshot was sent to the provider.",),
+            )
+        if self.visual_validation_provider != "qwen":
+            return self._visual_blocked_result(
+                tool_name=tool_name,
+                mode=mode,
+                blocker=QWEN_PERMISSION_GATED,
+                summary="Only the qwen visual provider is supported in this phase.",
+                limitations=("The configured visual provider is unavailable.",),
+            )
+        return None
+
+    def _ensure_visual_evidence_dirs(self) -> None:
+        create_visual_evidence_paths(
+            runtime_root=self.visual_evidence_runtime_root,
+            run_id=self.visual_evidence_run_id,
+            target_repo=self.target_repo,
+            source_root=self.source_root,
+            target_root=self.target_root,
+            create=True,
+        )
+
+    def _resolve_visual_image(self, path: str, *, label: str, allow_source: bool) -> ResolvedToolPath:
+        resolved = self.resolve_read_path(path)
+        if not allow_source and resolved.root_name == "source":
+            raise ToolError(f"{label} must come from target/ or target_subdir/, not source/.")
+        kind = path_kind_no_follow(resolved.absolute)
+        if kind == "missing":
+            raise ToolError(f"{label} does not exist: {resolved.virtual}")
+        if kind == "symlink":
+            raise ToolError(f"{label} must not be a symlink: {resolved.virtual}")
+        if kind != "file":
+            raise ToolError(f"{label} must be a file: {resolved.virtual}")
+        try:
+            validate_visual_image_path(resolved.absolute, must_exist=True)
+        except ValueError as exc:
+            raise ToolError(str(exc)) from exc
+        return resolved
+
+    def _visual_result_payload(
+        self,
+        *,
+        tool_name: str,
+        mode: str,
+        result: Any,
+        reference_paths: tuple[str, ...],
+        actual_paths: tuple[str, ...],
+        compare_completed: bool,
+    ) -> dict[str, Any]:
+        reference = tuple(sanitize_visual_path_label(path) for path in reference_paths)
+        actual = tuple(sanitize_visual_path_label(path) for path in actual_paths)
+        findings = [sanitize_visual_text(item, limit=300) for item in getattr(result, "findings", ()) if str(item).strip()]
+        limitations = [
+            sanitize_visual_text(item, limit=300)
+            for item in getattr(result, "limitations", ())
+            if str(item).strip()
+        ]
+        ok = bool(getattr(result, "ok", False))
+        blocker = getattr(result, "blocker", None) or ""
+        return {
+            "ok": ok,
+            "tool": tool_name,
+            "status": "success" if ok else "blocked",
+            "provider": sanitize_visual_text(getattr(result, "provider", None) or self.visual_validation_provider, limit=80),
+            "mode": mode,
+            "summary": sanitize_visual_text(getattr(result, "summary", ""), limit=1000),
+            "findings": findings[:20],
+            "limitations": limitations[:12],
+            "blocker": sanitize_visual_text(blocker, limit=120) if blocker else "",
+            "visual_state": classify_visual_evidence(reference, actual),
+            "reference_screenshots_used": list(reference),
+            "actual_screenshots": list(actual),
+            "compare_screenshots_completed": bool(ok and compare_completed),
+        }
+
+    def inspect_visual_reference(self, path: str, goal: str = "") -> dict[str, Any]:
+        tool_name = "inspect_visual_reference"
+        blocked = self._ensure_visual_enabled(tool_name, "reference")
+        if blocked is not None:
+            return blocked
+        try:
+            self._ensure_visual_evidence_dirs()
+            resolved = self._resolve_visual_image(path, label="reference screenshot", allow_source=True)
+        except ToolError as exc:
+            return self._visual_blocked_result(
+                tool_name=tool_name,
+                mode="reference",
+                blocker=HOST_ENV_BLOCKED,
+                summary="Reference screenshot path was rejected before provider use.",
+                limitations=(str(exc),),
+            )
+        self.visual_tool_calls += 1
+        result = qwen_vision.inspect_screenshot(
+            resolved.absolute,
+            sanitize_visual_text(goal, limit=500),
+            api_key=self.qwen_api_key,
+            api_base=self.qwen_api_base,
+            model=self.qwen_model,
+        )
+        return self._visual_result_payload(
+            tool_name=tool_name,
+            mode="reference",
+            result=result,
+            reference_paths=(resolved.virtual,),
+            actual_paths=(),
+            compare_completed=False,
+        )
+
+    def inspect_visual_actual(self, path: str, goal: str = "") -> dict[str, Any]:
+        tool_name = "inspect_visual_actual"
+        blocked = self._ensure_visual_enabled(tool_name, "actual")
+        if blocked is not None:
+            return blocked
+        try:
+            self._ensure_visual_evidence_dirs()
+            resolved = self._resolve_visual_image(path, label="actual screenshot", allow_source=False)
+        except ToolError as exc:
+            return self._visual_blocked_result(
+                tool_name=tool_name,
+                mode="actual",
+                blocker=HOST_ENV_BLOCKED,
+                summary="Actual screenshot path was rejected before provider use.",
+                limitations=(str(exc),),
+            )
+        self.visual_tool_calls += 1
+        result = qwen_vision.inspect_screenshot(
+            resolved.absolute,
+            sanitize_visual_text(goal, limit=500),
+            api_key=self.qwen_api_key,
+            api_base=self.qwen_api_base,
+            model=self.qwen_model,
+        )
+        return self._visual_result_payload(
+            tool_name=tool_name,
+            mode="actual",
+            result=result,
+            reference_paths=(),
+            actual_paths=(resolved.virtual,),
+            compare_completed=False,
+        )
+
+    def compare_visual_screenshots(self, reference_path: str, actual_path: str, goal: str = "") -> dict[str, Any]:
+        tool_name = "compare_visual_screenshots"
+        blocked = self._ensure_visual_enabled(tool_name, "compare")
+        if blocked is not None:
+            return blocked
+        try:
+            self._ensure_visual_evidence_dirs()
+            reference = self._resolve_visual_image(
+                reference_path,
+                label="reference screenshot",
+                allow_source=True,
+            )
+            actual = self._resolve_visual_image(actual_path, label="actual screenshot", allow_source=False)
+        except ToolError as exc:
+            return self._visual_blocked_result(
+                tool_name=tool_name,
+                mode="compare",
+                blocker=HOST_ENV_BLOCKED,
+                summary="Visual screenshot path was rejected before provider use.",
+                limitations=(str(exc),),
+            )
+        self.visual_tool_calls += 1
+        result = qwen_vision.compare_screenshots(
+            reference.absolute,
+            actual.absolute,
+            sanitize_visual_text(goal, limit=500),
+            api_key=self.qwen_api_key,
+            api_base=self.qwen_api_base,
+            model=self.qwen_model,
+        )
+        return self._visual_result_payload(
+            tool_name=tool_name,
+            mode="compare",
+            result=result,
+            reference_paths=(reference.virtual,),
+            actual_paths=(actual.virtual,),
+            compare_completed=True,
+        )
+
     def invoke(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if tool_name not in ALL_TOOLS:
             raise ToolError(f"Unsupported tool: {tool_name}")
@@ -739,6 +988,22 @@ class FileToolSandbox:
             return self.run_build()
         if tool_name == "run_tests":
             return self.run_tests()
+        if tool_name == "inspect_visual_reference":
+            return self.inspect_visual_reference(
+                str(arguments.get("path", "")),
+                str(arguments.get("goal", "")),
+            )
+        if tool_name == "inspect_visual_actual":
+            return self.inspect_visual_actual(
+                str(arguments.get("path", "")),
+                str(arguments.get("goal", "")),
+            )
+        if tool_name == "compare_visual_screenshots":
+            return self.compare_visual_screenshots(
+                str(arguments.get("reference_path", "")),
+                str(arguments.get("actual_path", "")),
+                str(arguments.get("goal", "")),
+            )
         raise ToolError(f"Unsupported tool: {tool_name}")
 
     def operation_log(self) -> list[dict[str, Any]]:

@@ -174,7 +174,7 @@
     ]
   },
   "expect": {
-    "report_schema_version": "forgis.run_report.v5.0",
+    "report_schema_version": "forgis.run_report.v6.0",
     "active_unit_id": "ui-homeview-swift",
     "reason": "Navigation dependency is not mapped in the target UI.",
     "recommended_keywords": [

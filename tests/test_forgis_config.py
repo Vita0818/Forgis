@@ -21,7 +21,7 @@ AGENT_DIR = REPO_ROOT / "agent"
 sys.path.insert(0, str(AGENT_DIR))
 
 from build_feedback import summarize_build_failure, summarize_command_result, summarize_test_failure
-from deepseek_agent import build_initial_messages, initial_messages, system_message
+from deepseek_agent import TOOL_DEFINITIONS, build_initial_messages, initial_messages, system_message
 from file_tools import FileToolSandbox, ToolError
 from forgis_config import (
     MAX_COMMAND_OUTPUT_CHARS_LIMIT,
@@ -34,6 +34,7 @@ from forgis_config import (
 )
 from guardrails import changed_read_only_paths, scan_secret_leaks, snapshot_paths, target_scope_violations
 from model_env import describe_model_env, parse_model_env_json, require_model_env_values
+import qwen_vision
 from migration_scheduler import (
     create_units_from_inventory,
     mark_unit_active,
@@ -77,7 +78,7 @@ from run_report import (
     render_run_report_markdown,
     write_run_reports,
 )
-from runtime_controller import RuntimeController
+from runtime_controller import RuntimeController, task_text_indicates_visual
 from skill_loader import (
     DEFAULT_SKILLS_DIR,
     SkillLoaderError,
@@ -89,6 +90,22 @@ from skill_loader import (
 from source_inventory import bundled_units_for_folder, collect_source_inventory, safe_source_report_name
 from tool_loop import run_tool_loop, write_status
 from validate_target_output import files_snapshot, meaningful_changes, validate
+from visual_evidence import (
+    ACTUAL_ONLY,
+    HOST_ENV_BLOCKED,
+    NO_VISUAL_EVIDENCE,
+    QWEN_PERMISSION_GATED,
+    QWEN_UNAVAILABLE_IN_SESSION,
+    REFERENCE_AND_ACTUAL,
+    REFERENCE_ONLY,
+    VISUAL_REPORT_INCOMPLETE,
+    VISUAL_VALIDATION_DISABLED,
+    VisualEvidenceSummary,
+    classify_visual_evidence,
+    create_visual_evidence_paths,
+    safe_target_repo_slug,
+    validate_visual_image_path,
+)
 
 
 class FakeDeepSeekClient:
@@ -258,6 +275,11 @@ class ForgisConfigTests(unittest.TestCase):
             config += extra if extra.endswith("\n") else extra + "\n"
         (target / "FORGIS_CONFIG.yml").write_text(config, encoding="utf-8")
         (target / "FORGIS_TASK.md").write_text(task_text, encoding="utf-8")
+
+    def write_fake_image(self, path: Path) -> Path:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"\x89PNG\r\n\x1a\nmock-image")
+        return path
 
     def staged_extra(
         self,
@@ -462,6 +484,12 @@ class ForgisConfigTests(unittest.TestCase):
             build_timeout_seconds=resolved.build_timeout_seconds,
             test_timeout_seconds=resolved.test_timeout_seconds,
             max_command_output_chars=resolved.max_command_output_chars,
+            visual_validation_enabled=resolved.visual_validation.enabled,
+            visual_validation_provider=resolved.visual_validation.provider,
+            max_visual_iterations=resolved.visual_validation.max_visual_iterations,
+            visual_evidence_runtime_root=root / "forgis-runtime",
+            visual_evidence_run_id="test-run",
+            target_repo=resolved.target_repo,
         )
         return sandbox, source, target
 
@@ -489,6 +517,9 @@ class ForgisConfigTests(unittest.TestCase):
             "OPENROUTER_API_KEY",
             "GEMINI_API_KEY",
             "GOOGLE_API_KEY",
+            "QWEN_API_KEY",
+            "QWEN_API_BASE",
+            "QWEN_VISION_MODEL",
         ):
             self.assertIn(secret_name, workflow)
 
@@ -648,6 +679,925 @@ class ForgisConfigTests(unittest.TestCase):
             self.assertEqual(staged.staged_translation.overview.min_iterations, 20)
             self.assertEqual(staged.staged_translation.progress_files.plan, "FORGIS_TRANSLATION_PLAN.md")
             self.assertIn("STAGED_TRANSLATION_JSON", staged.env())
+
+    def test_visual_validation_config_defaults_values_bounds_and_env_are_safe(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            target = Path(dirname)
+            self.write_config(target)
+            resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
+            self.assertEqual(resolved.visual_validation.enabled, "auto")
+            self.assertEqual(resolved.visual_validation.provider, "qwen")
+            self.assertEqual(resolved.visual_validation.max_visual_iterations, 2)
+            self.assertTrue(resolved.visual_validation.require_reference_first)
+            self.assertFalse(resolved.visual_validation.upload_visual_artifact)
+            self.assertEqual(resolved.env()["FORGIS_VISUAL_VALIDATION_ENABLED"], "auto")
+            self.assertEqual(resolved.outputs()["forgis_visual_validation_provider"], "qwen")
+
+            for yaml_value, expected in (("auto", "auto"), ("true", "true"), ("false", "false")):
+                self.write_config(
+                    target,
+                    extra=textwrap.dedent(
+                        f"""\
+                        visual_validation:
+                          enabled: {yaml_value}
+                        """
+                    ),
+                )
+                configured = resolve_config(target_root=target, target_repo="owner/target-repo")
+                self.assertEqual(configured.visual_validation.enabled, expected)
+
+            self.write_config(target, extra="visual_validation:\n  enabled: always\n")
+            with self.assertRaisesRegex(ValueError, "visual_validation.enabled"):
+                resolve_config(target_root=target, target_repo="owner/target-repo")
+
+            self.write_config(target, extra="visual_validation:\n  provider: qwen\n")
+            configured_provider = resolve_config(target_root=target, target_repo="owner/target-repo")
+            self.assertEqual(configured_provider.visual_validation.provider, "qwen")
+
+            self.write_config(target, extra="visual_validation:\n  provider: openai\n")
+            with self.assertRaisesRegex(ValueError, "visual_validation.provider"):
+                resolve_config(target_root=target, target_repo="owner/target-repo")
+
+            for iterations in (0, 1, 2):
+                self.write_config(
+                    target,
+                    extra=textwrap.dedent(
+                        f"""\
+                        visual_validation:
+                          max_visual_iterations: {iterations}
+                        """
+                    ),
+                )
+                configured = resolve_config(target_root=target, target_repo="owner/target-repo")
+                self.assertEqual(configured.visual_validation.max_visual_iterations, iterations)
+
+            for iterations in (3, -1):
+                self.write_config(
+                    target,
+                    extra=textwrap.dedent(
+                        f"""\
+                        visual_validation:
+                          max_visual_iterations: {iterations}
+                        """
+                    ),
+                )
+                with self.assertRaisesRegex(ValueError, "visual_validation.max_visual_iterations"):
+                    resolve_config(target_root=target, target_repo="owner/target-repo")
+
+            self.write_config(target, extra='visual_validation:\n  require_reference_first: "true"\n')
+            with self.assertRaisesRegex(ValueError, "visual_validation.require_reference_first"):
+                resolve_config(target_root=target, target_repo="owner/target-repo")
+
+            self.write_config(target, extra='visual_validation:\n  upload_visual_artifact: "false"\n')
+            with self.assertRaisesRegex(ValueError, "visual_validation.upload_visual_artifact"):
+                resolve_config(target_root=target, target_repo="owner/target-repo")
+
+            self.write_config(target, extra="visual_validation:\n  qwen_api_key: qwen-secret-value\n")
+            with self.assertRaisesRegex(ValueError, "visual_validation contains unsupported"):
+                resolve_config(target_root=target, target_repo="owner/target-repo")
+
+            self.write_config(
+                target,
+                extra=textwrap.dedent(
+                    """\
+                    visual_validation:
+                      enabled: true
+                      provider: qwen
+                      max_visual_iterations: 1
+                      require_reference_first: false
+                      upload_visual_artifact: true
+                    """
+                ),
+            )
+            configured = resolve_config(target_root=target, target_repo="owner/target-repo")
+            env = configured.env()
+            outputs = configured.outputs()
+            self.assertEqual(env["FORGIS_VISUAL_VALIDATION_ENABLED"], "true")
+            self.assertEqual(env["FORGIS_VISUAL_VALIDATION_PROVIDER"], "qwen")
+            self.assertEqual(env["FORGIS_VISUAL_MAX_ITERATIONS"], "1")
+            self.assertEqual(env["FORGIS_VISUAL_REQUIRE_REFERENCE_FIRST"], "false")
+            self.assertEqual(env["FORGIS_VISUAL_UPLOAD_ARTIFACT"], "true")
+            visual_env = {key: value for key, value in env.items() if key.startswith("FORGIS_VISUAL")}
+            visual_outputs = {key: value for key, value in outputs.items() if key.startswith("forgis_visual")}
+            rendered_visual_config = json.dumps(
+                {"env": visual_env, "outputs": visual_outputs},
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            self.assertNotIn("qwen-secret-value", rendered_visual_config)
+            self.assertNotIn("QWEN_API_KEY", rendered_visual_config)
+            self.assertNotIn("FORGIS_QWEN_API_KEY", rendered_visual_config)
+
+    def test_visual_evidence_paths_states_and_image_safety(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source = root / "source"
+            target = root / "target"
+            runtime = root / "forgis-runtime"
+            source.mkdir()
+            target.mkdir()
+
+            paths = create_visual_evidence_paths(
+                runtime_root=runtime,
+                run_id="run-001",
+                target_repo="owner/repo",
+                source_root=source,
+                target_root=target,
+            )
+            self.assertEqual(safe_target_repo_slug("owner/repo"), "owner__repo")
+            self.assertTrue(paths.root.is_relative_to(runtime.resolve()))
+            self.assertEqual(paths.root.name, "owner__repo")
+            self.assertTrue(paths.reference_dir.is_dir())
+            self.assertTrue(paths.actual_dir.is_dir())
+            self.assertTrue(paths.qwen_dir.is_dir())
+
+            with self.assertRaisesRegex(ValueError, "source repository"):
+                create_visual_evidence_paths(
+                    runtime_root=source / "forgis-runtime",
+                    run_id="run-001",
+                    target_repo="owner/repo",
+                    source_root=source,
+                    target_root=target,
+                )
+            with self.assertRaisesRegex(ValueError, "target repository"):
+                create_visual_evidence_paths(
+                    runtime_root=target / "forgis-runtime",
+                    run_id="run-001",
+                    target_repo="owner/repo",
+                    source_root=source,
+                    target_root=target,
+                )
+            for forbidden_home in (
+                Path.home() / "Desktop/forgis-visual",
+                Path.home() / "Downloads/forgis-visual",
+                Path.home() / "Documents/forgis-visual",
+            ):
+                with self.assertRaisesRegex(ValueError, "Desktop, Downloads, or Documents"):
+                    create_visual_evidence_paths(
+                        runtime_root=forbidden_home,
+                        run_id="run-001",
+                        target_repo="owner/repo",
+                        create=False,
+                    )
+            with self.assertRaisesRegex(ValueError, "secret-like"):
+                create_visual_evidence_paths(
+                    runtime_root=root / "secret-token-runtime",
+                    run_id="run-001",
+                    target_repo="owner/repo",
+                    create=False,
+                )
+
+            for suffix in (".png", ".jpg", ".jpeg", ".webp"):
+                image = self.write_fake_image(paths.reference_dir / f"screen{suffix}")
+                self.assertEqual(validate_visual_image_path(image, allowed_root=paths.root, must_exist=True), image.resolve())
+
+            for suffix in (".env", ".pem", ".key", ".p12", ".mobileprovision", ".cer", ".crt"):
+                unsafe = paths.reference_dir / f"screen{suffix}"
+                unsafe.write_text("not an image", encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "forbidden|secret-like|must be"):
+                    validate_visual_image_path(unsafe, allowed_root=paths.root, must_exist=True)
+
+            for suffix in (".py", ".swift", ".kt", ".java", ".js", ".ts", ".tsx", ".jsx", ".yml", ".yaml", ".json", ".md", ".txt"):
+                source_like = paths.reference_dir / f"screen{suffix}"
+                source_like.write_text("source or text", encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "source, config, text, or markdown"):
+                    validate_visual_image_path(source_like, allowed_root=paths.root, must_exist=True)
+
+            self.assertEqual(classify_visual_evidence(("reference.png",), ("actual.png",)), REFERENCE_AND_ACTUAL)
+            self.assertEqual(classify_visual_evidence(("reference.png",), ()), REFERENCE_ONLY)
+            self.assertEqual(classify_visual_evidence((), ("actual.png",)), ACTUAL_ONLY)
+            self.assertEqual(classify_visual_evidence((), ()), NO_VISUAL_EVIDENCE)
+
+            summary = VisualEvidenceSummary(
+                required=True,
+                provider="qwen",
+                state=REFERENCE_ONLY,
+                reference_screenshots_used=("reference/secret-token.png",),
+                actual_screenshots=(),
+                compare_screenshots_completed=False,
+                blocker=QWEN_PERMISSION_GATED,
+                limitations="TOKEN=secret-value from local path",
+            )
+            rendered = json.dumps(summary.as_dict(), ensure_ascii=False)
+            self.assertNotIn("secret-token", rendered)
+            self.assertNotIn("secret-value", rendered)
+            self.assertIn("[redacted]", rendered)
+
+    def test_qwen_vision_provider_adapter_is_mockable_bounded_and_safe(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            reference = self.write_fake_image(root / "reference.png")
+            actual = self.write_fake_image(root / "actual.webp")
+
+            missing_key = qwen_vision.inspect_screenshot(reference, "Check layout")
+            self.assertFalse(missing_key.ok)
+            self.assertEqual(missing_key.blocker, QWEN_PERMISSION_GATED)
+
+            def fake_inspect(**kwargs: Any) -> dict[str, Any]:
+                self.assertEqual(kwargs["mode"], qwen_vision.MODE_INSPECT)
+                self.assertEqual(len(kwargs["image_paths"]), 1)
+                return {
+                    "summary": "s" * 1500,
+                    "findings": ["f" * 500, "Spacing differs"],
+                    "limitations": ["l" * 500],
+                }
+
+            with mock.patch.object(qwen_vision, "_post_qwen_vision_payload", side_effect=fake_inspect):
+                inspect = qwen_vision.inspect_screenshot(reference, "Check color and spacing", api_key="mock-qwen-key")
+            self.assertTrue(inspect.ok)
+            self.assertLessEqual(len(inspect.summary), qwen_vision.MAX_SUMMARY_CHARS)
+            self.assertLessEqual(len(inspect.findings[0]), qwen_vision.MAX_FINDING_CHARS)
+            self.assertNotIn("mock-qwen-key", json.dumps(inspect.as_dict(), ensure_ascii=False))
+
+            def fake_compare(**kwargs: Any) -> dict[str, Any]:
+                self.assertEqual(kwargs["mode"], qwen_vision.MODE_COMPARE)
+                self.assertEqual(len(kwargs["image_paths"]), 2)
+                return {"summary": "Compared safely", "findings": ["Actual button is lower"], "limitations": []}
+
+            with mock.patch.object(qwen_vision, "_post_qwen_vision_payload", side_effect=fake_compare):
+                compare = qwen_vision.compare_screenshots(
+                    reference,
+                    actual,
+                    "Compare reference and actual",
+                    api_key="mock-qwen-key",
+                )
+            self.assertTrue(compare.ok)
+            self.assertEqual(compare.mode, qwen_vision.MODE_COMPARE)
+
+            raw_base64 = "a" * 140
+
+            def fake_failure(**kwargs: Any) -> dict[str, Any]:
+                raise RuntimeError(f"provider failed with {kwargs['api_key']} bytes={raw_base64}")
+
+            with mock.patch.object(qwen_vision, "_post_qwen_vision_payload", side_effect=fake_failure):
+                failure = qwen_vision.inspect_screenshot(reference, "Check layout", api_key="super-secret-qwen-key")
+            rendered_failure = json.dumps(failure.as_dict(), ensure_ascii=False)
+            self.assertFalse(failure.ok)
+            self.assertEqual(failure.blocker, QWEN_UNAVAILABLE_IN_SESSION)
+            self.assertNotIn("super-secret-qwen-key", rendered_failure)
+            self.assertNotIn(raw_base64, rendered_failure)
+            self.assertIn("[redacted-binary]", rendered_failure)
+
+            rejected = qwen_vision.inspect_screenshot(root / "screen.py", "Check layout", api_key="mock-qwen-key")
+            self.assertFalse(rejected.ok)
+            self.assertEqual(rejected.blocker, HOST_ENV_BLOCKED)
+
+            class FakeHTTPResponse:
+                def __init__(self, payload: dict[str, Any]) -> None:
+                    self.payload = payload
+
+                def __enter__(self) -> "FakeHTTPResponse":
+                    return self
+
+                def __exit__(self, *_args: Any) -> None:
+                    return None
+
+                def read(self, _limit: int | None = None) -> bytes:
+                    return json.dumps(self.payload).encode("utf-8")
+
+            def fake_urlopen(request: Any, timeout: int) -> FakeHTTPResponse:
+                self.assertEqual(timeout, qwen_vision.DEFAULT_QWEN_TIMEOUT_SECONDS)
+                body = json.loads(request.data.decode("utf-8"))
+                rendered_body = json.dumps(body, ensure_ascii=False)
+                self.assertIn("data:image/png;base64,", rendered_body)
+                self.assertNotIn(reference.as_posix(), rendered_body)
+                return FakeHTTPResponse(
+                    {
+                        "choices": [
+                            {
+                                "message": {
+                                    "content": json.dumps(
+                                        {
+                                            "summary": "transport success",
+                                            "findings": ["visual hierarchy is close"],
+                                            "limitations": [],
+                                        }
+                                    )
+                                }
+                            }
+                        ]
+                    }
+                )
+
+            with mock.patch.object(qwen_vision.urllib.request, "urlopen", side_effect=fake_urlopen):
+                transport = qwen_vision.inspect_screenshot(
+                    reference,
+                    "Check layout",
+                    api_key="mock-qwen-key",
+                    api_base="https://qwen.example.invalid/v1",
+                    model="qwen-vl-mock",
+                )
+            self.assertTrue(transport.ok)
+            self.assertEqual(transport.summary, "transport success")
+            rendered_transport = json.dumps(transport.as_dict(), ensure_ascii=False)
+            self.assertNotIn("mock-qwen-key", rendered_transport)
+            self.assertNotIn("base64", rendered_transport.casefold())
+
+            with mock.patch.object(qwen_vision, "_post_qwen_vision_payload", return_value={"choices": []}):
+                invalid = qwen_vision.inspect_screenshot(reference, "Check layout", api_key="mock-qwen-key")
+            self.assertFalse(invalid.ok)
+            self.assertEqual(invalid.blocker, QWEN_UNAVAILABLE_IN_SESSION)
+
+    def test_visual_tool_schema_is_visual_only_and_virtual_path_based(self) -> None:
+        tools = {item["function"]["name"]: item["function"] for item in TOOL_DEFINITIONS}
+        for name in ("inspect_visual_reference", "inspect_visual_actual", "compare_visual_screenshots"):
+            self.assertIn(name, tools)
+            description = tools[name]["description"].casefold()
+            self.assertIn("visual", description)
+            self.assertIn("image", description)
+            self.assertIn("source code", description)
+            self.assertNotIn("run_qwen", name)
+
+        reference_path = tools["inspect_visual_reference"]["parameters"]["properties"]["path"]
+        actual_path = tools["inspect_visual_actual"]["parameters"]["properties"]["path"]
+        compare_props = tools["compare_visual_screenshots"]["parameters"]["properties"]
+        for schema in (reference_path, actual_path, compare_props["reference_path"], compare_props["actual_path"]):
+            self.assertIn("(?!/)", schema["pattern"])
+            self.assertIn("png|jpg|jpeg|webp", schema["pattern"])
+        self.assertNotIn("run_qwen", json.dumps(TOOL_DEFINITIONS, ensure_ascii=False))
+
+    def test_visual_tool_sandbox_dispatch_paths_provider_and_safety(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            sandbox, source, target = self.make_configured_sandbox(
+                root,
+                extra=textwrap.dedent(
+                    """\
+                    visual_validation:
+                      enabled: true
+                    """
+                ),
+            )
+            reference = self.write_fake_image(source / "reference.png")
+            actual_jpg = self.write_fake_image(target / "target-output/actual.jpg")
+            self.assertTrue(reference.is_file())
+            self.assertTrue(actual_jpg.is_file())
+
+            def fake_inspect(image_path: Path, goal: str, **kwargs: Any) -> qwen_vision.QwenVisionResult:
+                self.assertTrue(Path(image_path).is_file())
+                self.assertNotIn("source code", goal.casefold())
+                return qwen_vision.QwenVisionResult(
+                    ok=True,
+                    provider="qwen",
+                    mode=qwen_vision.MODE_INSPECT,
+                    summary="visual structure inspected",
+                    findings=("spacing needs review",),
+                    limitations=(),
+                )
+
+            with mock.patch.object(qwen_vision, "inspect_screenshot", side_effect=fake_inspect):
+                reference_result = sandbox.invoke(
+                    "inspect_visual_reference",
+                    {"path": "source/reference.png", "goal": "inspect layout"},
+                )
+                actual_result = sandbox.invoke(
+                    "inspect_visual_actual",
+                    {"path": "target_subdir/actual.jpg", "goal": "inspect rendered UI"},
+                )
+            self.assertTrue(reference_result["ok"])
+            self.assertEqual(reference_result["visual_state"], REFERENCE_ONLY)
+            self.assertTrue(actual_result["ok"])
+            self.assertEqual(actual_result["visual_state"], ACTUAL_ONLY)
+
+        for suffix in (".jpg", ".jpeg", ".webp"):
+            with tempfile.TemporaryDirectory() as dirname:
+                root = Path(dirname)
+                sandbox, _source, target = self.make_configured_sandbox(root, extra="visual_validation:\n  enabled: true\n")
+                self.write_fake_image(target / f"target-output/actual{suffix}")
+                with mock.patch.object(qwen_vision, "inspect_screenshot", side_effect=fake_inspect):
+                    result = sandbox.invoke(
+                        "inspect_visual_actual",
+                        {"path": f"target_subdir/actual{suffix}", "goal": "inspect actual"},
+                    )
+                self.assertTrue(result["ok"])
+
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            sandbox, source, target = self.make_configured_sandbox(root, extra="visual_validation:\n  enabled: true\n")
+            self.write_fake_image(source / "reference.png")
+            self.write_fake_image(target / "target-output/actual.webp")
+
+            def fake_compare(reference_path: Path, actual_path: Path, goal: str, **kwargs: Any) -> qwen_vision.QwenVisionResult:
+                self.assertTrue(reference_path.is_file())
+                self.assertTrue(actual_path.is_file())
+                return qwen_vision.QwenVisionResult(
+                    ok=True,
+                    provider="qwen",
+                    mode=qwen_vision.MODE_COMPARE,
+                    summary="screenshots compared",
+                    findings=("button is lower than reference",),
+                    limitations=(),
+                )
+
+            with mock.patch.object(qwen_vision, "compare_screenshots", side_effect=fake_compare):
+                compare_result = sandbox.invoke(
+                    "compare_visual_screenshots",
+                    {
+                        "reference_path": "source/reference.png",
+                        "actual_path": "target_subdir/actual.webp",
+                        "goal": "compare visual parity",
+                    },
+                )
+            self.assertTrue(compare_result["ok"])
+            self.assertEqual(compare_result["visual_state"], REFERENCE_AND_ACTUAL)
+            self.assertTrue(compare_result["compare_screenshots_completed"])
+
+            for path in (
+                "source/not-image.txt",
+                "source/secret-token.png",
+                "/tmp/reference.png",
+                "source/../reference.png",
+                "source/View.swift",
+            ):
+                (source / "not-image.txt").write_text("text", encoding="utf-8")
+                (source / "secret-token.png").write_bytes(b"image")
+                (source / "View.swift").write_text("struct View {}", encoding="utf-8")
+                blocked = sandbox.invoke(
+                    "inspect_visual_reference",
+                    {"path": path, "goal": "inspect"},
+                )
+                self.assertFalse(blocked["ok"])
+                self.assertIn(blocked["blocker"], {HOST_ENV_BLOCKED, VISUAL_VALIDATION_DISABLED})
+
+            disabled_root = root / "disabled"
+            disabled_root.mkdir()
+            disabled, _source, _target = self.make_configured_sandbox(
+                disabled_root,
+                extra="visual_validation:\n  enabled: false\n",
+            )
+            self.write_fake_image((disabled_root / "source/reference.png"))
+            disabled_result = disabled.invoke(
+                "inspect_visual_reference",
+                {"path": "source/reference.png", "goal": "inspect"},
+            )
+            self.assertFalse(disabled_result["ok"])
+            self.assertEqual(disabled_result["blocker"], VISUAL_VALIDATION_DISABLED)
+
+            missing_key = sandbox.invoke(
+                "inspect_visual_reference",
+                {"path": "source/reference.png", "goal": "inspect"},
+            )
+            self.assertFalse(missing_key["ok"])
+            self.assertEqual(missing_key["blocker"], QWEN_PERMISSION_GATED)
+            rendered = json.dumps(missing_key, ensure_ascii=False)
+            self.assertNotIn("api_key", rendered.casefold())
+            self.assertNotIn("authorization", rendered.casefold())
+            self.assertNotIn("mock-image", rendered)
+
+    def test_visual_runtime_report_pr_body_and_gate_states(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target = self.make_source_target(root)
+            self.write_config(target)
+            default_config = resolve_config(target_root=target, target_repo="owner/target-repo")
+            runtime = RuntimeController()
+            runtime.attach_visual_config(default_config.visual_validation)
+            default_report = render_run_report_json(
+                config=default_config,
+                runtime_state=runtime.as_dict(),
+                repair_report_markdown="",
+                final_summary="default",
+                status="completed",
+                executed=True,
+                iterations=1,
+                tool_call_count=0,
+                read_tool_count=0,
+                write_tool_count=0,
+                operation_log=[],
+            )
+            self.assertIn("visual_validation", default_report)
+            self.assertFalse(default_report["visual_validation"]["required"])
+            self.assertEqual(default_report["visual_validation"]["valid_visual_evidence"], NO_VISUAL_EVIDENCE)
+            self.assertTrue(task_text_indicates_visual("Use the reference screenshot to validate UI layout and color."))
+            self.assertTrue(task_text_indicates_visual("请检查界面截图的布局、颜色、间距和圆角。"))
+            self.assertFalse(task_text_indicates_visual("Refactor the data model and fix unit tests only."))
+
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target = self.make_source_target(root)
+            self.write_config(
+                target,
+                extra="dry_run: false\nrun_agent: true\nconfirm_real_run: true\n",
+                task_text="# Task\n\nValidate the UI screenshot parity for layout and color.",
+            )
+            auto_visual_config = resolve_config(target_root=target, target_repo="owner/target-repo")
+            fake = FakeDeepSeekClient([self.final_response("auto visual task complete")])
+            with redirect_stdout(StringIO()):
+                result = run_tool_loop(
+                    config=auto_visual_config,
+                    source_root=source,
+                    target_root=target,
+                    environ={"DEEPSEEK_API_KEY": "mock-secret-value"},
+                    client_factory=lambda _config, _env: fake,
+                )
+            self.assertEqual(result.status, "visual-incomplete")
+            self.assertTrue(result.runtime_state["visual_required"])
+            self.assertIn("visual keywords", result.runtime_state["visual_validation_required_reason"])
+
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target = self.make_source_target(root)
+            self.write_config(
+                target,
+                extra="dry_run: false\nrun_agent: true\nconfirm_real_run: true\n",
+                task_text="# Task\n\nRefactor a pure backend helper and fix unit tests only.",
+            )
+            pure_code_config = resolve_config(target_root=target, target_repo="owner/target-repo")
+            fake = FakeDeepSeekClient([self.final_response("pure code complete")])
+            with redirect_stdout(StringIO()):
+                result = run_tool_loop(
+                    config=pure_code_config,
+                    source_root=source,
+                    target_root=target,
+                    environ={"DEEPSEEK_API_KEY": "mock-secret-value"},
+                    client_factory=lambda _config, _env: fake,
+                )
+            self.assertEqual(result.status, "completed")
+            self.assertFalse(result.runtime_state["visual_required"])
+
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target = self.make_source_target(root)
+            self.write_config(
+                target,
+                extra="dry_run: false\nrun_agent: true\nconfirm_real_run: true\n",
+                task_text="# Task\n\nPure code task, but the model explicitly checks a screenshot.",
+            )
+            self.write_fake_image(source / "reference.png")
+            auto_tool_config = resolve_config(target_root=target, target_repo="owner/target-repo")
+            fake = FakeDeepSeekClient(
+                [
+                    self.tool_response(
+                        ("visual-ref-auto", "inspect_visual_reference", {"path": "source/reference.png", "goal": "inspect"})
+                    ),
+                    self.final_response("auto visual tool complete"),
+                ]
+            )
+            with mock.patch.object(
+                qwen_vision,
+                "inspect_screenshot",
+                return_value=qwen_vision.QwenVisionResult(
+                    ok=True,
+                    provider="qwen",
+                    mode=qwen_vision.MODE_INSPECT,
+                    summary="auto tool reference inspected",
+                    findings=(),
+                    limitations=(),
+                ),
+            ):
+                with redirect_stdout(StringIO()):
+                    result = run_tool_loop(
+                        config=auto_tool_config,
+                        source_root=source,
+                        target_root=target,
+                        environ={"DEEPSEEK_API_KEY": "mock-secret-value"},
+                        client_factory=lambda _config, _env: fake,
+                    )
+            self.assertTrue(result.runtime_state["visual_required"])
+            self.assertIn("visual tool was called", result.runtime_state["visual_validation_required_reason"])
+
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target = self.make_source_target(root)
+            self.write_config(
+                target,
+                extra="dry_run: false\nrun_agent: true\nconfirm_real_run: true\nvisual_validation:\n  enabled: true\n",
+            )
+            enabled_config = resolve_config(target_root=target, target_repo="owner/target-repo")
+            fake = FakeDeepSeekClient([self.final_response("visual task complete")])
+            with redirect_stdout(StringIO()):
+                result = run_tool_loop(
+                    config=enabled_config,
+                    source_root=source,
+                    target_root=target,
+                    environ={"DEEPSEEK_API_KEY": "mock-secret-value"},
+                    client_factory=lambda _config, _env: fake,
+                )
+            self.assertEqual(result.status, "visual-incomplete")
+            self.assertEqual(result.runtime_state["visual_gate_status"], VISUAL_REPORT_INCOMPLETE)
+            self.assertTrue(result.runtime_state["visual_required"])
+
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target = self.make_source_target(root)
+            self.write_config(
+                target,
+                extra="dry_run: false\nrun_agent: true\nconfirm_real_run: true\nvisual_validation:\n  enabled: true\n",
+            )
+            self.write_fake_image(source / "reference.png")
+            config = resolve_config(target_root=target, target_repo="owner/target-repo")
+            fake = FakeDeepSeekClient(
+                [
+                    self.tool_response(
+                        ("visual-ref", "inspect_visual_reference", {"path": "source/reference.png", "goal": "inspect reference"})
+                    ),
+                    self.final_response("reference inspected"),
+                ]
+            )
+            with mock.patch.object(
+                qwen_vision,
+                "inspect_screenshot",
+                return_value=qwen_vision.QwenVisionResult(
+                    ok=True,
+                    provider="qwen",
+                    mode=qwen_vision.MODE_INSPECT,
+                    summary="reference-only structure",
+                    findings=("fix spacing",),
+                    limitations=(),
+                ),
+            ):
+                with redirect_stdout(StringIO()):
+                    result = run_tool_loop(
+                        config=config,
+                        source_root=source,
+                        target_root=target,
+                        environ={"DEEPSEEK_API_KEY": "mock-secret-value"},
+                        client_factory=lambda _config, _env: fake,
+                    )
+            self.assertEqual(result.runtime_state["valid_visual_evidence"], REFERENCE_ONLY)
+            self.assertEqual(result.runtime_state["visual_gate_status"], "reference_only")
+            report = render_run_report_json(
+                config=config,
+                runtime_state=result.runtime_state,
+                repair_report_markdown=result.repair_report,
+                final_summary=result.final_summary,
+                status=result.status,
+                executed=result.executed,
+                iterations=result.iterations,
+                tool_call_count=result.tool_call_count,
+                read_tool_count=result.read_tool_count,
+                write_tool_count=result.write_tool_count,
+                operation_log=result.operation_log,
+            )
+            self.assertIn("reference-only", report["visual_validation"]["visual_validation_limitations"])
+
+            report_path = root / "forgis-runtime/reports/FORGIS_RUN_REPORT.json"
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(json.dumps(report), encoding="utf-8")
+            body = build_pr_body(
+                target_branch="forgis/output",
+                push_branch="forgis/output-run-123-1",
+                target_base_branch="main",
+                target_subdir="target-output",
+                run_report_json_path=str(report_path),
+            )
+            self.assertIn("Visual Validation", body)
+            self.assertIn("REFERENCE_ONLY", body)
+            self.assertNotIn("secret", body.casefold())
+            self.assertNotIn("base64", body.casefold())
+
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target = self.make_source_target(root)
+            self.write_config(
+                target,
+                extra="dry_run: false\nrun_agent: true\nconfirm_real_run: true\nvisual_validation:\n  enabled: true\n",
+            )
+            self.write_fake_image(source / "reference.png")
+            self.write_fake_image(target / "target-output/actual.webp")
+            config = resolve_config(target_root=target, target_repo="owner/target-repo")
+            fake = FakeDeepSeekClient(
+                [
+                    self.tool_response(
+                        (
+                            "visual-compare",
+                            "compare_visual_screenshots",
+                            {
+                                "reference_path": "source/reference.png",
+                                "actual_path": "target_subdir/actual.webp",
+                                "goal": "compare",
+                            },
+                        )
+                    ),
+                    self.final_response("compare complete"),
+                ]
+            )
+            with mock.patch.object(
+                qwen_vision,
+                "compare_screenshots",
+                return_value=qwen_vision.QwenVisionResult(
+                    ok=True,
+                    provider="qwen",
+                    mode=qwen_vision.MODE_COMPARE,
+                    summary="compare completed",
+                    findings=("actual card radius differs",),
+                    limitations=(),
+                ),
+            ):
+                with redirect_stdout(StringIO()):
+                    result = run_tool_loop(
+                        config=config,
+                        source_root=source,
+                        target_root=target,
+                        environ={"DEEPSEEK_API_KEY": "mock-secret-value"},
+                        client_factory=lambda _config, _env: fake,
+                    )
+            self.assertEqual(result.runtime_state["valid_visual_evidence"], REFERENCE_AND_ACTUAL)
+            self.assertTrue(result.runtime_state["compare_screenshots_completed"])
+            self.assertEqual(result.runtime_state["visual_gate_status"], "compare_completed")
+
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target = self.make_source_target(root)
+            self.write_config(
+                target,
+                extra=textwrap.dedent(
+                    """\
+                    dry_run: false
+                    run_agent: true
+                    confirm_real_run: true
+                    visual_validation:
+                      enabled: true
+                      provider: qwen
+                      max_visual_iterations: 2
+                      require_reference_first: true
+                      upload_visual_artifact: false
+                    """
+                ),
+                task_text="# Task\n\nUse reference and actual screenshots for UI visual validation.",
+            )
+            self.write_fake_image(source / "reference.png")
+            self.write_fake_image(target / "target-output/actual.png")
+            config = resolve_config(target_root=target, target_repo="owner/target-repo")
+            fake = FakeDeepSeekClient(
+                [
+                    self.tool_response(
+                        (
+                            "visual-ref",
+                            "inspect_visual_reference",
+                            {"path": "source/reference.png", "goal": "inspect reference screenshot"},
+                        ),
+                        (
+                            "visual-actual",
+                            "inspect_visual_actual",
+                            {"path": "target_subdir/actual.png", "goal": "inspect actual screenshot"},
+                        ),
+                        (
+                            "visual-compare",
+                            "compare_visual_screenshots",
+                            {
+                                "reference_path": "source/reference.png",
+                                "actual_path": "target_subdir/actual.png",
+                                "goal": "compare visual parity",
+                            },
+                        ),
+                    ),
+                    self.final_response("visual compare complete"),
+                ]
+            )
+
+            def fake_inspect(image_path: Path, goal: str, **kwargs: Any) -> qwen_vision.QwenVisionResult:
+                self.assertEqual(kwargs.get("api_key"), "mock-qwen-key")
+                summary = "reference inspected" if image_path.name == "reference.png" else "actual inspected"
+                return qwen_vision.QwenVisionResult(
+                    ok=True,
+                    provider="qwen",
+                    mode=qwen_vision.MODE_INSPECT,
+                    summary=summary,
+                    findings=("visual structure captured",),
+                    limitations=(),
+                )
+
+            def fake_compare(reference_path: Path, actual_path: Path, goal: str, **kwargs: Any) -> qwen_vision.QwenVisionResult:
+                self.assertEqual(kwargs.get("api_key"), "mock-qwen-key")
+                self.assertTrue(reference_path.is_file())
+                self.assertTrue(actual_path.is_file())
+                return qwen_vision.QwenVisionResult(
+                    ok=True,
+                    provider="qwen",
+                    mode=qwen_vision.MODE_COMPARE,
+                    summary="compare completed",
+                    findings=("remaining radius difference",),
+                    limitations=(),
+                )
+
+            with mock.patch.object(qwen_vision, "inspect_screenshot", side_effect=fake_inspect), mock.patch.object(
+                qwen_vision,
+                "compare_screenshots",
+                side_effect=fake_compare,
+            ):
+                with redirect_stdout(StringIO()):
+                    result = run_tool_loop(
+                        config=config,
+                        source_root=source,
+                        target_root=target,
+                        environ={"DEEPSEEK_API_KEY": "mock-secret-value", "QWEN_API_KEY": "mock-qwen-key"},
+                        client_factory=lambda _config, _env: fake,
+                        report_output_dir="forgis-runtime/reports",
+                        report_allowed_root=root,
+                    )
+            self.assertEqual(result.status, "completed")
+            self.assertTrue(result.runtime_state["visual_required"])
+            self.assertEqual(
+                result.runtime_state["visual_tools_called"],
+                ["inspect_visual_reference", "inspect_visual_actual", "compare_visual_screenshots"],
+            )
+            self.assertEqual(result.runtime_state["valid_visual_evidence"], REFERENCE_AND_ACTUAL)
+            self.assertTrue(result.runtime_state["compare_screenshots_completed"])
+            self.assertEqual(result.runtime_state["visual_gate_status"], "compare_completed")
+            evidence_root = root / "forgis-runtime/visual-evidence/local/owner__target-repo"
+            self.assertTrue((evidence_root / "reference").is_dir())
+            self.assertTrue((evidence_root / "actual").is_dir())
+            self.assertTrue((evidence_root / "qwen").is_dir())
+            report_json = json.loads(Path(result.report_json_path).read_text(encoding="utf-8"))
+            report_markdown = Path(result.report_markdown_path).read_text(encoding="utf-8")
+            self.assertEqual(report_json["visual_validation"]["valid_visual_evidence"], REFERENCE_AND_ACTUAL)
+            self.assertTrue(report_json["visual_validation"]["compare_screenshots_completed"])
+            self.assertIn("Visual Validation", report_markdown)
+            body = build_pr_body(
+                target_branch="forgis/output",
+                push_branch="forgis/output-run-123-1",
+                target_base_branch="main",
+                target_subdir="target-output",
+                run_report_json_path=result.report_json_path,
+            )
+            self.assertIn("Visual Validation", body)
+            combined = json.dumps(report_json, ensure_ascii=False) + report_markdown + body
+            self.assertNotIn("mock-qwen-key", combined)
+            self.assertNotIn("base64", combined.casefold())
+            self.assertNotIn("mock-image", combined)
+
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target = self.make_source_target(root)
+            self.write_config(
+                target,
+                extra="dry_run: false\nrun_agent: true\nconfirm_real_run: true\nselected_skills:\n  - qwen_visual_mode\n",
+            )
+            config = resolve_config(target_root=target, target_repo="owner/target-repo")
+            fake = FakeDeepSeekClient([self.final_response("auto visual skill complete")])
+            with redirect_stdout(StringIO()):
+                result = run_tool_loop(
+                    config=config,
+                    source_root=source,
+                    target_root=target,
+                    environ={"DEEPSEEK_API_KEY": "mock-secret-value"},
+                    client_factory=lambda _config, _env: fake,
+                )
+            self.assertEqual(result.status, "visual-incomplete")
+            self.assertTrue(result.runtime_state["visual_required"])
+
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target = self.make_source_target(root)
+            self.write_config(
+                target,
+                extra="dry_run: false\nrun_agent: true\nconfirm_real_run: true\nvisual_validation:\n  enabled: true\n",
+            )
+            self.write_fake_image(source / "reference.png")
+            config = resolve_config(target_root=target, target_repo="owner/target-repo")
+            fake = FakeDeepSeekClient(
+                [
+                    self.tool_response(
+                        ("visual-missing-key", "inspect_visual_reference", {"path": "source/reference.png", "goal": "inspect"})
+                    ),
+                    self.final_response("provider unavailable recorded"),
+                ]
+            )
+            with redirect_stdout(StringIO()):
+                result = run_tool_loop(
+                    config=config,
+                    source_root=source,
+                    target_root=target,
+                    environ={"DEEPSEEK_API_KEY": "mock-secret-value"},
+                    client_factory=lambda _config, _env: fake,
+                    report_output_dir="forgis-runtime/reports",
+                    report_allowed_root=root,
+                )
+            self.assertEqual(result.runtime_state["actual_screenshot_blocker"], QWEN_PERMISSION_GATED)
+            self.assertEqual(result.runtime_state["visual_gate_status"], "blocked")
+            report_json = json.loads(Path(result.report_json_path).read_text(encoding="utf-8"))
+            self.assertEqual(report_json["visual_validation"]["actual_screenshot_blocker"], QWEN_PERMISSION_GATED)
+            self.assertIn("Provider", report_json["visual_validation"]["visual_validation_limitations"])
+            self.assertFalse(report_json["visual_validation"]["compare_screenshots_completed"])
+
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target = self.make_source_target(root)
+            self.write_config(
+                target,
+                extra="dry_run: false\nrun_agent: true\nconfirm_real_run: true\nvisual_validation:\n  enabled: false\n",
+            )
+            self.write_fake_image(source / "reference.png")
+            config = resolve_config(target_root=target, target_repo="owner/target-repo")
+            fake = FakeDeepSeekClient(
+                [
+                    self.tool_response(
+                        ("visual-disabled", "inspect_visual_reference", {"path": "source/reference.png", "goal": "inspect"})
+                    ),
+                    self.final_response("disabled complete"),
+                ]
+            )
+            with redirect_stdout(StringIO()):
+                result = run_tool_loop(
+                    config=config,
+                    source_root=source,
+                    target_root=target,
+                    environ={"DEEPSEEK_API_KEY": "mock-secret-value"},
+                    client_factory=lambda _config, _env: fake,
+                )
+            self.assertFalse(result.runtime_state["visual_required"])
+            self.assertEqual(result.runtime_state["actual_screenshot_blocker"], VISUAL_VALIDATION_DISABLED)
 
     def test_build_and_test_command_config_is_optional_and_array_based(self) -> None:
         with tempfile.TemporaryDirectory() as dirname:
@@ -2335,11 +3285,12 @@ class ForgisConfigTests(unittest.TestCase):
             payload = result.as_dict()
             self.assertEqual(payload["report_write_status"], "written")
             report_json = json.loads(Path(result.report_json_path).read_text(encoding="utf-8"))
-            self.assertEqual(report_json["schema_version"], "forgis.run_report.v5.0")
+            self.assertEqual(report_json["schema_version"], "forgis.run_report.v6.0")
             self.assertEqual(report_json["tool_loop"]["status"], "completed")
             self.assertFalse(report_json["repair_loop"]["enabled"])
             self.assertTrue(report_json["skills"]["skills_enabled"])
             self.assertEqual(report_json["skills"]["selected_skill_names"], ["migration_general"])
+            self.assertIn("visual_validation", report_json)
 
     def test_tool_loop_report_disabled_skips_persistent_write(self) -> None:
         with tempfile.TemporaryDirectory() as dirname:
@@ -4460,6 +5411,7 @@ class ForgisConfigTests(unittest.TestCase):
             "## Active Unit State",
             "## Migration Plan Events",
             "## Build / Test",
+            "## Visual Validation",
             "## Changed Paths",
             "## Final Summary",
         ):
@@ -4468,7 +5420,7 @@ class ForgisConfigTests(unittest.TestCase):
     def assert_report_fixture_schema_version(self, report_json: dict[str, Any], fixture: dict[str, Any]) -> None:
         self.assertEqual(
             report_json["schema_version"],
-            fixture["expect"].get("report_schema_version", "forgis.run_report.v5.0"),
+            fixture["expect"].get("report_schema_version", "forgis.run_report.v6.0"),
         )
 
     def test_report_fixture_active_status_golden_fields(self) -> None:
@@ -4776,6 +5728,20 @@ class ForgisConfigTests(unittest.TestCase):
                         }
                     ],
                 },
+                "visual_required": True,
+                "visual_provider": "qwen",
+                "visual_tools_called": ["inspect_visual_reference"],
+                "reference_screenshots_used": ["source/reference.png"],
+                "actual_screenshots": [],
+                "valid_visual_evidence": REFERENCE_ONLY,
+                "compare_screenshots_completed": False,
+                "vision_result_summary": "Reference UI inspected TOKEN=secret-token-value",
+                "actual_screenshot_blocker": "",
+                "visual_validation_limitations": "reference-only; not full rendered visual validation.",
+                "fixes_from_qwen_result": "Adjust spacing",
+                "remaining_ui_differences": "",
+                "visual_gate_status": "reference_only",
+                "visual_validation_required_reason": "visual_validation.enabled=true",
                 "repair_events": [
                     {
                         "event_id": index,
@@ -4815,6 +5781,7 @@ class ForgisConfigTests(unittest.TestCase):
             )
             self.assertIn("Forgis Run Report", markdown)
             self.assertIn("Build / Test", markdown)
+            self.assertIn("Visual Validation", markdown)
             self.assertIn("Skills", markdown)
             self.assertIn("Migration Plan", markdown)
             self.assertIn("Migration Plan Audit Summary", markdown)
@@ -4838,6 +5805,8 @@ class ForgisConfigTests(unittest.TestCase):
             self.assertIn("Repair", markdown)
             self.assertIn("max_attempts_reached", markdown)
             self.assertIn("target/target-output/app.py", markdown)
+            self.assertIn("REFERENCE_ONLY", markdown)
+            self.assertIn("not full rendered visual validation", markdown)
             self.assertNotIn("Read or search the relevant source", markdown)
             self.assertNotIn("secret-token-value", markdown)
             self.assertNotIn("super-secret-value", markdown)
@@ -4860,6 +5829,9 @@ class ForgisConfigTests(unittest.TestCase):
             )
             rendered_json = json.dumps(report_json, ensure_ascii=False)
             self.assertEqual(report_json["build_test"]["build_runs"], 1)
+            self.assertTrue(report_json["visual_validation"]["required"])
+            self.assertEqual(report_json["visual_validation"]["valid_visual_evidence"], REFERENCE_ONLY)
+            self.assertIn("not full rendered visual validation", report_json["visual_validation"]["visual_validation_limitations"])
             self.assertEqual(report_json["repair_loop"]["stopped_reason"], "max_attempts_reached")
             self.assertEqual(report_json["skills"]["selected_skill_names"], ["migration_general", "build_repair"])
             self.assertEqual(report_json["skills"]["skipped_skill_names"], ["swiftui_to_harmonyos"])
@@ -5654,6 +6626,24 @@ class ForgisConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as dirname:
             log_path = Path(dirname) / "FORGIS_LOG.md"
             log_path.write_text("final_summary\n" + ("long output\n" * 20_000), encoding="utf-8")
+            report_path = Path(dirname) / "FORGIS_RUN_REPORT.json"
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "visual_validation": {
+                            "required": True,
+                            "provider": "qwen",
+                            "called": True,
+                            "valid_visual_evidence": "REFERENCE_AND_ACTUAL",
+                            "compare_screenshots_completed": True,
+                            "actual_screenshot_blocker": "",
+                            "visual_validation_limitations": "none",
+                            "raw_provider_response": "SECRET=do-not-render",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
 
             body = build_pr_body(
                 target_branch="forgis/output",
@@ -5666,6 +6656,7 @@ class ForgisConfigTests(unittest.TestCase):
                 remote_target_branch_exists="true",
                 run_url="https://github.example/owner/repo/actions/runs/123",
                 run_log_path=str(log_path),
+                run_report_json_path=str(report_path),
             )
             self.assertLessEqual(len(body), PR_BODY_MAX_CHARS)
             self.assertIn("PR head / pushed branch: `forgis/output-run-123-1`", body)
@@ -5676,6 +6667,9 @@ class ForgisConfigTests(unittest.TestCase):
             self.assertIn("FORGIS_RUN_REPORT.md", body)
             self.assertIn("FORGIS_RUN_REPORT.json", body)
             self.assertIn("FORGIS_MIGRATION_PLAN.json", body)
+            self.assertIn("Visual Validation", body)
+            self.assertIn("REFERENCE_AND_ACTUAL", body)
+            self.assertNotIn("do-not-render", body)
             self.assertIn("Truncated. See forgis-reports artifact for the full report.", body)
             self.assertNotIn("long output\n" * 1000, body)
 
@@ -5686,9 +6680,11 @@ class ForgisConfigTests(unittest.TestCase):
                 target_subdir="target-output",
                 commit_sha="abc1234",
                 run_url="https://github.example/owner/repo/actions/runs/123",
+                run_report_json_path=str(report_path),
             )
             self.assertLessEqual(len(short_body), PR_BODY_SHORT_MAX_CHARS)
             self.assertIn("forgis-reports", short_body)
+            self.assertIn("Visual Validation", short_body)
             self.assertNotIn("Short Run Log Excerpt", short_body)
 
     def test_create_pr_uses_target_branch_when_remote_branch_is_absent(self) -> None:
@@ -5905,6 +6901,14 @@ class ForgisConfigTests(unittest.TestCase):
             self.assertIn("migration_plan_resume_enabled: false", text)
             self.assertIn("migration_plan_auto_complete_on_success: false", text)
             self.assertIn("repair_loop_enabled: false", text)
+            self.assertIn("visual_validation:", text)
+            self.assertIn("enabled: auto", text)
+            self.assertIn("provider: qwen", text)
+            self.assertIn("max_visual_iterations: 2", text)
+            self.assertIn("docs/QWEN_VISUAL_MODE.md", text)
+            self.assertIn("agent/visual_evidence.py", text)
+            self.assertIn("agent/qwen_vision.py", text)
+            self.assertIn("Phase 8+", text)
             self.assertIn("swiftui_to_compose", text)
             for sizing_value in ("5000", "5000000", "2000000", "10000", "20000000"):
                 self.assertIn(sizing_value, text)

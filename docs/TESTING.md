@@ -1,6 +1,6 @@
 # 构建与测试说明
 
-最近自查日期：2026-05-26
+最近自查日期：2026-05-29
 
 ## 环境要求
 
@@ -9,6 +9,7 @@
 - Shell：`agent/build_target.sh` 和 `agent/create_pr.sh` 使用 bash。
 - Git/GitHub CLI：真实 PR 创建路径依赖 `git` 和 `gh`，在 `agent/create_pr.sh` 中使用。
 - GitHub Actions secrets：真实运行依赖 `FORGIS_TARGET_TOKEN`、`FORGIS_SOURCE_TOKEN` 和模型 secret 环境变量。不要在文档或配置中写入真实值。
+- v6.0 视觉闭环测试不需要真实 Qwen API key。`visual_validation` 配置不得包含真实 token、API key、图片路径或本地敏感路径；`agent/qwen_vision.py` 的 provider transport 在测试中必须 mock。真实 Qwen 调用只允许在运行时显式提供 `QWEN_API_KEY`，可选 `QWEN_API_BASE` 和 `QWEN_VISION_MODEL`，这些值不得写入报告。
 
 ## 依赖安装方式
 
@@ -37,7 +38,11 @@ bash -n agent/create_pr.sh
 bash -n agent/build_target.sh
 ```
 
-注意：本轮未运行上述构建命令。
+v6.0 Phase 3-4 新增 Python 模块后，应至少运行：
+
+```bash
+python3 -m py_compile agent/*.py
+```
 
 ## 单元测试命令
 
@@ -55,6 +60,23 @@ python3 -m unittest
 
 两者都来自项目文件。若需要最接近 CI，请优先运行 `python -m unittest tests/test_forgis_config.py`。
 
+v6.0 视觉闭环的配置解析和视觉基础设施测试点集中在 `tests/test_forgis_config.py`：
+
+- 不写 `visual_validation` 时使用兼容默认值。
+- `enabled` 仅允许 `auto`、`true`、`false`。
+- `provider` 本轮仅允许 `qwen`。
+- `max_visual_iterations` 仅允许整数 `0..2`。
+- `require_reference_first` 和 `upload_visual_artifact` 必须是 YAML boolean。
+- `visual_validation` 内未知字段必须失败，避免 API key、secret 或本地路径混入配置。
+- `FORGIS_VISUAL_*` env/output 只包含脱敏控制值。
+- `agent/visual_evidence.py` 创建 `reference/actual/qwen` 目录，拒绝 source/target/home/secret-like runtime root，校验图片扩展名，计算 `REFERENCE_AND_ACTUAL` / `REFERENCE_ONLY` / `ACTUAL_ONLY` / `NO` 状态。
+- `agent/qwen_vision.py` 缺少 API key 时返回 blocker；inspect/compare 成功路径用 mock；provider failure 和 invalid response 不泄露 API key、图片 bytes 或 base64；单元测试不真实访问网络。
+- 三个视觉工具存在于 `agent/deepseek_agent.py` schema，说明明确只处理图片/视觉，不叫 `run_qwen`。
+- `FileToolSandbox` 分发 `inspect_visual_reference`、`inspect_visual_actual`、`compare_visual_screenshots`，接受合法图片，拒绝绝对路径、`..`、非图片、secret-like 文件名和源码/文本文件。
+- `visual_validation.enabled=false` 时视觉工具返回 disabled blocker；缺少 provider/API key 时返回 blocker，不崩溃。
+- run report JSON 始终包含 `visual_validation` 块；reference-only、reference+actual+compare、provider blocker、gate incomplete、auto 关键词判定和 controller-level smoke 都有测试。
+- PR body 包含短 Visual Validation 摘要，并保持脱敏、有界，不包含 provider raw response、secret、headers、base64 或图片 bytes。
+
 ## 集成测试命令
 
 当前没有独立集成测试目录。`.github/workflows/validate-forgis.yml` 包含一个 controller smoke test，会临时创建 `tmp/source`、`tmp/target`、写入最小 `FORGIS_CONFIG.yml` 和 `FORGIS_TASK.md`，再运行：
@@ -71,7 +93,7 @@ python agent/forge.py \
 
 ## UI 测试命令
 
-不适用。当前项目没有前端 UI 或客户端 UI。
+不适用。当前项目没有前端 UI 或客户端 UI。v6.0 只允许模型使用已有截图文件路径进行受控视觉工具调用；测试默认不调用真实 Qwen，运行时只有显式 `QWEN_API_KEY` 才能调用 provider。仍不自动截图、不上传 artifacts。
 
 ## 静态检查 / lint / format
 
@@ -88,6 +110,10 @@ bash -n agent/create_pr.sh
 ## 手动验证矩阵
 
 - 配置解析：最小 `FORGIS_CONFIG.yml`、未知字段、缺失 task、非法路径、真实运行 gate。
+- Visual validation config：默认值、合法枚举、非法 provider、iteration 越界、严格 boolean、未知字段失败、env/output 不含 Qwen secret。
+- Visual evidence：runtime 目录结构、target repo slug、安全路径拒绝、图片扩展名 allow/deny、状态分类、summary 脱敏序列化。
+- Qwen adapter：missing key、mock inspect、mock compare、mock failure、invalid response、安全 blocker、非法路径拒绝、单元测试无真实网络。
+- Visual tools/report/gate：schema、sandbox dispatch、disabled/provider blocker、reference-only limitation、reference+actual compare completed、auto 模式 required 判定、`VISUAL_REPORT_INCOMPLETE`、run report / PR body 脱敏摘要。
 - Dry run：`dry_run=true` 时不调用 DeepSeek、不写目标仓库、不 push/PR。
 - Tool sandbox：读 source/target、写 `target_subdir`、拒绝 source 写入、拒绝 target root 写入、拒绝 symlink 和 secret-like 路径。
 - Build/test feedback：未配置时 skipped，安全命令成功/失败/超时/拒绝时返回结构化摘要。
@@ -101,6 +127,7 @@ bash -n agent/create_pr.sh
 
 - 目标仓库没有 `FORGIS_CONFIG.yml` 或文件为空。
 - `FORGIS_CONFIG.yml` 含未知字段，例如历史文档提到但当前不支持的字段。
+- `visual_validation` 内包含未知字段、API key、token、图片路径、evidence root 或非 boolean 的 `require_reference_first` / `upload_visual_artifact`。
 - `target_repo` 被写入配置，而不是通过 workflow input 或 CLI 参数传入。
 - `target_subdir`、`run_log_path`、task 路径使用绝对路径、`..`、`.git` 或逃逸目标仓库根。
 - `dry_run=false` 但 `confirm_real_run` 不是 true。
@@ -111,15 +138,15 @@ bash -n agent/create_pr.sh
 
 ## 本轮是否实际运行命令
 
-本轮实际运行的是项目自查和文档验证命令，包括：
+v6.0 视觉闭环本轮实际运行：
 
-- `pwd`
-- `git rev-parse --show-toplevel`
-- `git status --short`
-- 多个只读 `find`、`rg`、`sed`、`wc`、`git ls-files`
-- 文档写入后的 `git diff --check`
-- 文档写入后的 `git status --short`
-- 文档写入后的 `find docs -maxdepth 1 -type f | sort`
-- 文档写入后的 `sed -n '1,220p' AGENTS.md`
+- `python3 -m unittest tests/test_forgis_config.py`：已在实现中途运行，134 个测试通过；最终结果以本轮最终报告为准。
+- `python3 -m unittest`：134 个测试通过。
+- `python3 -m py_compile agent/.py`：按用户给定命令执行，失败原因是 `agent/.py` 文件不存在；实际有效命令见下一项。
+- `python3 -m py_compile agent/*.py`：通过。
+- `bash -n agent/build_target.sh`：通过。
+- `bash -n agent/create_pr.sh`：通过。
+- `git diff --check`：通过。
+- `git status --short`：列出本轮和前序 v6.0 未提交改动，结果以最终报告为准。
 
-本轮未运行构建或测试。
+本轮修改了 workflow 与 Python/文档；工作区仍包含前序 `agent/create_pr.sh` 改动，因此已运行两个 shell syntax check。
