@@ -90,16 +90,22 @@ DEFAULT_STAGED_MAX_UNITS_PER_RUN = 12
 DEFAULT_STAGED_COMPARE_REPORT_DIR = "FORGIS_COMPARE_REPORTS"
 DEFAULT_VISUAL_VALIDATION_ENABLED = "auto"
 DEFAULT_VISUAL_VALIDATION_PROVIDER = "qwen"
+DEFAULT_VISUAL_VALIDATION_MODE = "reference_guidance"
 DEFAULT_MAX_VISUAL_ITERATIONS = 2
 MAX_VISUAL_ITERATIONS_LIMIT = 2
 VISUAL_VALIDATION_ENABLED_VALUES = frozenset({"auto", "true", "false"})
 VISUAL_VALIDATION_PROVIDERS = frozenset({"qwen"})
+VISUAL_VALIDATION_MODES = frozenset({"reference_guidance", "compare"})
 VISUAL_VALIDATION_FIELDS = frozenset(
     {
         "enabled",
         "provider",
+        "mode",
+        "reference_screenshot_dirs",
+        "actual_screenshot_dirs",
         "max_visual_iterations",
         "require_reference_first",
+        "require_actual_for_full_validation",
         "upload_visual_artifact",
     }
 )
@@ -111,6 +117,7 @@ SECRET_SKILL_NAME_WORDS = re.compile(
     r"(secret|token|credential|password|api[_-]?key|private|\.env|\.npmrc|\.pypirc|\.netrc)",
     re.IGNORECASE,
 )
+WINDOWS_ABSOLUTE_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
 
 CONFIG_FIELDS = {
     "source_repo",
@@ -202,8 +209,12 @@ REQUIRED_FIELDS = {
 class VisualValidationConfig:
     enabled: str
     provider: str
+    mode: str
+    reference_screenshot_dirs: tuple[str, ...]
+    actual_screenshot_dirs: tuple[str, ...]
     max_visual_iterations: int
     require_reference_first: bool
+    require_actual_for_full_validation: bool
     upload_visual_artifact: bool
 
 
@@ -449,9 +460,21 @@ class ResolvedConfig:
             "EXECUTION_MODE": self.execution_mode,
             "FORGIS_VISUAL_VALIDATION_ENABLED": self.visual_validation.enabled,
             "FORGIS_VISUAL_VALIDATION_PROVIDER": self.visual_validation.provider,
+            "FORGIS_VISUAL_VALIDATION_MODE": self.visual_validation.mode,
+            "FORGIS_VISUAL_REFERENCE_SCREENSHOT_DIRS_JSON": json.dumps(
+                list(self.visual_validation.reference_screenshot_dirs),
+                ensure_ascii=False,
+            ),
+            "FORGIS_VISUAL_ACTUAL_SCREENSHOT_DIRS_JSON": json.dumps(
+                list(self.visual_validation.actual_screenshot_dirs),
+                ensure_ascii=False,
+            ),
             "FORGIS_VISUAL_MAX_ITERATIONS": str(self.visual_validation.max_visual_iterations),
             "FORGIS_VISUAL_REQUIRE_REFERENCE_FIRST": (
                 "true" if self.visual_validation.require_reference_first else "false"
+            ),
+            "FORGIS_VISUAL_REQUIRE_ACTUAL_FOR_FULL_VALIDATION": (
+                "true" if self.visual_validation.require_actual_for_full_validation else "false"
             ),
             "FORGIS_VISUAL_UPLOAD_ARTIFACT": (
                 "true" if self.visual_validation.upload_visual_artifact else "false"
@@ -723,6 +746,18 @@ def select_visual_validation_provider(config: dict[str, Any]) -> str:
     return provider
 
 
+def select_visual_validation_mode(config: dict[str, Any]) -> str:
+    if "mode" not in config or config["mode"] is None:
+        return DEFAULT_VISUAL_VALIDATION_MODE
+    text = non_empty(config["mode"])
+    if text is None:
+        raise ValueError("visual_validation.mode must be one of: reference_guidance, compare.")
+    mode = clean_single_line(text, "visual_validation.mode").casefold()
+    if mode not in VISUAL_VALIDATION_MODES:
+        raise ValueError("visual_validation.mode must be one of: reference_guidance, compare.")
+    return mode
+
+
 def select_visual_validation_iterations(config: dict[str, Any]) -> int:
     if "max_visual_iterations" not in config or config["max_visual_iterations"] is None:
         return DEFAULT_MAX_VISUAL_ITERATIONS
@@ -735,6 +770,48 @@ def select_visual_validation_iterations(config: dict[str, Any]) -> int:
             f"{MAX_VISUAL_ITERATIONS_LIMIT}."
         )
     return value
+
+
+def _visual_screenshot_dir_is_secret_like(part: str) -> bool:
+    lowered = part.casefold()
+    return (
+        lowered in {".env", ".netrc", ".npmrc", ".pypirc", ".ssh"}
+        or lowered.endswith((".pem", ".key", ".p12", ".pfx", ".mobileprovision", ".cer", ".crt"))
+        or bool(SECRET_SKILL_NAME_WORDS.search(part))
+    )
+
+
+def validate_visual_screenshot_dir(value: Any, label: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{label} must be a relative target repository path string.")
+    text = non_empty(value)
+    if text is None:
+        raise ValueError(f"{label} must be a non-empty relative target repository path.")
+    cleaned = clean_single_line(text, label).replace("\\", "/")
+    if cleaned.startswith("/") or cleaned.startswith("~") or WINDOWS_ABSOLUTE_PATH_RE.match(cleaned):
+        raise ValueError(f"{label} must be relative to the target repository root.")
+    raw = PurePosixPath(cleaned.strip("/"))
+    if raw.is_absolute() or not raw.parts:
+        raise ValueError(f"{label} must be a non-empty relative target repository path.")
+    if any(part in {"", ".", "..", ".git"} for part in raw.parts):
+        raise ValueError(f"{label} contains an unsafe path segment: {value}")
+    if any(_visual_screenshot_dir_is_secret_like(part) for part in raw.parts):
+        raise ValueError(f"{label} must not contain secret-like path segments.")
+    return raw.as_posix()
+
+
+def select_visual_screenshot_dirs(config: dict[str, Any], field: str) -> tuple[str, ...]:
+    if field not in config or config[field] is None:
+        return ()
+    value = config[field]
+    if not isinstance(value, list):
+        raise ValueError(f"visual_validation.{field} must be a YAML list of relative path strings.")
+    selected: list[str] = []
+    for index, item in enumerate(value):
+        path = validate_visual_screenshot_dir(item, f"visual_validation.{field}[{index}]")
+        if path not in selected:
+            selected.append(path)
+    return tuple(selected)
 
 
 def select_visual_validation_config(config: dict[str, Any]) -> VisualValidationConfig:
@@ -755,11 +832,20 @@ def select_visual_validation_config(config: dict[str, Any]) -> VisualValidationC
     return VisualValidationConfig(
         enabled=select_visual_validation_enabled(visual),
         provider=select_visual_validation_provider(visual),
+        mode=select_visual_validation_mode(visual),
+        reference_screenshot_dirs=select_visual_screenshot_dirs(visual, "reference_screenshot_dirs"),
+        actual_screenshot_dirs=select_visual_screenshot_dirs(visual, "actual_screenshot_dirs"),
         max_visual_iterations=select_visual_validation_iterations(visual),
         require_reference_first=select_strict_nested_bool(
             visual,
             "require_reference_first",
             True,
+            prefix="visual_validation",
+        ),
+        require_actual_for_full_validation=select_strict_nested_bool(
+            visual,
+            "require_actual_for_full_validation",
+            False,
             prefix="visual_validation",
         ),
         upload_visual_artifact=select_strict_nested_bool(
@@ -1777,8 +1863,12 @@ def markdown_summary(resolved: ResolvedConfig) -> str:
             f"| Execution mode | `{resolved.execution_mode}` |",
             f"| visual_validation.enabled | `{resolved.visual_validation.enabled}` |",
             f"| visual_validation.provider | `{resolved.visual_validation.provider}` |",
+            f"| visual_validation.mode | `{resolved.visual_validation.mode}` |",
+            f"| visual_validation.reference_screenshot_dirs | `{', '.join(resolved.visual_validation.reference_screenshot_dirs) or '[]'}` |",
+            f"| visual_validation.actual_screenshot_dirs | `{', '.join(resolved.visual_validation.actual_screenshot_dirs) or '[]'}` |",
             f"| visual_validation.max_visual_iterations | `{resolved.visual_validation.max_visual_iterations}` |",
             f"| visual_validation.require_reference_first | `{str(resolved.visual_validation.require_reference_first).lower()}` |",
+            f"| visual_validation.require_actual_for_full_validation | `{str(resolved.visual_validation.require_actual_for_full_validation).lower()}` |",
             f"| visual_validation.upload_visual_artifact | `{str(resolved.visual_validation.upload_visual_artifact).lower()}` |",
             f"| Task prompt path | `{resolved.task_prompt_path}` |",
             f"| Target subdir | `{resolved.target_subdir}` |",

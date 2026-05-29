@@ -83,16 +83,26 @@ def _visual_summary_lines(report_json_path: str | None) -> list[str]:
     limitations = _clean_visual_field(visual.get("visual_validation_limitations"), "none")
     if evidence == "REFERENCE_ONLY" and limitations == "none":
         limitations = "reference-only; not full rendered visual validation."
+    guidance_completed = bool(visual.get("guidance_completed"))
+    full_rendered_validation = bool(visual.get("full_rendered_validation"))
+    mode = _clean_visual_field(visual.get("mode"), "reference_guidance")
+    extra: list[str] = []
+    if guidance_completed and not full_rendered_validation:
+        extra.append("- Guidance: `reference-guided migration completed; full rendered validation not performed`")
     return [
         "## Visual Validation",
         "",
+        f"- Mode: `{mode}`",
         f"- Required: `{str(bool(visual.get('required'))).lower()}`",
         f"- Provider: `{_clean_visual_field(visual.get('provider'), 'qwen')}`",
         f"- Called: `{str(bool(visual.get('called'))).lower()}`",
+        f"- Guidance completed: `{str(guidance_completed).lower()}`",
         f"- Evidence: `{evidence}`",
         f"- Compare completed: `{str(bool(visual.get('compare_screenshots_completed'))).lower()}`",
+        f"- Full rendered validation: `{str(full_rendered_validation).lower()}`",
         f"- Blocker: `{blocker}`",
         f"- Limitations: `{limitations}`",
+        *extra,
     ]
 
 

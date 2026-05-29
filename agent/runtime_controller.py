@@ -7,6 +7,7 @@ from typing import Any
 from repair_report import sanitize_path, sanitize_text
 from visual_evidence import (
     ACTUAL_ONLY,
+    NO_REFERENCE_SCREENSHOTS_FOUND,
     NO_VISUAL_EVIDENCE,
     REFERENCE_AND_ACTUAL,
     REFERENCE_ONLY,
@@ -30,6 +31,7 @@ WRITE_OBSERVATION_TOOLS = {
 }
 CHECK_FAILURE_STATUSES = {"failed", "rejected", "timeout", "blocked"}
 VISUAL_OBSERVATION_TOOLS = {
+    "list_visual_references",
     "inspect_visual_reference",
     "inspect_visual_actual",
     "compare_visual_screenshots",
@@ -156,11 +158,17 @@ class RuntimeController:
     migration_plan_recommended_next_action: str = ""
     visual_required: bool = False
     visual_provider: str = "qwen"
+    visual_mode: str = "reference_guidance"
     visual_tools_called: list[str] = dataclasses.field(default_factory=list)
+    reference_screenshot_dirs: list[str] = dataclasses.field(default_factory=list)
+    reference_screenshots_found: list[str] = dataclasses.field(default_factory=list)
     reference_screenshots_used: list[str] = dataclasses.field(default_factory=list)
+    actual_screenshot_dirs: list[str] = dataclasses.field(default_factory=list)
     actual_screenshots: list[str] = dataclasses.field(default_factory=list)
     valid_visual_evidence: str = NO_VISUAL_EVIDENCE
+    guidance_completed: bool = False
     compare_screenshots_completed: bool = False
+    full_rendered_validation: bool = False
     vision_result_summary: str = ""
     actual_screenshot_blocker: str = ""
     visual_validation_limitations: str = ""
@@ -171,6 +179,7 @@ class RuntimeController:
     _visual_enabled_mode: str = dataclasses.field(default="auto", repr=False)
     _visual_skill_selected: bool = dataclasses.field(default=False, repr=False)
     _visual_task_signal: bool = dataclasses.field(default=False, repr=False)
+    _require_actual_for_full_validation: bool = dataclasses.field(default=False, repr=False)
     _pending_failed_check: bool = dataclasses.field(default=False, repr=False)
 
     def _add_changed_path(self, value: Any) -> None:
@@ -203,6 +212,17 @@ class RuntimeController:
         if self._visual_enabled_mode not in {"auto", "true", "false"}:
             self._visual_enabled_mode = "auto"
         self.visual_provider = sanitize_text(getattr(visual_config, "provider", "qwen") or "qwen", limit=80) or "qwen"
+        mode = sanitize_text(getattr(visual_config, "mode", "reference_guidance") or "reference_guidance", limit=80)
+        self.visual_mode = mode if mode in {"reference_guidance", "compare"} else "reference_guidance"
+        self.reference_screenshot_dirs = [
+            sanitize_path(path) for path in getattr(visual_config, "reference_screenshot_dirs", ()) or () if sanitize_path(path)
+        ]
+        self.actual_screenshot_dirs = [
+            sanitize_path(path) for path in getattr(visual_config, "actual_screenshot_dirs", ()) or () if sanitize_path(path)
+        ]
+        self._require_actual_for_full_validation = bool(
+            getattr(visual_config, "require_actual_for_full_validation", False)
+        )
         self._refresh_visual_gate()
 
     def attach_visual_task_text(self, task_text: Any) -> None:
@@ -218,8 +238,12 @@ class RuntimeController:
             return True, "visual_validation.enabled=auto and a visual tool was called"
         if self._visual_skill_selected:
             return True, "visual_validation.enabled=auto and qwen_visual_mode skill is selected"
-        if self._visual_task_signal:
-            return True, "visual_validation.enabled=auto and task text contains visual keywords"
+        if self._visual_task_signal and self.reference_screenshot_dirs:
+            return (
+                True,
+                "visual_validation.enabled=auto, reference_screenshot_dirs are configured, "
+                "and task text contains visual keywords",
+            )
         return False, "visual_validation.enabled=auto and no visual runtime signal was present"
 
     def _append_visual_limitation(self, message: str) -> None:
@@ -237,6 +261,13 @@ class RuntimeController:
             self.reference_screenshots_used,
             self.actual_screenshots,
         )
+        self.full_rendered_validation = bool(
+            self.valid_visual_evidence == REFERENCE_AND_ACTUAL and self.compare_screenshots_completed
+        )
+        if self.guidance_completed and not self.full_rendered_validation:
+            self._append_visual_limitation(
+                "reference-guided migration; not full rendered visual validation."
+            )
         required, reason = self._compute_visual_required()
         self.visual_required = required
         self.visual_validation_required_reason = sanitize_text(reason, limit=200)
@@ -246,6 +277,25 @@ class RuntimeController:
         if self.actual_screenshot_blocker:
             self.visual_gate_status = "blocked"
             return
+        if self.visual_mode == "reference_guidance":
+            if self.full_rendered_validation:
+                self.visual_gate_status = "compare_completed"
+                return
+            if self.guidance_completed:
+                self.visual_gate_status = "guidance_completed"
+                if not self.full_rendered_validation:
+                    self._append_visual_limitation("reference-only guidance; not full rendered visual validation.")
+                return
+            if self.reference_screenshots_found:
+                self.visual_gate_status = "reference_found"
+                self._append_visual_limitation(
+                    "reference screenshots were found but Qwen reference guidance was not completed."
+                )
+                return
+            if self.reference_screenshot_dirs and not self.visual_tools_called:
+                self.visual_gate_status = VISUAL_REPORT_INCOMPLETE
+                self._append_visual_limitation("Reference screenshot discovery or inspection is required.")
+                return
         if not self.visual_tools_called:
             self.visual_gate_status = VISUAL_REPORT_INCOMPLETE
             self._append_visual_limitation("Visual validation is required but no visual tool was called.")
@@ -286,6 +336,17 @@ class RuntimeController:
         provider = sanitize_text(result.get("provider") or self.visual_provider or "qwen", limit=80)
         if provider:
             self.visual_provider = provider
+        mode = sanitize_text(result.get("mode") or "", limit=80)
+        if mode == "reference_guidance":
+            self.visual_mode = mode
+        for raw in result.get("reference_screenshot_dirs") or []:
+            path = sanitize_path(raw)
+            if path and path not in self.reference_screenshot_dirs:
+                self.reference_screenshot_dirs.append(path)
+        for raw in result.get("reference_screenshots_found") or []:
+            path = sanitize_path(raw)
+            if path and path not in self.reference_screenshots_found:
+                self.reference_screenshots_found.append(path)
         for raw in result.get("reference_screenshots_used") or []:
             path = sanitize_path(raw)
             if path and path not in self.reference_screenshots_used:
@@ -296,6 +357,17 @@ class RuntimeController:
                 self.actual_screenshots.append(path)
         self.compare_screenshots_completed = bool(
             self.compare_screenshots_completed or result.get("compare_screenshots_completed")
+        )
+        if result.get("ok") and name in {"inspect_visual_reference", "compare_visual_screenshots"}:
+            if result.get("reference_screenshots_used"):
+                self.guidance_completed = True
+        self.full_rendered_validation = bool(
+            self.full_rendered_validation
+            or (
+                result.get("ok")
+                and name == "compare_visual_screenshots"
+                and result.get("compare_screenshots_completed")
+            )
         )
         summary = sanitize_text(result.get("summary") or "", limit=1000)
         if summary:
@@ -464,6 +536,7 @@ class RuntimeController:
         data.pop("_visual_enabled_mode", None)
         data.pop("_visual_skill_selected", None)
         data.pop("_visual_task_signal", None)
+        data.pop("_require_actual_for_full_validation", None)
         data["build_runs"] = self.build_tool_calls
         data["test_runs"] = self.test_tool_calls
         if repair_loop_summary is not None:

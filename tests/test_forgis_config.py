@@ -93,6 +93,7 @@ from validate_target_output import files_snapshot, meaningful_changes, validate
 from visual_evidence import (
     ACTUAL_ONLY,
     HOST_ENV_BLOCKED,
+    NO_REFERENCE_SCREENSHOTS_FOUND,
     NO_VISUAL_EVIDENCE,
     QWEN_PERMISSION_GATED,
     QWEN_UNAVAILABLE_IN_SESSION,
@@ -486,6 +487,10 @@ class ForgisConfigTests(unittest.TestCase):
             max_command_output_chars=resolved.max_command_output_chars,
             visual_validation_enabled=resolved.visual_validation.enabled,
             visual_validation_provider=resolved.visual_validation.provider,
+            visual_validation_mode=resolved.visual_validation.mode,
+            reference_screenshot_dirs=resolved.visual_validation.reference_screenshot_dirs,
+            actual_screenshot_dirs=resolved.visual_validation.actual_screenshot_dirs,
+            require_actual_for_full_validation=resolved.visual_validation.require_actual_for_full_validation,
             max_visual_iterations=resolved.visual_validation.max_visual_iterations,
             visual_evidence_runtime_root=root / "forgis-runtime",
             visual_evidence_run_id="test-run",
@@ -687,10 +692,15 @@ class ForgisConfigTests(unittest.TestCase):
             resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
             self.assertEqual(resolved.visual_validation.enabled, "auto")
             self.assertEqual(resolved.visual_validation.provider, "qwen")
+            self.assertEqual(resolved.visual_validation.mode, "reference_guidance")
+            self.assertEqual(resolved.visual_validation.reference_screenshot_dirs, ())
+            self.assertEqual(resolved.visual_validation.actual_screenshot_dirs, ())
             self.assertEqual(resolved.visual_validation.max_visual_iterations, 2)
             self.assertTrue(resolved.visual_validation.require_reference_first)
+            self.assertFalse(resolved.visual_validation.require_actual_for_full_validation)
             self.assertFalse(resolved.visual_validation.upload_visual_artifact)
             self.assertEqual(resolved.env()["FORGIS_VISUAL_VALIDATION_ENABLED"], "auto")
+            self.assertEqual(resolved.env()["FORGIS_VISUAL_VALIDATION_MODE"], "reference_guidance")
             self.assertEqual(resolved.outputs()["forgis_visual_validation_provider"], "qwen")
 
             for yaml_value, expected in (("auto", "auto"), ("true", "true"), ("false", "false")):
@@ -717,6 +727,50 @@ class ForgisConfigTests(unittest.TestCase):
             self.write_config(target, extra="visual_validation:\n  provider: openai\n")
             with self.assertRaisesRegex(ValueError, "visual_validation.provider"):
                 resolve_config(target_root=target, target_repo="owner/target-repo")
+
+            for mode in ("reference_guidance", "compare"):
+                self.write_config(target, extra=f"visual_validation:\n  mode: {mode}\n")
+                configured = resolve_config(target_root=target, target_repo="owner/target-repo")
+                self.assertEqual(configured.visual_validation.mode, mode)
+
+            self.write_config(target, extra="visual_validation:\n  mode: full_validation\n")
+            with self.assertRaisesRegex(ValueError, "visual_validation.mode"):
+                resolve_config(target_root=target, target_repo="owner/target-repo")
+
+            self.write_config(
+                target,
+                extra=textwrap.dedent(
+                    """\
+                    visual_validation:
+                      reference_screenshot_dirs:
+                        - forgis-reference-screenshots
+                        - target-output/reference-ui
+                      actual_screenshot_dirs:
+                        - rendered-screenshots
+                    """
+                ),
+            )
+            configured_dirs = resolve_config(target_root=target, target_repo="owner/target-repo")
+            self.assertEqual(
+                configured_dirs.visual_validation.reference_screenshot_dirs,
+                ("forgis-reference-screenshots", "target-output/reference-ui"),
+            )
+            self.assertEqual(configured_dirs.visual_validation.actual_screenshot_dirs, ("rendered-screenshots",))
+
+            for field in ("reference_screenshot_dirs", "actual_screenshot_dirs"):
+                for unsafe in ("/tmp/screens", "../screens", ".git/screens", "secret-token/screens", "C:/screens"):
+                    self.write_config(
+                        target,
+                        extra=textwrap.dedent(
+                            f"""\
+                            visual_validation:
+                              {field}:
+                                - {json.dumps(unsafe)}
+                            """
+                        ),
+                    )
+                    with self.assertRaisesRegex(ValueError, f"visual_validation.{field}"):
+                        resolve_config(target_root=target, target_repo="owner/target-repo")
 
             for iterations in (0, 1, 2):
                 self.write_config(
@@ -748,6 +802,10 @@ class ForgisConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "visual_validation.require_reference_first"):
                 resolve_config(target_root=target, target_repo="owner/target-repo")
 
+            self.write_config(target, extra='visual_validation:\n  require_actual_for_full_validation: "false"\n')
+            with self.assertRaisesRegex(ValueError, "visual_validation.require_actual_for_full_validation"):
+                resolve_config(target_root=target, target_repo="owner/target-repo")
+
             self.write_config(target, extra='visual_validation:\n  upload_visual_artifact: "false"\n')
             with self.assertRaisesRegex(ValueError, "visual_validation.upload_visual_artifact"):
                 resolve_config(target_root=target, target_repo="owner/target-repo")
@@ -763,8 +821,14 @@ class ForgisConfigTests(unittest.TestCase):
                     visual_validation:
                       enabled: true
                       provider: qwen
+                      mode: compare
+                      reference_screenshot_dirs:
+                        - forgis-reference-screenshots
+                      actual_screenshot_dirs:
+                        - target-output/actual-screenshots
                       max_visual_iterations: 1
                       require_reference_first: false
+                      require_actual_for_full_validation: true
                       upload_visual_artifact: true
                     """
                 ),
@@ -774,8 +838,12 @@ class ForgisConfigTests(unittest.TestCase):
             outputs = configured.outputs()
             self.assertEqual(env["FORGIS_VISUAL_VALIDATION_ENABLED"], "true")
             self.assertEqual(env["FORGIS_VISUAL_VALIDATION_PROVIDER"], "qwen")
+            self.assertEqual(env["FORGIS_VISUAL_VALIDATION_MODE"], "compare")
+            self.assertEqual(env["FORGIS_VISUAL_REFERENCE_SCREENSHOT_DIRS_JSON"], '["forgis-reference-screenshots"]')
+            self.assertEqual(env["FORGIS_VISUAL_ACTUAL_SCREENSHOT_DIRS_JSON"], '["target-output/actual-screenshots"]')
             self.assertEqual(env["FORGIS_VISUAL_MAX_ITERATIONS"], "1")
             self.assertEqual(env["FORGIS_VISUAL_REQUIRE_REFERENCE_FIRST"], "false")
+            self.assertEqual(env["FORGIS_VISUAL_REQUIRE_ACTUAL_FOR_FULL_VALIDATION"], "true")
             self.assertEqual(env["FORGIS_VISUAL_UPLOAD_ARTIFACT"], "true")
             visual_env = {key: value for key, value in env.items() if key.startswith("FORGIS_VISUAL")}
             visual_outputs = {key: value for key, value in outputs.items() if key.startswith("forgis_visual")}
@@ -1000,7 +1068,12 @@ class ForgisConfigTests(unittest.TestCase):
 
     def test_visual_tool_schema_is_visual_only_and_virtual_path_based(self) -> None:
         tools = {item["function"]["name"]: item["function"] for item in TOOL_DEFINITIONS}
-        for name in ("inspect_visual_reference", "inspect_visual_actual", "compare_visual_screenshots"):
+        for name in (
+            "list_visual_references",
+            "inspect_visual_reference",
+            "inspect_visual_actual",
+            "compare_visual_screenshots",
+        ):
             self.assertIn(name, tools)
             description = tools[name]["description"].casefold()
             self.assertIn("visual", description)
@@ -1008,6 +1081,7 @@ class ForgisConfigTests(unittest.TestCase):
             self.assertIn("source code", description)
             self.assertNotIn("run_qwen", name)
 
+        self.assertNotIn("path", tools["list_visual_references"]["parameters"]["properties"])
         reference_path = tools["inspect_visual_reference"]["parameters"]["properties"]["path"]
         actual_path = tools["inspect_visual_actual"]["parameters"]["properties"]["path"]
         compare_props = tools["compare_visual_screenshots"]["parameters"]["properties"]
@@ -1025,10 +1099,14 @@ class ForgisConfigTests(unittest.TestCase):
                     """\
                     visual_validation:
                       enabled: true
+                      reference_screenshot_dirs:
+                        - forgis-reference-screenshots
                     """
                 ),
             )
-            reference = self.write_fake_image(source / "reference.png")
+            reference = self.write_fake_image(target / "forgis-reference-screenshots/reference.png")
+            self.write_fake_image(target / "forgis-reference-screenshots/secret-token.png")
+            (target / "forgis-reference-screenshots/notes.txt").write_text("not an image", encoding="utf-8")
             actual_jpg = self.write_fake_image(target / "target-output/actual.jpg")
             self.assertTrue(reference.is_file())
             self.assertTrue(actual_jpg.is_file())
@@ -1046,18 +1124,46 @@ class ForgisConfigTests(unittest.TestCase):
                 )
 
             with mock.patch.object(qwen_vision, "inspect_screenshot", side_effect=fake_inspect):
+                references = sandbox.invoke("list_visual_references", {})
                 reference_result = sandbox.invoke(
                     "inspect_visual_reference",
-                    {"path": "source/reference.png", "goal": "inspect layout"},
+                    {"path": "target/forgis-reference-screenshots/reference.png", "goal": "inspect layout"},
                 )
                 actual_result = sandbox.invoke(
                     "inspect_visual_actual",
                     {"path": "target_subdir/actual.jpg", "goal": "inspect rendered UI"},
                 )
+            self.assertTrue(references["ok"])
+            self.assertEqual(references["reference_screenshots_found"], ["target/forgis-reference-screenshots/reference.png"])
+            rendered_refs = json.dumps(references, ensure_ascii=False)
+            self.assertNotIn(str(target), rendered_refs)
+            self.assertNotIn("secret-token", rendered_refs)
             self.assertTrue(reference_result["ok"])
             self.assertEqual(reference_result["visual_state"], REFERENCE_ONLY)
             self.assertTrue(actual_result["ok"])
             self.assertEqual(actual_result["visual_state"], ACTUAL_ONLY)
+
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            sandbox, _source, target = self.make_configured_sandbox(
+                root,
+                extra=textwrap.dedent(
+                    """\
+                    visual_validation:
+                      enabled: true
+                      reference_screenshot_dirs:
+                        - target-output/reference-ui
+                    """
+                ),
+            )
+            self.write_fake_image(target / "target-output/reference-ui/reference.png")
+            listed = sandbox.invoke("list_visual_references", {})
+            self.assertEqual(listed["reference_screenshots_found"], ["target/target-output/reference-ui/reference.png"])
+            with self.assertRaisesRegex(ToolError, "visual screenshot input"):
+                sandbox.invoke(
+                    "write_file",
+                    {"path": "target_subdir/reference-ui/reference.png", "content": "overwrite"},
+                )
 
         for suffix in (".jpg", ".jpeg", ".webp"):
             with tempfile.TemporaryDirectory() as dirname:
@@ -1167,7 +1273,10 @@ class ForgisConfigTests(unittest.TestCase):
             )
             self.assertIn("visual_validation", default_report)
             self.assertFalse(default_report["visual_validation"]["required"])
+            self.assertEqual(default_report["visual_validation"]["mode"], "reference_guidance")
             self.assertEqual(default_report["visual_validation"]["valid_visual_evidence"], NO_VISUAL_EVIDENCE)
+            self.assertFalse(default_report["visual_validation"]["guidance_completed"])
+            self.assertFalse(default_report["visual_validation"]["full_rendered_validation"])
             self.assertTrue(task_text_indicates_visual("Use the reference screenshot to validate UI layout and color."))
             self.assertTrue(task_text_indicates_visual("请检查界面截图的布局、颜色、间距和圆角。"))
             self.assertFalse(task_text_indicates_visual("Refactor the data model and fix unit tests only."))
@@ -1177,7 +1286,16 @@ class ForgisConfigTests(unittest.TestCase):
             source, target = self.make_source_target(root)
             self.write_config(
                 target,
-                extra="dry_run: false\nrun_agent: true\nconfirm_real_run: true\n",
+                extra=textwrap.dedent(
+                    """\
+                    dry_run: false
+                    run_agent: true
+                    confirm_real_run: true
+                    visual_validation:
+                      reference_screenshot_dirs:
+                        - forgis-reference-screenshots
+                    """
+                ),
                 task_text="# Task\n\nValidate the UI screenshot parity for layout and color.",
             )
             auto_visual_config = resolve_config(target_root=target, target_repo="owner/target-repo")
@@ -1282,6 +1400,143 @@ class ForgisConfigTests(unittest.TestCase):
             source, target = self.make_source_target(root)
             self.write_config(
                 target,
+                extra=textwrap.dedent(
+                    """\
+                    dry_run: false
+                    run_agent: true
+                    confirm_real_run: true
+                    visual_validation:
+                      enabled: true
+                      reference_screenshot_dirs:
+                        - forgis-reference-screenshots
+                    """
+                ),
+            )
+            config = resolve_config(target_root=target, target_repo="owner/target-repo")
+            fake = FakeDeepSeekClient(
+                [
+                    self.tool_response(("visual-list", "list_visual_references", {})),
+                    self.final_response("no references available"),
+                ]
+            )
+            with redirect_stdout(StringIO()):
+                result = run_tool_loop(
+                    config=config,
+                    source_root=source,
+                    target_root=target,
+                    environ={"DEEPSEEK_API_KEY": "mock-secret-value"},
+                    client_factory=lambda _config, _env: fake,
+                    report_output_dir="forgis-runtime/reports",
+                    report_allowed_root=root,
+                )
+            self.assertEqual(result.runtime_state["actual_screenshot_blocker"], NO_REFERENCE_SCREENSHOTS_FOUND)
+            self.assertEqual(result.runtime_state["visual_gate_status"], "blocked")
+            report_json = json.loads(Path(result.report_json_path).read_text(encoding="utf-8"))
+            self.assertEqual(report_json["visual_validation"]["actual_screenshot_blocker"], NO_REFERENCE_SCREENSHOTS_FOUND)
+            self.assertFalse(report_json["visual_validation"]["guidance_completed"])
+
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target = self.make_source_target(root)
+            self.write_config(
+                target,
+                extra=textwrap.dedent(
+                    """\
+                    dry_run: false
+                    run_agent: true
+                    confirm_real_run: true
+                    visual_validation:
+                      enabled: true
+                      mode: reference_guidance
+                      reference_screenshot_dirs:
+                        - forgis-reference-screenshots
+                    """
+                ),
+                task_text="# Task\n\nUse the reference screenshots to migrate the UI layout and color.",
+            )
+            self.write_fake_image(target / "forgis-reference-screenshots/login.png")
+            config = resolve_config(target_root=target, target_repo="owner/target-repo")
+            fake = FakeDeepSeekClient(
+                [
+                    self.tool_response(("visual-list", "list_visual_references", {})),
+                    self.tool_response(
+                        (
+                            "visual-ref",
+                            "inspect_visual_reference",
+                            {"path": "target/forgis-reference-screenshots/login.png", "goal": "extract visual structure"},
+                        )
+                    ),
+                    self.final_response("reference guidance complete"),
+                ]
+            )
+            with mock.patch.object(
+                qwen_vision,
+                "inspect_screenshot",
+                return_value=qwen_vision.QwenVisionResult(
+                    ok=True,
+                    provider="qwen",
+                    mode=qwen_vision.MODE_INSPECT,
+                    summary="reference guidance extracted",
+                    findings=("use softer radius", "increase title hierarchy"),
+                    limitations=(),
+                ),
+            ):
+                with redirect_stdout(StringIO()):
+                    result = run_tool_loop(
+                        config=config,
+                        source_root=source,
+                        target_root=target,
+                        environ={"DEEPSEEK_API_KEY": "mock-secret-value", "QWEN_API_KEY": "mock-qwen-key"},
+                        client_factory=lambda _config, _env: fake,
+                        report_output_dir="forgis-runtime/reports",
+                        report_allowed_root=root,
+                    )
+            self.assertEqual(result.status, "completed")
+            self.assertTrue(result.runtime_state["visual_required"])
+            self.assertEqual(
+                result.runtime_state["reference_screenshots_found"],
+                ["target/forgis-reference-screenshots/login.png"],
+            )
+            self.assertEqual(
+                result.runtime_state["reference_screenshots_used"],
+                ["target/forgis-reference-screenshots/login.png"],
+            )
+            self.assertTrue(result.runtime_state["guidance_completed"])
+            self.assertFalse(result.runtime_state["full_rendered_validation"])
+            self.assertEqual(result.runtime_state["visual_gate_status"], "guidance_completed")
+            report_json = json.loads(Path(result.report_json_path).read_text(encoding="utf-8"))
+            report_markdown = Path(result.report_markdown_path).read_text(encoding="utf-8")
+            self.assertEqual(report_json["visual_validation"]["mode"], "reference_guidance")
+            self.assertEqual(
+                report_json["visual_validation"]["reference_screenshot_dirs"],
+                ["forgis-reference-screenshots"],
+            )
+            self.assertEqual(
+                report_json["visual_validation"]["reference_screenshots_found"],
+                ["target/forgis-reference-screenshots/login.png"],
+            )
+            self.assertTrue(report_json["visual_validation"]["guidance_completed"])
+            self.assertFalse(report_json["visual_validation"]["full_rendered_validation"])
+            self.assertIn("Reference-guided visual migration completed", report_markdown)
+            self.assertIn("Full rendered visual validation was not performed", report_markdown)
+            body = build_pr_body(
+                target_branch="forgis/output",
+                push_branch="forgis/output-run-123-1",
+                target_base_branch="main",
+                target_subdir="target-output",
+                run_report_json_path=result.report_json_path,
+            )
+            self.assertIn("reference-guided migration completed", body)
+            combined = json.dumps(report_json, ensure_ascii=False) + report_markdown + body
+            self.assertNotIn("mock-qwen-key", combined)
+            self.assertNotIn("base64", combined.casefold())
+            self.assertNotIn("mock-image", combined)
+
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            source, target = self.make_source_target(root)
+            self.write_config(
+                target,
                 extra="dry_run: false\nrun_agent: true\nconfirm_real_run: true\nvisual_validation:\n  enabled: true\n",
             )
             self.write_fake_image(source / "reference.png")
@@ -1315,7 +1570,9 @@ class ForgisConfigTests(unittest.TestCase):
                         client_factory=lambda _config, _env: fake,
                     )
             self.assertEqual(result.runtime_state["valid_visual_evidence"], REFERENCE_ONLY)
-            self.assertEqual(result.runtime_state["visual_gate_status"], "reference_only")
+            self.assertTrue(result.runtime_state["guidance_completed"])
+            self.assertFalse(result.runtime_state["full_rendered_validation"])
+            self.assertEqual(result.runtime_state["visual_gate_status"], "guidance_completed")
             report = render_run_report_json(
                 config=config,
                 runtime_state=result.runtime_state,
@@ -1329,6 +1586,8 @@ class ForgisConfigTests(unittest.TestCase):
                 write_tool_count=result.write_tool_count,
                 operation_log=result.operation_log,
             )
+            self.assertTrue(report["visual_validation"]["guidance_completed"])
+            self.assertFalse(report["visual_validation"]["full_rendered_validation"])
             self.assertIn("reference-only", report["visual_validation"]["visual_validation_limitations"])
 
             report_path = root / "forgis-runtime/reports/FORGIS_RUN_REPORT.json"
@@ -1343,6 +1602,7 @@ class ForgisConfigTests(unittest.TestCase):
             )
             self.assertIn("Visual Validation", body)
             self.assertIn("REFERENCE_ONLY", body)
+            self.assertIn("reference-guided migration completed", body)
             self.assertNotIn("secret", body.casefold())
             self.assertNotIn("base64", body.casefold())
 
@@ -1394,6 +1654,7 @@ class ForgisConfigTests(unittest.TestCase):
                     )
             self.assertEqual(result.runtime_state["valid_visual_evidence"], REFERENCE_AND_ACTUAL)
             self.assertTrue(result.runtime_state["compare_screenshots_completed"])
+            self.assertTrue(result.runtime_state["full_rendered_validation"])
             self.assertEqual(result.runtime_state["visual_gate_status"], "compare_completed")
 
         with tempfile.TemporaryDirectory() as dirname:
@@ -1409,8 +1670,10 @@ class ForgisConfigTests(unittest.TestCase):
                     visual_validation:
                       enabled: true
                       provider: qwen
+                      mode: compare
                       max_visual_iterations: 2
                       require_reference_first: true
+                      require_actual_for_full_validation: false
                       upload_visual_artifact: false
                     """
                 ),
@@ -1501,8 +1764,11 @@ class ForgisConfigTests(unittest.TestCase):
             self.assertTrue((evidence_root / "qwen").is_dir())
             report_json = json.loads(Path(result.report_json_path).read_text(encoding="utf-8"))
             report_markdown = Path(result.report_markdown_path).read_text(encoding="utf-8")
+            self.assertEqual(report_json["visual_validation"]["mode"], "compare")
             self.assertEqual(report_json["visual_validation"]["valid_visual_evidence"], REFERENCE_AND_ACTUAL)
             self.assertTrue(report_json["visual_validation"]["compare_screenshots_completed"])
+            self.assertTrue(report_json["visual_validation"]["guidance_completed"])
+            self.assertTrue(report_json["visual_validation"]["full_rendered_validation"])
             self.assertIn("Visual Validation", report_markdown)
             body = build_pr_body(
                 target_branch="forgis/output",
@@ -5589,7 +5855,7 @@ class ForgisConfigTests(unittest.TestCase):
                 extra=textwrap.dedent(
                     """\
                     run_report_max_events: 3
-                    run_report_max_chars: 6000
+                    run_report_max_chars: 9000
                     """
                 ),
             )
@@ -5730,11 +5996,17 @@ class ForgisConfigTests(unittest.TestCase):
                 },
                 "visual_required": True,
                 "visual_provider": "qwen",
+                "visual_mode": "reference_guidance",
                 "visual_tools_called": ["inspect_visual_reference"],
+                "reference_screenshot_dirs": ["forgis-reference-screenshots"],
+                "reference_screenshots_found": ["target/forgis-reference-screenshots/reference.png"],
                 "reference_screenshots_used": ["source/reference.png"],
+                "actual_screenshot_dirs": [],
                 "actual_screenshots": [],
                 "valid_visual_evidence": REFERENCE_ONLY,
+                "guidance_completed": True,
                 "compare_screenshots_completed": False,
+                "full_rendered_validation": False,
                 "vision_result_summary": "Reference UI inspected TOKEN=secret-token-value",
                 "actual_screenshot_blocker": "",
                 "visual_validation_limitations": "reference-only; not full rendered visual validation.",
@@ -5830,7 +6102,10 @@ class ForgisConfigTests(unittest.TestCase):
             rendered_json = json.dumps(report_json, ensure_ascii=False)
             self.assertEqual(report_json["build_test"]["build_runs"], 1)
             self.assertTrue(report_json["visual_validation"]["required"])
+            self.assertEqual(report_json["visual_validation"]["mode"], "reference_guidance")
             self.assertEqual(report_json["visual_validation"]["valid_visual_evidence"], REFERENCE_ONLY)
+            self.assertTrue(report_json["visual_validation"]["guidance_completed"])
+            self.assertFalse(report_json["visual_validation"]["full_rendered_validation"])
             self.assertIn("not full rendered visual validation", report_json["visual_validation"]["visual_validation_limitations"])
             self.assertEqual(report_json["repair_loop"]["stopped_reason"], "max_attempts_reached")
             self.assertEqual(report_json["skills"]["selected_skill_names"], ["migration_general", "build_repair"])

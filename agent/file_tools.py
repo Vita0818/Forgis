@@ -22,6 +22,7 @@ from forgis_config import (
 from git_tools import GitToolError, git_diff as target_git_diff, git_status as target_git_status
 from visual_evidence import (
     HOST_ENV_BLOCKED,
+    NO_REFERENCE_SCREENSHOTS_FOUND,
     QWEN_PERMISSION_GATED,
     VISUAL_VALIDATION_DISABLED,
     classify_visual_evidence,
@@ -35,7 +36,12 @@ from visual_evidence import (
 READ_TOOLS = {"list_dir", "tree", "read_file", "file_exists", "search_text", "git_status", "git_diff"}
 WRITE_TOOLS = {"mkdir", "write_file", "append_file", "delete_file", "edit_file", "apply_patch"}
 COMMAND_TOOLS = {"run_command", "run_build", "run_tests"}
-VISUAL_TOOLS = {"inspect_visual_reference", "inspect_visual_actual", "compare_visual_screenshots"}
+VISUAL_TOOLS = {
+    "list_visual_references",
+    "inspect_visual_reference",
+    "inspect_visual_actual",
+    "compare_visual_screenshots",
+}
 OBSERVATION_TOOLS = READ_TOOLS | COMMAND_TOOLS
 ALL_TOOLS = READ_TOOLS | WRITE_TOOLS | COMMAND_TOOLS | VISUAL_TOOLS
 
@@ -120,6 +126,10 @@ class FileToolSandbox:
         max_command_output_chars: int | None = None,
         visual_validation_enabled: str = DEFAULT_VISUAL_VALIDATION_ENABLED,
         visual_validation_provider: str = DEFAULT_VISUAL_VALIDATION_PROVIDER,
+        visual_validation_mode: str = "reference_guidance",
+        reference_screenshot_dirs: tuple[str, ...] = (),
+        actual_screenshot_dirs: tuple[str, ...] = (),
+        require_actual_for_full_validation: bool = False,
         max_visual_iterations: int = 2,
         visual_evidence_runtime_root: str | Path | None = None,
         visual_evidence_run_id: str = "local",
@@ -157,6 +167,20 @@ class FileToolSandbox:
         self.max_command_output_chars = max_result_chars if max_command_output_chars is None else max_command_output_chars
         self.visual_validation_enabled = str(visual_validation_enabled or DEFAULT_VISUAL_VALIDATION_ENABLED).casefold()
         self.visual_validation_provider = str(visual_validation_provider or DEFAULT_VISUAL_VALIDATION_PROVIDER).casefold()
+        self.visual_validation_mode = str(visual_validation_mode or "reference_guidance").casefold()
+        if self.visual_validation_mode not in {"reference_guidance", "compare"}:
+            self.visual_validation_mode = "reference_guidance"
+        self.reference_screenshot_dirs = tuple(str(path) for path in (reference_screenshot_dirs or ()))
+        self.actual_screenshot_dirs = tuple(str(path) for path in (actual_screenshot_dirs or ()))
+        self.reference_screenshot_dir_paths = tuple(
+            resolve_inside_root(self.target_root, path, "visual_validation.reference_screenshot_dirs")[0]
+            for path in self.reference_screenshot_dirs
+        )
+        self.actual_screenshot_dir_paths = tuple(
+            resolve_inside_root(self.target_root, path, "visual_validation.actual_screenshot_dirs")[0]
+            for path in self.actual_screenshot_dirs
+        )
+        self.require_actual_for_full_validation = bool(require_actual_for_full_validation)
         self.max_visual_iterations = max(0, min(int(max_visual_iterations), 2))
         self.visual_evidence_runtime_root = Path(visual_evidence_runtime_root) if visual_evidence_runtime_root else self.target_root.parent / "forgis-runtime"
         self.visual_evidence_run_id = str(visual_evidence_run_id or "local")
@@ -235,6 +259,12 @@ class FileToolSandbox:
         absolute = self._resolve_against(root, relative, "read path")
         return ResolvedToolPath(absolute=absolute, virtual=virtual, root_name=root_name)
 
+    def _is_visual_input_path(self, absolute: Path) -> bool:
+        for root in self.reference_screenshot_dir_paths + self.actual_screenshot_dir_paths:
+            if absolute == root or absolute.is_relative_to(root):
+                return True
+        return False
+
     def resolve_write_path(self, path: str, *, allow_subdir_root: bool = False) -> ResolvedToolPath:
         root_name, relative, virtual = self._virtual_parts(path)
         if root_name == "source":
@@ -250,6 +280,8 @@ class FileToolSandbox:
             raise ToolError("Write tools cannot modify paths through symlinks.")
         if absolute in {self.config_path, self.task_path}:
             raise ToolError("Write tools cannot modify the config or task file.")
+        if self._is_visual_input_path(absolute):
+            raise ToolError("Write tools cannot modify configured visual screenshot input directories.")
 
         relative_to_target = absolute.relative_to(self.target_root).as_posix()
         parts = PurePosixPath(relative_to_target).parts
@@ -772,6 +804,99 @@ class FileToolSandbox:
             create=True,
         )
 
+    def list_visual_references(self, max_results: int = 200) -> dict[str, Any]:
+        tool_name = "list_visual_references"
+        if self.visual_validation_enabled == "false":
+            return self._visual_blocked_result(
+                tool_name=tool_name,
+                mode="reference_guidance",
+                blocker=VISUAL_VALIDATION_DISABLED,
+                summary="visual_validation.enabled=false; visual reference discovery is disabled.",
+                limitations=("No screenshot path was returned.",),
+            )
+        try:
+            self._ensure_visual_evidence_dirs()
+        except ValueError as exc:
+            return self._visual_blocked_result(
+                tool_name=tool_name,
+                mode="reference_guidance",
+                blocker=HOST_ENV_BLOCKED,
+                summary="Visual evidence directory setup was rejected before reference discovery.",
+                limitations=(str(exc),),
+            )
+
+        self.visual_tool_calls += 1
+        limit = max(1, min(int(max_results or 200), 200))
+        configured_dirs = [sanitize_visual_path_label(path) for path in self.reference_screenshot_dirs]
+        found: list[str] = []
+        truncated = False
+        for directory in self.reference_screenshot_dir_paths:
+            if path_kind_no_follow(directory) != "dir":
+                continue
+            stack = [directory]
+            while stack:
+                current = stack.pop()
+                for entry in sorted(current.iterdir(), key=lambda item: item.name.casefold()):
+                    if entry.name == ".git" or is_secret_like_part(entry.name):
+                        continue
+                    kind = path_kind_no_follow(entry)
+                    if kind == "dir":
+                        stack.append(entry)
+                        continue
+                    if kind != "file":
+                        continue
+                    try:
+                        validate_visual_image_path(entry, allowed_root=directory, must_exist=True)
+                    except ValueError:
+                        continue
+                    virtual = f"target/{entry.relative_to(self.target_root).as_posix()}"
+                    safe_virtual = sanitize_visual_path_label(virtual)
+                    if safe_virtual and safe_virtual not in found:
+                        found.append(safe_virtual)
+                    if len(found) >= limit:
+                        truncated = True
+                        stack = []
+                        break
+
+        if not found:
+            return {
+                "ok": False,
+                "tool": tool_name,
+                "status": "blocked",
+                "provider": self.visual_validation_provider or "qwen",
+                "mode": "reference_guidance",
+                "summary": "No configured reference screenshots were found.",
+                "findings": [],
+                "limitations": ["Configure visual_validation.reference_screenshot_dirs with .png/.jpg/.jpeg/.webp files."],
+                "blocker": NO_REFERENCE_SCREENSHOTS_FOUND,
+                "visual_state": classify_visual_evidence((), ()),
+                "reference_screenshot_dirs": [sanitize_visual_path_label(path) for path in configured_dirs],
+                "reference_screenshots_found": [],
+                "reference_screenshots_used": [],
+                "actual_screenshots": [],
+                "compare_screenshots_completed": False,
+                "truncated": False,
+            }
+
+        return {
+            "ok": True,
+            "tool": tool_name,
+            "status": "success",
+            "provider": self.visual_validation_provider or "qwen",
+            "mode": "reference_guidance",
+            "summary": f"Found {len(found)} configured reference screenshot(s).",
+            "findings": [],
+            "limitations": [],
+            "blocker": "",
+            "visual_state": classify_visual_evidence((), ()),
+            "reference_screenshot_dirs": [sanitize_visual_path_label(path) for path in configured_dirs],
+            "reference_screenshots_found": found,
+            "reference_screenshots_used": [],
+            "actual_screenshots": [],
+            "compare_screenshots_completed": False,
+            "truncated": truncated,
+        }
+
     def _resolve_visual_image(self, path: str, *, label: str, allow_source: bool) -> ResolvedToolPath:
         resolved = self.resolve_read_path(path)
         if not allow_source and resolved.root_name == "source":
@@ -988,6 +1113,8 @@ class FileToolSandbox:
             return self.run_build()
         if tool_name == "run_tests":
             return self.run_tests()
+        if tool_name == "list_visual_references":
+            return self.list_visual_references(int(arguments.get("max_results", 200)))
         if tool_name == "inspect_visual_reference":
             return self.inspect_visual_reference(
                 str(arguments.get("path", "")),

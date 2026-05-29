@@ -58,10 +58,10 @@
 - `agent/forgis_config.py`：解析 `FORGIS_CONFIG.yml`、支持字段、默认值、路径安全、真实运行 gate、`ResolvedConfig.env()` 输出。
 - `agent/forge.py`：CLI 控制器入口，校验 source/target 目录并输出运行摘要。
 - `agent/resolve_config.py`：GitHub Actions 中解析目标仓库配置并写入 `$GITHUB_ENV` / `$GITHUB_OUTPUT`。
-- `agent/deepseek_agent.py`：系统提示词、工具 schema、DeepSeek OpenAI-compatible chat client。
+- `agent/deepseek_agent.py`：系统提示词、工具 schema、DeepSeek OpenAI-compatible chat client。v6.0 视觉工具包括 `list_visual_references`、`inspect_visual_reference`、`inspect_visual_actual`、`compare_visual_screenshots`。
 - `agent/tool_loop.py`：默认 tool loop 主流程，处理 dry-run/run-agent gate、工具调用、runtime state、repair loop、report 和 migration plan。
 - `agent/staged_translation.py`：`execution_mode=staged_translation` 的控制器，按 overview、per_file、stabilization 和微阶段 gate 推进。
-- `agent/file_tools.py`：虚拟路径沙箱和工具实现。读 `source/`、`target/`、`target_subdir/`，写入仅限 `target_subdir`。
+- `agent/file_tools.py`：虚拟路径沙箱和工具实现。读 `source/`、`target/`、`target_subdir/`，写入仅限 `target_subdir`；`visual_validation.reference_screenshot_dirs` / `actual_screenshot_dirs` 是目标仓库只读截图输入目录，即使位于 `target_subdir` 内也不得被写工具修改。
 - `agent/command_runner.py`：保守命令 allowlist。基础命令和 build/test profile 都在这里限制。
 - `agent/build_runner.py` / `agent/build_feedback.py`：配置驱动 build/test 执行与失败摘要、脱敏。
 - `agent/guardrails.py`：read-only snapshot、target scope、source clean、dry-run clean、secret leak 检查。
@@ -74,7 +74,7 @@
 - `agent/repair_loop.py`、`agent/repair_report.py`、`agent/runtime_controller.py`：修复循环状态机、报告渲染与运行时观测状态。
 - `agent/source_inventory.py`：源仓库扫描、过滤生成物/二进制/secret-like 文件、按优先级排序。
 - `agent/skill_loader.py`：本地技能选择、加载、长度限制和 secret-like 内容检查。
-- `docs/QWEN_VISUAL_MODE.md`：v6.0 Qwen Visual Evidence Mode 契约文档，说明 provider 边界、reference-first、证据状态、证据目录、mock-first provider adapter、真实 transport 启用条件、视觉 tool schema、report/PR 字段和 runtime gate。
+- `docs/QWEN_VISUAL_MODE.md`：v6.0 Qwen Visual Evidence Mode 契约文档，说明 reference-guided migration、provider 边界、reference-first、证据状态、证据目录、mock-first provider adapter、真实 transport 启用条件、视觉 tool schema、report/PR 字段和 runtime gate。
 - `skills/qwen_visual_mode.md`：可显式注入主 Agent 的短 skill，只记录 Qwen 视觉 provider 的安全边界。
 - `agent/build_target.sh`：GitHub Actions 中运行 `validation_commands` 的脚本，作用域限定在目标仓库 `target_subdir`。
 - `agent/create_pr.sh`：真实运行后的 target branch 准备、提交、push 和 PR 创建。已有远程分支时改用 fallback branch，避免 force push。
@@ -98,8 +98,8 @@
 - `.gitignore`：忽略 Python 缓存、虚拟环境、`.env`、日志、`reports/`、`forgis-runtime/`、`tmp/`、证书和 secrets 目录。
 - 目标仓库运行配置不是本仓库文件，而是目标仓库根目录的 `FORGIS_CONFIG.yml`。`agent/forgis_config.py` 固定该文件名，且拒绝未知字段。
 - 目标仓库任务文件默认 `FORGIS_TASK.md`，可由 `task_prompt_path` 指定，但必须位于目标仓库根内且非空。
-- v6.0 Phase 2 新增可选 `visual_validation` 配置块，只包含 `enabled`、`provider`、`max_visual_iterations`、`require_reference_first`、`upload_visual_artifact`。
-- v6.0 已接通视觉工具 schema、`FileToolSandbox` 分发、runtime visual state/gate、run report / PR body 视觉字段和显式 env 下的 Qwen HTTP transport。仍不自动截图、不上传 visual artifact、不支持多 provider。
+- v6.0 `visual_validation` 配置块包含 `enabled`、`provider`、`mode`、`reference_screenshot_dirs`、`actual_screenshot_dirs`、`max_visual_iterations`、`require_reference_first`、`require_actual_for_full_validation`、`upload_visual_artifact`。默认 `mode=reference_guidance`，`reference_screenshot_dirs` / `actual_screenshot_dirs` 默认为空以保持兼容。
+- v6.0 已接通 reference-guided migration、`list_visual_references`、视觉工具 schema、`FileToolSandbox` 分发、runtime visual state/gate、run report / PR body 视觉字段和显式 env 下的 Qwen HTTP transport。仍不自动截图、不上传 visual artifact、不支持多 provider。
 
 ## 测试目录
 
@@ -112,7 +112,7 @@
 - `skills/*.md`：本地技能文本，包括 `migration_general`、`swiftui_to_compose`、`swiftui_to_harmonyos`、`ui_style_preservation`、`build_repair`、`qwen_visual_mode`。
 - `prompts/system_agent_v3.md`：运行时系统提示词。
 - `docs/DS_GUIDE_Swift_Kotlin.md`：SwiftUI 到 Kotlin/Compose 迁移风险文档。
-- `docs/QWEN_VISUAL_MODE.md`：Qwen Visual Evidence Mode 的长期维护说明。当前 v6.0 已接入受控视觉工具、报告字段、gate 和真实 provider transport；截图采集、artifact 上传和多 provider 仍未实现。
+- `docs/QWEN_VISUAL_MODE.md`：Qwen Visual Evidence Mode 的长期维护说明。当前 v6.0 已接入 reference guidance、受控视觉工具、报告字段、gate 和真实 provider transport；自动截图采集、artifact 上传和多 provider 仍未实现。
 
 ## 生成物和缓存目录
 
