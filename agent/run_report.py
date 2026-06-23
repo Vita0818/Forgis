@@ -98,6 +98,7 @@ def config_summary(config: ResolvedConfig) -> dict[str, Any]:
         "agent_backend": sanitize_text(config.agent_backend, limit=80),
         "model": sanitize_text(config.model, limit=120),
         "api_format": sanitize_text(config.api_format, limit=80),
+        "request_timeout_seconds": int(getattr(config, "request_timeout_seconds", 120)),
         "execution_mode": sanitize_text(config.execution_mode, limit=80),
         "dry_run": bool(config.dry_run),
         "run_agent_config": bool(config.run_agent_config),

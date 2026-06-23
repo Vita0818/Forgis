@@ -16,6 +16,7 @@ from forgis_config import (
     DEFAULT_TASK_PROMPT_PATH,
     DEFAULT_VISUAL_VALIDATION_ENABLED,
     DEFAULT_VISUAL_VALIDATION_PROVIDER,
+    resolve_config_file_path,
     resolve_inside_root,
     resolve_target_subdir,
 )
@@ -149,11 +150,10 @@ class FileToolSandbox:
             self.target_root,
             target_subdir,
         )
-        self.config_path, self.config_relative = resolve_inside_root(
-            self.target_root,
-            config_path,
-            "config_path",
-        )
+        self.config_path, self.config_relative = resolve_config_file_path(self.target_root, config_path)
+        if self.config_path.is_relative_to(self.source_root):
+            raise ToolError("config_path must not be inside the source repository.")
+        self.config_is_target_relative = self.config_path.is_relative_to(self.target_root)
         self.task_path, self.task_relative = resolve_inside_root(
             self.target_root,
             task_path,
@@ -221,7 +221,9 @@ class FileToolSandbox:
         if text.startswith("target/"):
             return "target", text[len("target/") :], text
         if text == "config":
-            return "target", self.config_relative, f"target/{self.config_relative}"
+            if self.config_is_target_relative:
+                return "target", self.config_relative, f"target/{self.config_relative}"
+            return "config", "", "config"
         if text == "task":
             return "target", self.task_relative, f"target/{self.task_relative}"
         if text == "target_subdir":
@@ -254,6 +256,8 @@ class FileToolSandbox:
             root = self.source_root
         elif root_name == "target":
             root = self.target_root
+        elif root_name == "config":
+            return ResolvedToolPath(absolute=self.config_path, virtual=virtual, root_name=root_name)
         else:
             root = self.target_subdir_path
         absolute = self._resolve_against(root, relative, "read path")
@@ -269,6 +273,8 @@ class FileToolSandbox:
         root_name, relative, virtual = self._virtual_parts(path)
         if root_name == "source":
             raise ToolError("Write tools cannot modify the source repository.")
+        if root_name == "config":
+            raise ToolError("Write tools cannot modify the config file.")
 
         base = self.target_subdir_path if root_name == "target_subdir" else self.target_root
         absolute = self._resolve_against(base, relative, "write path")

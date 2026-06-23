@@ -1077,10 +1077,10 @@ def run_tool_loop(
     )
     migration_plan = migration_preparation.plan
     if config.dry_run:
-        safe_log("dry_run=true; skipping DeepSeek tool loop")
+        safe_log("dry_run=true; skipping model tool loop")
         result = skipped_result(
             status="skipped-dry-run",
-            final_summary="dry_run=true; DeepSeek was not called.",
+            final_summary="dry_run=true; model was not called.",
             config=config,
             visual_task_text=task_text,
             skill_selection=skill_selection,
@@ -1100,10 +1100,10 @@ def run_tool_loop(
             run_metadata=run_metadata,
         )
     if not config.run_agent:
-        safe_log("run_agent=false; skipping DeepSeek tool loop")
+        safe_log("run_agent=false; skipping model tool loop")
         result = skipped_result(
             status="skipped-run-agent-false",
-            final_summary="run_agent=false; DeepSeek was not called.",
+            final_summary="run_agent=false; model was not called.",
             config=config,
             visual_task_text=task_text,
             skill_selection=skill_selection,
@@ -1284,7 +1284,7 @@ def run_tool_loop(
             result = ToolLoopResult(
                 executed=True,
                 status=loop_status,
-                final_summary=summary or "DeepSeek returned no final summary.",
+                final_summary=summary or "Model returned no final summary.",
                 iterations=iteration,
                 tool_call_count=tool_call_count,
                 read_tool_count=sandbox.read_count,
@@ -1426,7 +1426,7 @@ def run_tool_loop(
     result = ToolLoopResult(
         executed=True,
         status=loop_status,
-        final_summary=f"DeepSeek tool loop stopped after max_iterations={config.max_iterations}.",
+        final_summary=f"Model tool loop stopped after max_iterations={config.max_iterations}.",
         iterations=config.max_iterations,
         tool_call_count=tool_call_count,
         read_tool_count=sandbox.read_count,
@@ -1516,17 +1516,18 @@ def write_json(path: str, payload: Any) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the Forgis DeepSeek tool loop")
+    parser = argparse.ArgumentParser(description="Run the Forgis model tool loop")
     parser.add_argument("--source", required=True, help="Path to the checked-out source repository")
     parser.add_argument("--target", required=True, help="Path to the checked-out target repository")
     parser.add_argument("--target-repo", required=True, help="Target repository, for example owner/target-repo")
+    parser.add_argument("--config", default="", help="Optional config file path; defaults to target/FORGIS_CONFIG.yml")
     parser.add_argument("--status-output", default="")
     parser.add_argument("--operation-log-output", default="")
     parser.add_argument("--summary-output", default="")
     parser.add_argument("--report-output-dir", default="")
     args = parser.parse_args()
 
-    config = resolve_config(target_root=Path(args.target), target_repo=args.target_repo)
+    config = resolve_config(target_root=Path(args.target), target_repo=args.target_repo, config_path=args.config)
     report_allowed_root = Path(os.environ.get("GITHUB_WORKSPACE", "") or Path.cwd()).resolve()
     report_output_dir = args.report_output_dir or config.run_report_output_dir
     result = run_tool_loop(

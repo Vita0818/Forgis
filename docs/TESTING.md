@@ -1,6 +1,6 @@
 # 构建与测试说明
 
-最近自查日期：2026-05-29
+最近自查日期：2026-06-23
 
 ## 环境要求
 
@@ -9,6 +9,7 @@
 - Shell：`agent/build_target.sh` 和 `agent/create_pr.sh` 使用 bash。
 - Git/GitHub CLI：真实 PR 创建路径依赖 `git` 和 `gh`，在 `agent/create_pr.sh` 中使用。
 - GitHub Actions secrets：真实运行依赖 `FORGIS_TARGET_TOKEN`、`FORGIS_SOURCE_TOKEN` 和模型 secret 环境变量。不要在文档或配置中写入真实值。
+- v7.0 模型 client 测试只使用 mock HTTP，不真实调用任何 API。OpenAI-compatible API key 只能通过 `model_env` 指向环境变量名；异常、日志、报告和 fixture 不得包含真实 secret 值、Authorization header、raw provider response 或完整模型输出。
 - v6.0 视觉闭环测试不需要真实 Qwen API key。`visual_validation` 配置不得包含真实 token、API key、截图文件路径、evidence root 或本地敏感路径；`reference_screenshot_dirs` / `actual_screenshot_dirs` 只能是目标仓库相对目录。`agent/qwen_vision.py` 的 provider transport 在测试中必须 mock。真实 Qwen 调用只允许在运行时显式提供 `QWEN_API_KEY`，可选 `QWEN_API_BASE` 和 `QWEN_VISION_MODEL`，这些值不得写入报告。
 
 ## 依赖安装方式
@@ -22,12 +23,19 @@ pip install -r requirements.txt
 
 本地开发可使用同样命令。是否使用虚拟环境由开发者决定，`.venv/` 和 `venv/` 已被 `.gitignore` 忽略。
 
+仓库外临时 venv 示例：
+
+```bash
+python3 -m venv /tmp/forgis-v7-local-venv
+/tmp/forgis-v7-local-venv/bin/python -m pip install -r requirements.txt
+```
+
 ## 构建命令
 
 仓库没有传统 package build。当前验证工作流中的语法构建检查为：
 
 ```bash
-python -m py_compile agent/forge.py agent/forgis_config.py agent/resolve_config.py agent/guardrails.py agent/write_run_log.py agent/model_env.py agent/deepseek_agent.py agent/file_tools.py agent/tool_loop.py
+python -m py_compile agent/forge.py agent/forgis_config.py agent/resolve_config.py agent/guardrails.py agent/write_run_log.py agent/model_env.py agent/deepseek_agent.py agent/openai_compatible_client.py agent/cli.py agent/file_tools.py agent/tool_loop.py
 ```
 
 发布检查清单中还建议：
@@ -49,7 +57,7 @@ python3 -m py_compile agent/*.py
 当前 CI 运行：
 
 ```bash
-python -m unittest tests/test_forgis_config.py
+python -m unittest tests/test_forgis_config.py tests/test_openai_compatible_client.py tests/test_v7_cli_config.py tests/test_v7_local_cli.py tests/test_v7_local_smoke.py
 ```
 
 `RELEASE_NOTES.md` 的 release checklist 写的是：
@@ -58,7 +66,15 @@ python -m unittest tests/test_forgis_config.py
 python3 -m unittest
 ```
 
-两者都来自项目文件。若需要最接近 CI，请优先运行 `python -m unittest tests/test_forgis_config.py`。
+两者都来自项目文件。若需要最接近 CI，请优先运行 `python -m unittest tests/test_forgis_config.py tests/test_openai_compatible_client.py tests/test_v7_cli_config.py tests/test_v7_local_cli.py tests/test_v7_local_smoke.py`。
+
+v7.0 第一阶段的新增测试点：
+
+- `tests/test_openai_compatible_client.py` 覆盖 Chat Completions request schema、base URL 拼接、model/tools/tool_choice、timeout、HTTP error 脱敏、invalid JSON、missing choices、malformed message/tool_calls、API key 不出现在异常或 repr、DeepSeek shim 兼容。
+- `tests/test_v7_cli_config.py` 覆盖 `agent_backend: deepseek` 兼容、`agent_backend: openai-compatible` alias、`base_url` alias、`request_timeout_seconds`、env var 缺失错误只显示 env 名、CLI help/dry-run、command allowlist 未放宽、`validation_commands` 没被改成 shell bypass。
+- `tests/test_v7_local_cli.py` 覆盖 `python -m agent.cli help`、`doctor`、`run --config`、summary output、外部 config 解析、缺少 API key 错误脱敏、examples config 解析、DeepSeek shim 兼容。
+- `tests/test_v7_local_smoke.py` 覆盖 `python -m agent.cli smoke --workdir ...` 的本地 dry-run 闭环，不需要 API key、不调用 API、不写 target。
+- 所有 v7 API 测试必须 mock HTTP，不真实访问 provider。
 
 v6.0 视觉闭环的配置解析和视觉基础设施测试点集中在 `tests/test_forgis_config.py`：
 
@@ -91,6 +107,35 @@ python agent/forge.py \
   --summary-output "$GITHUB_WORKSPACE/tmp/run_summary.md"
 ```
 
+本地 CLI dry-run smoke 可使用：
+
+```bash
+python -m agent.cli doctor
+python -m agent.cli smoke --workdir /tmp/forgis-smoke
+
+python -m agent.cli run \
+  --source "$PWD/tmp/source" \
+  --target "$PWD/tmp/target" \
+  --target-repo "owner/target-repo" \
+  --config examples/FORGIS_CONFIG.local.smoke.yml \
+  --summary-output /tmp/forgis-summary.md \
+  --dry-run
+```
+
+该命令仍受 `FORGIS_CONFIG.yml` 的 dry-run/real-run gate 约束，不应写 source，不应绕过 `target_subdir`。
+
+真实 OpenAI-compatible 本地运行只应由用户手动设置 env 后执行，测试不得运行：
+
+```bash
+export FORGIS_MODEL_API_KEY="..."
+python -m agent.cli run \
+  --source /path/to/source \
+  --target /path/to/target \
+  --target-repo local/my-migration \
+  --config examples/FORGIS_CONFIG.local.openai-compatible.yml \
+  --summary-output /tmp/forgis-summary.md
+```
+
 本轮未运行该 smoke test。
 
 ## UI 测试命令
@@ -116,7 +161,8 @@ bash -n agent/create_pr.sh
 - Visual evidence：runtime 目录结构、target repo slug、安全路径拒绝、图片扩展名 allow/deny、状态分类、summary 脱敏序列化。
 - Qwen adapter：missing key、mock inspect、mock compare、mock failure、invalid response、安全 blocker、非法路径拒绝、单元测试无真实网络。
 - Visual tools/report/gate：schema、`list_visual_references`、sandbox dispatch、reference dirs 可读不可写、disabled/provider blocker、reference-only guidance limitation、reference+actual compare completed、auto 模式 required 判定、`NO_REFERENCE_SCREENSHOTS_FOUND`、`VISUAL_REPORT_INCOMPLETE`、run report / PR body 脱敏摘要。
-- Dry run：`dry_run=true` 时不调用 DeepSeek、不写目标仓库、不 push/PR。
+- Dry run：`dry_run=true` 时不调用模型、不写目标仓库、不 push/PR。
+- OpenAI-compatible model config：`agent_backend` alias、`api_base` / `base_url`、`model`、`request_timeout_seconds`、`model_env`、错误脱敏和 DeepSeek shim。
 - Tool sandbox：读 source/target、写 `target_subdir`、拒绝 source 写入、拒绝 target root 写入、拒绝 symlink 和 secret-like 路径。
 - Build/test feedback：未配置时 skipped，安全命令成功/失败/超时/拒绝时返回结构化摘要。
 - Repair loop：失败后要求 diff/build/test gate，超过 attempts 时停止。
@@ -140,7 +186,7 @@ bash -n agent/create_pr.sh
 
 ## 本轮是否实际运行命令
 
-v6.0 reference guidance 调整本轮实际运行：
+上一轮 v6.0 reference guidance 调整曾运行：
 
 - `python3 -m unittest tests/test_forgis_config.py`：134 个测试通过。
 - `python3 -m unittest`：134 个测试通过。

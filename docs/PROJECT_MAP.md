@@ -1,6 +1,6 @@
 # 项目地图
 
-最近自查日期：2026-05-29
+最近自查日期：2026-06-23
 
 ## 顶层目录树
 
@@ -10,6 +10,8 @@
 │   ├── migrate.yml
 │   └── validate-forgis.yml
 ├── agent/
+│   ├── cli.py
+│   ├── openai_compatible_client.py
 │   ├── visual_evidence.py
 │   └── qwen_vision.py
 ├── docs/
@@ -29,7 +31,9 @@
 ├── skills/
 ├── tests/
 │   ├── fixtures/reports/
-│   └── test_forgis_config.py
+│   ├── test_forgis_config.py
+│   ├── test_openai_compatible_client.py
+│   └── test_v7_cli_config.py
 ├── tmp/
 ├── README.md
 ├── README.zh-CN.md
@@ -42,11 +46,11 @@
 
 ## 关键目录职责
 
-- `agent/`：Forgis 核心 Python 和 shell 运行时。包括配置解析、DeepSeek client、受控文件工具、tool loop、staged translation、guardrails、报告、PR body 和 GitHub Actions 辅助脚本。
+- `agent/`：Forgis 核心 Python 和 shell 运行时。包括配置解析、OpenAI-compatible client、DeepSeek compatibility shim、本地 CLI、受控文件工具、tool loop、staged translation、guardrails、报告、PR body 和 GitHub Actions 辅助脚本。
 - `.github/workflows/`：CI 与主运行工作流。`migrate.yml` 是真实 Forgis 运行链路，`validate-forgis.yml` 是本仓库脚本验证链路。
 - `skills/`：仓库本地可注入的短技能文档。`agent/skill_loader.py` 只允许从仓库本地 `skills/*.md` 读取安全 slug。
 - `prompts/`：Agent 系统提示词。`agent/deepseek_agent.py` 优先读取 `prompts/system_agent_v3.md`，失败时回落到内置 legacy prompt。
-- `tests/`：单文件 unittest 测试套件和报告 fixture。当前核心行为集中在 `tests/test_forgis_config.py`。
+- `tests/`：unittest 测试套件和报告 fixture。历史核心行为集中在 `tests/test_forgis_config.py`；v7.0 新增 client/CLI/config 窄测试文件。
 - `tests/fixtures/reports/`：run report / migration plan audit 的 active、blocked、completed、deferred 状态 fixture。
 - `docs/`：项目说明与迁移参考文档。`DS_GUIDE_Swift_Kotlin.md` 是迁移策略参考，不是运行时自动规则。
 - `reports/`：生成报告目录占位或本地输出位置，当前未发现跟踪文件。
@@ -56,9 +60,11 @@
 ## 关键文件清单
 
 - `agent/forgis_config.py`：解析 `FORGIS_CONFIG.yml`、支持字段、默认值、路径安全、真实运行 gate、`ResolvedConfig.env()` 输出。
-- `agent/forge.py`：CLI 控制器入口，校验 source/target 目录并输出运行摘要。
+- `agent/forge.py`：旧控制器入口，校验 source/target 目录并输出运行摘要；保留既有参数形式。
+- `agent/cli.py`：v7.0 本地 CLI 入口，支持 `python -m agent.cli help`、`doctor`、`smoke` 与 `run --source ... --target ... --target-repo ... [--config ...] [--dry-run]`，复用现有 config resolver 和 tool loop。
 - `agent/resolve_config.py`：GitHub Actions 中解析目标仓库配置并写入 `$GITHUB_ENV` / `$GITHUB_OUTPUT`。
-- `agent/deepseek_agent.py`：系统提示词、工具 schema、DeepSeek OpenAI-compatible chat client。v6.0 视觉工具包括 `list_visual_references`、`inspect_visual_reference`、`inspect_visual_actual`、`compare_visual_screenshots`。
+- `agent/openai_compatible_client.py`：v7.0 非 streaming OpenAI-compatible Chat Completions client，负责 URL 拼接、request schema、timeout、脱敏错误和 response/tool_call shape 校验。
+- `agent/deepseek_agent.py`：系统提示词、工具 schema、DeepSeek public API compatibility shim。底层 HTTP 通过 `OpenAICompatibleClient`；v6.0 视觉工具包括 `list_visual_references`、`inspect_visual_reference`、`inspect_visual_actual`、`compare_visual_screenshots`。
 - `agent/tool_loop.py`：默认 tool loop 主流程，处理 dry-run/run-agent gate、工具调用、runtime state、repair loop、report 和 migration plan。
 - `agent/staged_translation.py`：`execution_mode=staged_translation` 的控制器，按 overview、per_file、stabilization 和微阶段 gate 推进。
 - `agent/file_tools.py`：虚拟路径沙箱和工具实现。读 `source/`、`target/`、`target_subdir/`，写入仅限 `target_subdir`；`visual_validation.reference_screenshot_dirs` / `actual_screenshot_dirs` 是目标仓库只读截图输入目录，即使位于 `target_subdir` 内也不得被写工具修改。
@@ -90,20 +96,25 @@
 - 默认模型循环入口：`python forgis/agent/tool_loop.py --source ... --target ... --target-repo ...`。
 - 目标输出验证入口：`python forgis/agent/validate_target_output.py snapshot|validate ...`。
 - guardrail 入口：`python forgis/agent/guardrails.py snapshot-readonly|check-readonly|check-target-scope|check-source-clean|check-dry-run-clean|check-secret-leaks ...`。
-- 本地测试入口：`python3 -m unittest tests/test_forgis_config.py`。
+- 本地测试入口：`python3 -m unittest tests/test_forgis_config.py tests/test_openai_compatible_client.py tests/test_v7_cli_config.py tests/test_v7_local_cli.py tests/test_v7_local_smoke.py`。
 
 ## 配置文件
 
 - `requirements.txt`：当前仅声明 `PyYAML>=6.0.2`。
 - `.gitignore`：忽略 Python 缓存、虚拟环境、`.env`、日志、`reports/`、`forgis-runtime/`、`tmp/`、证书和 secrets 目录。
-- 目标仓库运行配置不是本仓库文件，而是目标仓库根目录的 `FORGIS_CONFIG.yml`。`agent/forgis_config.py` 固定该文件名，且拒绝未知字段。
+- 目标仓库运行配置默认是目标仓库根目录的 `FORGIS_CONFIG.yml`；本地 CLI 可用 `--config` 指向仓库外配置文件。`agent/forgis_config.py` 拒绝未知字段和 secret-like config path。
 - 目标仓库任务文件默认 `FORGIS_TASK.md`，可由 `task_prompt_path` 指定，但必须位于目标仓库根内且非空。
+- v7.0 模型配置支持 `agent_backend: deepseek`、`agent_backend: openai-compatible`、`api_base` / `base_url`、`api_format: openai-compatible`、`model`、`request_timeout_seconds` 和 `model_env`。API key 只能通过 env 映射注入，不应写入配置。
 - v6.0 `visual_validation` 配置块包含 `enabled`、`provider`、`mode`、`reference_screenshot_dirs`、`actual_screenshot_dirs`、`max_visual_iterations`、`require_reference_first`、`require_actual_for_full_validation`、`upload_visual_artifact`。默认 `mode=reference_guidance`，`reference_screenshot_dirs` / `actual_screenshot_dirs` 默认为空以保持兼容。
 - v6.0 已接通 reference-guided migration、`list_visual_references`、视觉工具 schema、`FileToolSandbox` 分发、runtime visual state/gate、run report / PR body 视觉字段和显式 env 下的 Qwen HTTP transport。仍不自动截图、不上传 visual artifact、不支持多 provider。
 
 ## 测试目录
 
 - `tests/test_forgis_config.py`：覆盖配置解析、工作流约束、工具沙箱、staged translation、migration plan、report、guardrails、PR body 等。
+- `tests/test_openai_compatible_client.py`：覆盖 v7.0 client request schema、URL 拼接、timeout、HTTP/JSON/shape 错误脱敏和 DeepSeek shim 兼容。
+- `tests/test_v7_cli_config.py`：覆盖 v7.0 config 字段、backend alias、env 缺失、CLI help/dry-run、command allowlist 和 `validation_commands` 回归。
+- `tests/test_v7_local_cli.py`：覆盖 `doctor`、`run --config`、summary output、缺失 env 错误脱敏、examples config 解析和 DeepSeek shim 本地配置兼容。
+- `tests/test_v7_local_smoke.py`：覆盖 `python -m agent.cli smoke --workdir ...` 的 dry-run 本地闭环、不调用 API、不写 target。
 - `tests/fixtures/reports/*.json`：报告 fixture 和 golden-like 样本。
 - `tests/__init__.py`：测试包标记文件。
 
@@ -113,6 +124,8 @@
 - `prompts/system_agent_v3.md`：运行时系统提示词。
 - `docs/DS_GUIDE_Swift_Kotlin.md`：SwiftUI 到 Kotlin/Compose 迁移风险文档。
 - `docs/QWEN_VISUAL_MODE.md`：Qwen Visual Evidence Mode 的长期维护说明。当前 v6.0 已接入 reference guidance、受控视觉工具、报告字段、gate 和真实 provider transport；自动截图采集、artifact 上传和多 provider 仍未实现。
+- `examples/FORGIS_CONFIG.local.openai-compatible.yml`：真实本地 OpenAI-compatible 模板，只通过 env 注入 API key。
+- `examples/FORGIS_CONFIG.local.smoke.yml`：无 API key dry-run smoke 模板。
 
 ## 生成物和缓存目录
 

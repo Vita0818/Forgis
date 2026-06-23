@@ -1,6 +1,6 @@
 # 工程禁区
 
-最近自查日期：2026-05-29
+最近自查日期：2026-06-23
 
 ## 不得破坏的用户数据格式
 
@@ -15,7 +15,7 @@
 
 ## 不得破坏的文件路径约定
 
-- 目标配置固定为目标仓库根目录 `FORGIS_CONFIG.yml`。
+- 目标配置默认是目标仓库根目录 `FORGIS_CONFIG.yml`。本地 CLI `--config` 可以显式指定外部配置文件，但该路径必须是只读运行输入，不能位于 source repo 内，不能包含 secret-like 路径段，不能成为写工具目标。
 - 目标任务文件默认 `FORGIS_TASK.md`，可配置但必须在目标仓库根内。
 - `target_subdir` 默认 `target-output`，必须是目标仓库内非根相对路径。
 - `run_log_path` 默认 `{target_subdir}/FORGIS_LOG.md`，必须位于 `target_subdir` 内。
@@ -27,9 +27,12 @@
 
 ## 不得破坏的 API / 路由 / 协议 / 存储结构
 
-- DeepSeek client 使用 OpenAI-compatible chat completions：`{api_base}/chat/completions`，payload 包含 `model`、`messages`、`tools`、`tool_choice: auto`。
+- 模型 client 使用非 streaming OpenAI-compatible chat completions，payload 包含 `model`、`messages`、可选 `tools`、可选 `tool_choice`。`agent_backend: deepseek` 必须继续兼容，`agent_backend: openai-compatible` 只作为通用 alias，不得引入 provider 私有协议。
+- `api_base` 和 `base_url` 是同一 endpoint 配置的 alias；不得在同一配置中设置两个不同值。Chat Completions URL 拼接不得重复 `/v1` 或 `/chat/completions`，也不得泄露 API key。
 - Tool schema 名称和参数由 `agent/deepseek_agent.py` 定义，`agent/file_tools.py` 按同名 `invoke()`。改动任一边必须同步另一边和测试。
 - `model_env` 是 runtime env name 到 secret env name 的映射，只允许环境变量名，不允许真实 secret 值。
+- `python -m agent.cli doctor` 和 `python -m agent.cli smoke` 不得真实调用模型 API。`smoke` 只允许在用户指定或系统临时 workdir 下创建 dry-run fixture。
+- `request_timeout_seconds` 是模型请求超时控制值，必须有安全默认值和上限；不得用配置绕过 dry-run/real-run gate。
 - `success_checks` 支持 `path_exists` 或 `command`，每个 mapping 只能包含其中一个。
 - `build_command` 和 `test_command` 是非空 YAML 参数数组，不是 shell 字符串。
 - `validation_commands` 是字符串列表，由 `agent/build_target.sh` 在 `target_subdir` 下执行。不要和 build/test command array 混淆。
@@ -47,7 +50,9 @@
 - dry run 不得写 target。
 - secret leak check 必须扫描 `model_env` 对应 secret 值是否写入 `target_subdir`。
 - 命令执行不得开启任意 shell 权限。`run_command` 和 build/test feedback 必须经过 `command_runner.py`。
+- 本地 CLI 不得新增 shell runner，也不得让 `--config` 或 `smoke` 绕过 `command_runner.py`、dry-run gate、source readonly 或 `target_subdir` 写入边界。
 - 报告、日志、PR body、migration plan 必须脱敏、截断、禁止完整 diff/source/model output 泄露。
+- OpenAI-compatible HTTP error、invalid JSON、missing choices、malformed message/tool_calls 等错误必须脱敏，不能打印 API key、Authorization header、cookie、raw provider response 或完整模型输出。
 - 不得向 Qwen 或任何视觉 provider 发送源码、secret、token、`.env`、证书、私钥、provisioning profile、完整仓库快照或私有本地配置。
 - 不得把 reference-only 视觉指导当作完整真实渲染验收；报告和 PR body 必须区分 `guidance_completed` 与 `full_rendered_validation`。
 - 找不到配置的 reference screenshots 时必须写 `NO_REFERENCE_SCREENSHOTS_FOUND` 或等价 blocker，不得声称视觉指导完成。
@@ -56,6 +61,7 @@
 ## 不得随意重构的核心模块
 
 - `agent/forgis_config.py`：配置字段、默认值、路径安全、运行 gate。
+- `agent/openai_compatible_client.py`：v7.0 模型 HTTP transport，必须保持非 streaming、可 mock、脱敏、有界，不得引入 provider-specific hacks 或真实网络单测。
 - `docs/QWEN_VISUAL_MODE.md` 与 `skills/qwen_visual_mode.md`：v6.0 视觉模式安全契约。
 - `agent/visual_evidence.py`：视觉证据目录、状态、阻塞原因、图片路径校验和摘要模型。
 - `agent/qwen_vision.py`：Qwen provider adapter，必须保持可 mock、脱敏、有界；缺少显式 `QWEN_API_KEY` 时必须安全返回 blocker，不得真实联网。
@@ -98,7 +104,7 @@
 - Tool schema 或文件权限：`agent/deepseek_agent.py`、`agent/file_tools.py`、`tests/test_forgis_config.py`。
 - 命令执行：`agent/command_runner.py`、`agent/build_runner.py`、`agent/build_target.sh`。
 - Guardrails：`agent/guardrails.py`、`agent/validate_target_output.py`、`.github/workflows/migrate.yml`。
-- DeepSeek 调用：`agent/deepseek_agent.py`、`agent/model_env.py`、`agent/tool_loop.py`.
+- 模型调用：`agent/openai_compatible_client.py`、`agent/deepseek_agent.py`、`agent/model_env.py`、`agent/tool_loop.py`.
 - Staged translation：`agent/staged_translation.py`、`agent/source_inventory.py`。
 - Migration plan：`agent/migration_units.py`、`agent/migration_scheduler.py`、`agent/migration_state.py`、`agent/migration_plan_store.py`、`agent/plan_audit.py`。
 - Reports：`agent/run_report.py`、`agent/repair_report.py`、`tests/fixtures/reports/*.json`。
@@ -107,7 +113,7 @@
 ## 回归验证要求
 
 - 文档-only 修改：至少运行 `git diff --check`，并检查 `git status --short`。
-- Python 逻辑修改：运行相关窄测试，通常至少 `python3 -m unittest tests/test_forgis_config.py`；发布前运行 `python3 -m py_compile agent/*.py`。
+- Python 逻辑修改：运行相关窄测试，通常至少 `python3 -m unittest tests/test_forgis_config.py`；v7.0 模型/CLI 修改还应运行 `python3 -m unittest tests/test_openai_compatible_client.py tests/test_v7_cli_config.py`；发布前运行 `python3 -m py_compile agent/*.py`。
 - `visual_validation` 配置修改：必须覆盖默认值、`enabled` 枚举、`provider=qwen`、`mode` 枚举、reference/actual screenshot dirs 路径校验、iteration 范围、严格 boolean、未知字段失败、env/output 不含 Qwen secret 值。
 - 视觉证据修改：必须覆盖 runtime 目录结构、source/target/home/secret-like 路径拒绝、图片扩展名 allow/deny、状态分类、摘要脱敏序列化。
 - Qwen adapter 修改：必须覆盖缺少 API key、mock inspect、mock compare、mock failure、异常脱敏、非法图片路径拒绝、invalid response 安全失败，以及单元测试不真实联网。
