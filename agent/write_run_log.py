@@ -84,7 +84,7 @@ def markdown_entry(args: argparse.Namespace, run_log_relative: str, changed_path
 
     warnings: list[str] = []
     if dry_run and run_agent_config:
-        warnings.append("dry_run=true, DeepSeek execution is disabled.")
+        warnings.append("dry_run=true, model execution is disabled.")
     if not dry_run and not confirm_real_run:
         warnings.append("Real Forgis runs require confirm_real_run: true in FORGIS_CONFIG.yml.")
     if args.warning:
@@ -116,8 +116,8 @@ def markdown_entry(args: argparse.Namespace, run_log_relative: str, changed_path
 | run_agent config value | `{str(run_agent_config).lower()}` |
 | Effective run_agent | `{str(run_agent).lower()}` |
 | confirm_real_run | `{str(confirm_real_run).lower()}` |
-| DeepSeek executed | `{str(deepseek_executed).lower()}` |
-| DeepSeek status | `{args.deepseek_status}` |
+| Model executed | `{str(deepseek_executed).lower()}` |
+| Model status | `{args.deepseek_status}` |
 | Tool call count | `{args.tool_call_count}` |
 | Read tool count | `{args.read_tool_count}` |
 | Write tool count | `{args.write_tool_count}` |

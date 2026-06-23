@@ -6,17 +6,18 @@ import re
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-import yaml
-
 
 DEFAULT_CONFIG_PATH = "FORGIS_CONFIG.yml"
 DEFAULT_SOURCE_REF = "main"
 DEFAULT_TASK_PROMPT_PATH = "FORGIS_TASK.md"
 DEFAULT_TARGET_SUBDIR = "target-output"
 DEFAULT_AGENT_BACKEND = "deepseek"
+SUPPORTED_AGENT_BACKENDS = frozenset({"deepseek", "openai-compatible"})
 DEFAULT_MODEL = "deepseek-v4-pro"
 DEFAULT_API_BASE = "https://api.deepseek.com"
 DEFAULT_API_FORMAT = "openai-compatible"
+DEFAULT_REQUEST_TIMEOUT_SECONDS = 120
+MAX_REQUEST_TIMEOUT_SECONDS = 600
 DEFAULT_TARGET_BASE_BRANCH = "main"
 DEFAULT_RUN_LOG_FILENAME = "FORGIS_LOG.md"
 DEFAULT_MAX_ITERATIONS = 80
@@ -117,6 +118,10 @@ SECRET_SKILL_NAME_WORDS = re.compile(
     r"(secret|token|credential|password|api[_-]?key|private|\.env|\.npmrc|\.pypirc|\.netrc)",
     re.IGNORECASE,
 )
+CONFIG_SECRET_PATH_WORDS = re.compile(
+    r"(secret|token|credential|password|api[_-]?key|apikey|private-key|private_key|\.env|\.npmrc|\.pypirc|\.netrc)",
+    re.IGNORECASE,
+)
 WINDOWS_ABSOLUTE_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
 
 CONFIG_FIELDS = {
@@ -127,7 +132,9 @@ CONFIG_FIELDS = {
     "agent_backend",
     "model",
     "api_base",
+    "base_url",
     "api_format",
+    "request_timeout_seconds",
     "target_branch",
     "target_base_branch",
     "run_log_path",
@@ -292,6 +299,7 @@ class ResolvedConfig:
     model: str
     api_base: str
     api_format: str
+    request_timeout_seconds: int
     target_branch: str
     target_base_branch: str
     run_log_path: str
@@ -376,6 +384,7 @@ class ResolvedConfig:
             "MODEL": self.model,
             "API_BASE": self.api_base,
             "API_FORMAT": self.api_format,
+            "REQUEST_TIMEOUT_SECONDS": str(self.request_timeout_seconds),
             "TARGET_BRANCH": self.target_branch,
             "TARGET_BASE_BRANCH": self.target_base_branch,
             "RUN_LOG_PATH": self.run_log_path,
@@ -1298,8 +1307,49 @@ def require_path_inside_subdir(
     return resolved, relative
 
 
-def load_config_file(target_root: Path) -> tuple[dict[str, Any], str]:
-    config_abs, config_relative = resolve_inside_root(target_root, DEFAULT_CONFIG_PATH, "config_path")
+def _path_has_secret_like_part(path: Path) -> bool:
+    ignored_system_parts = {"/", "private", "tmp", "var"}
+    for part in path.parts:
+        lowered = part.casefold()
+        if lowered in ignored_system_parts:
+            continue
+        if lowered in {".env", ".netrc", ".npmrc", ".pypirc", ".ssh"}:
+            return True
+        if lowered.endswith((".pem", ".key", ".p12", ".pfx", ".mobileprovision", ".cer", ".crt")):
+            return True
+        if CONFIG_SECRET_PATH_WORDS.search(part):
+            return True
+    return False
+
+
+def resolve_config_file_path(target_root: Path, config_path: str | None) -> tuple[Path, str]:
+    config_path_input = non_empty(config_path) or DEFAULT_CONFIG_PATH
+    cleaned = clean_single_line(config_path_input, "config_path")
+    if not cleaned:
+        raise ValueError("config_path is required.")
+    if cleaned.startswith("~"):
+        raise ValueError("config_path must be an explicit file path, not a home-relative path.")
+
+    if cleaned == DEFAULT_CONFIG_PATH:
+        return resolve_inside_root(target_root, DEFAULT_CONFIG_PATH, "config_path")
+
+    raw = Path(cleaned)
+    if any(part in {"", ".", "..", ".git"} for part in raw.parts):
+        raise ValueError(f"config_path contains an unsafe path segment: {config_path_input}")
+    if _path_has_secret_like_part(raw):
+        raise ValueError("config_path must not contain secret-like path segments.")
+
+    config_abs = raw.resolve()
+    target_resolved = target_root.resolve()
+    if config_abs.is_relative_to(target_resolved):
+        if config_abs == target_resolved:
+            raise ValueError("config_path must not resolve to the target repository root.")
+        return config_abs, config_abs.relative_to(target_resolved).as_posix()
+    return config_abs, config_abs.as_posix()
+
+
+def load_config_file(target_root: Path, config_path: str | None = DEFAULT_CONFIG_PATH) -> tuple[dict[str, Any], str]:
+    config_abs, config_relative = resolve_config_file_path(target_root, config_path)
     if not config_abs.exists():
         raise FileNotFoundError(f"Config file not found: {config_relative}")
 
@@ -1309,6 +1359,11 @@ def load_config_file(target_root: Path) -> tuple[dict[str, Any], str]:
     text = config_abs.read_text(encoding="utf-8", errors="replace")
     if not text.strip():
         raise ValueError(f"Config file exists but is empty: {config_relative}")
+
+    try:
+        import yaml
+    except ModuleNotFoundError as exc:
+        raise ModuleNotFoundError("PyYAML is required to read FORGIS_CONFIG.yml. Install requirements.txt.") from exc
 
     try:
         loaded = yaml.safe_load(text)
@@ -1349,6 +1404,14 @@ def select_value(
     return default
 
 
+def select_api_base(config: dict[str, Any]) -> str:
+    api_base = select_value("api_base", config)
+    base_url = select_value("base_url", config)
+    if api_base and base_url and api_base.rstrip("/") != base_url.rstrip("/"):
+        raise ValueError("Configure only one OpenAI-compatible endpoint field: api_base or base_url.")
+    return api_base or base_url or DEFAULT_API_BASE
+
+
 def select_config_bool(config: dict[str, Any], field: str, default: bool) -> bool:
     if field not in config or config[field] is None:
         return default
@@ -1377,11 +1440,7 @@ def resolve_config(
     if not target_root.exists() or not target_root.is_dir():
         raise FileNotFoundError(f"Target repository directory not found: {target_root}")
 
-    config_path_input = non_empty(config_path) or DEFAULT_CONFIG_PATH
-    if config_path_input != DEFAULT_CONFIG_PATH:
-        raise ValueError("Forgis config path is fixed to FORGIS_CONFIG.yml at the target repository root.")
-
-    config, resolved_config_path = load_config_file(target_root)
+    config, resolved_config_path = load_config_file(target_root, config_path)
 
     target_repo_value = non_empty(target_repo)
     if target_repo_value is not None:
@@ -1395,7 +1454,7 @@ def resolve_config(
         "task_prompt_path": select_value("task_prompt_path", config, DEFAULT_TASK_PROMPT_PATH),
         "agent_backend": select_value("agent_backend", config, DEFAULT_AGENT_BACKEND),
         "model": select_value("model", config, DEFAULT_MODEL),
-        "api_base": select_value("api_base", config, DEFAULT_API_BASE),
+        "api_base": select_api_base(config),
         "api_format": select_value("api_format", config, DEFAULT_API_FORMAT),
         "target_branch": select_value("target_branch", config),
         "target_base_branch": select_value(
@@ -1415,8 +1474,8 @@ def resolve_config(
         )
 
     agent_backend = (values["agent_backend"] or DEFAULT_AGENT_BACKEND).casefold()
-    if agent_backend != "deepseek":
-        raise ValueError("Only agent_backend: deepseek is currently supported.")
+    if agent_backend not in SUPPORTED_AGENT_BACKENDS:
+        raise ValueError("Only agent_backend: deepseek or openai-compatible is currently supported.")
 
     api_format = (values["api_format"] or DEFAULT_API_FORMAT).casefold()
     if api_format != DEFAULT_API_FORMAT:
@@ -1725,6 +1784,13 @@ def resolve_config(
         DEFAULT_TEST_TIMEOUT_SECONDS,
         minimum=1,
     )
+    request_timeout_seconds = select_bounded_int(
+        config,
+        "request_timeout_seconds",
+        DEFAULT_REQUEST_TIMEOUT_SECONDS,
+        minimum=1,
+        maximum=MAX_REQUEST_TIMEOUT_SECONDS,
+    )
 
     if not dry_run_value and not confirm_real_run:
         raise ValueError("Real Forgis runs require confirm_real_run: true in FORGIS_CONFIG.yml.")
@@ -1748,6 +1814,7 @@ def resolve_config(
         model=values["model"] or DEFAULT_MODEL,
         api_base=values["api_base"] or DEFAULT_API_BASE,
         api_format=api_format,
+        request_timeout_seconds=request_timeout_seconds,
         target_branch=values["target_branch"] or "",
         target_base_branch=values["target_base_branch"] or DEFAULT_TARGET_BASE_BRANCH,
         run_log_path=run_log_relative,
@@ -1826,7 +1893,7 @@ def markdown_summary(resolved: ResolvedConfig) -> str:
     config_keys = ", ".join(resolved.config_keys) if resolved.config_keys else "[none]"
     run_agent_note = ""
     if resolved.dry_run and resolved.run_agent_config:
-        run_agent_note = " (dry_run=true, DeepSeek execution is disabled.)"
+        run_agent_note = " (dry_run=true, model execution is disabled.)"
     model_env = (
         ", ".join(f"{runtime} <- {source}" for runtime, source in resolved.model_env)
         if resolved.model_env
@@ -1876,6 +1943,7 @@ def markdown_summary(resolved: ResolvedConfig) -> str:
             f"| Model | `{resolved.model}` |",
             f"| API base | `{resolved.api_base}` |",
             f"| API format | `{resolved.api_format}` |",
+            f"| Request timeout seconds | `{resolved.request_timeout_seconds}` |",
             f"| Model env mapping | `{model_env}` |",
             f"| Max iterations | `{resolved.max_iterations}` |",
             f"| Max tool result chars | `{resolved.max_tool_result_chars}` |",
@@ -1947,6 +2015,6 @@ def markdown_summary(resolved: ResolvedConfig) -> str:
             f"| Real run allowed | `{str(resolved.real_run_allowed and resolved.run_agent).lower()}` |",
             "",
             "Config path is fixed to FORGIS_CONFIG.yml in the main workflow.",
-            "DeepSeek execution is allowed only when dry_run=false, run_agent=true, and confirm_real_run=true.",
+            "Model execution is allowed only when dry_run=false, run_agent=true, and confirm_real_run=true.",
         ]
     )

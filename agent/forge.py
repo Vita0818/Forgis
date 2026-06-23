@@ -47,6 +47,7 @@ Generated at: {now}
 - Run log path: {config.run_log_path}
 - Agent backend: {config.agent_backend}
 - Model: {config.model}
+- Request timeout seconds: {config.request_timeout_seconds}
 - Execution mode: {config.execution_mode}
 - Dry run: {config.dry_run}
 - Run agent: {config.run_agent}
@@ -75,6 +76,7 @@ def main() -> None:
     parser.add_argument("--source", required=True, help="Path to the checked-out source repository")
     parser.add_argument("--target", required=True, help="Path to the checked-out target repository")
     parser.add_argument("--target-repo", required=True, help="Target repository, for example owner/target-repo")
+    parser.add_argument("--config", default="", help="Optional config file path; defaults to target/FORGIS_CONFIG.yml")
     parser.add_argument("--summary-output", required=False, default="")
     args = parser.parse_args()
 
@@ -83,7 +85,7 @@ def main() -> None:
 
     ensure_directory(source, "Source repository")
     ensure_directory(target, "Target repository")
-    config = resolve_config(target_root=target, target_repo=args.target_repo)
+    config = resolve_config(target_root=target, target_repo=args.target_repo, config_path=args.config)
 
     summary = build_summary(source=source, target=target, config=config)
     if args.summary_output:
@@ -97,7 +99,7 @@ def main() -> None:
     print(f"Target writable scope: {config.target_subdir}/")
     print(f"Long-term run log path: {config.run_log_path}")
     if config.dry_run:
-        print("dry_run=true; DeepSeek, target writes, push, and PR are disabled.")
+        print("dry_run=true; model calls, target writes, push, and PR are disabled.")
 
 
 if __name__ == "__main__":

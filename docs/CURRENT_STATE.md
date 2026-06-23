@@ -1,6 +1,6 @@
 # 当前状态
 
-最近自查日期：2026-05-29
+最近自查日期：2026-06-23
 
 ## 当前工作区状态摘要
 
@@ -12,13 +12,14 @@ git root: <PROJECT_ROOT>
 git status --short: 本轮存在 v6.0 未提交修改，具体文件以最终报告和 `git status --short` 为准
 ```
 
-v6.0 视觉闭环已按用户确认的真实使用方式调整为 reference-guided migration 优先：用户把源 App 参考截图放入目标仓库，通过 `visual_validation.reference_screenshot_dirs` 声明目录；Forgis 发现并检查 reference screenshots，把 Qwen 视觉指导提供给 DeepSeek / 主 Agent。actual screenshots 与 compare 是可选增强。仍不包含自动截图、adb/hdc/Windows/macOS 截图、artifact 上传、多 provider、UI dashboard 或任意 shell 扩展。
+v7.0 第一阶段已把 Forgis 的模型调用层推进到本地代码迁移助手的基础形态：保留 `agent_backend: deepseek` 默认行为，同时新增 `agent_backend: openai-compatible` alias、非 streaming Chat Completions client、本地 `python -m agent.cli` 入口、`doctor` / `smoke` 本地闭环、CLI `--config`、`base_url` alias 和 `request_timeout_seconds` 配置。v6.0 视觉闭环仍按 reference-guided migration 优先：Qwen 只读截图并输出视觉指导，不能读源码、写文件、运行命令或接收 secret。当前仍不包含 streaming、Responses API、local server/gateway、council、多 Agent、自动截图、artifact 上传、Keychain、GUI、多 provider 视觉或任意 shell 扩展。
 
 ## 当前项目已实现能力
 
-- 目标仓库配置解析：固定读取目标仓库根目录 `FORGIS_CONFIG.yml`，未知字段失败，必填 `source_repo`、`target_branch`，`target_repo` 由 workflow/CLI 输入。
+- 目标仓库配置解析：默认读取目标仓库根目录 `FORGIS_CONFIG.yml`；本地 CLI 可用 `--config` 显式读取外部配置文件。未知字段失败，必填 `source_repo`、`target_branch`，`target_repo` 由 workflow/CLI 输入。
 - 运行开关：真实模型执行需要 `dry_run=false`、`run_agent=true`、`confirm_real_run=true` 同时成立。
-- DeepSeek 调用：`agent/deepseek_agent.py` 使用 OpenAI-compatible `/chat/completions`，模型默认 `deepseek-v4-pro`。
+- 模型调用：`agent/openai_compatible_client.py` 提供非 streaming OpenAI-compatible Chat Completions transport；`agent/deepseek_agent.py` 保留 public API 并作为 DeepSeek 兼容 shim，模型默认 `deepseek-v4-pro`。
+- 本地 CLI：`agent/cli.py` 支持 `python -m agent.cli help`、`doctor`、`smoke` 和 `run --source ... --target ... --target-repo ... [--config ...] [--dry-run]`，复用现有配置解析、dry-run/real-run gate、tool loop 和报告写入边界。
 - 受控文件工具：支持 list/tree/read/file_exists/search/git_status/git_diff/mkdir/write/append/delete/edit/apply_patch/run_command/run_build/run_tests。
 - 文件沙箱：source 只读，target outside `target_subdir` 只读，写入仅限 `target_subdir`，并拒绝 secret-like 路径、symlink 写入、workflow 文件写入。
 - build/test feedback：可选 `build_command`、`test_command` 参数数组，经保守 allowlist 执行，输出会截断和脱敏。
@@ -44,13 +45,15 @@ v6.0 视觉闭环已按用户确认的真实使用方式调整为 reference-guid
 - Aider 后端。
 - 跨语言 build adapter、UI 控制台。
 - 上传 legacy runtime diagnostics artifacts、业务源码、完整 diff、secret、未脱敏模型输出或 target repository snapshot。
-- 自动截图、adb/hdc/Windows/macOS 截图、visual artifact 上传、多 provider、UI dashboard。当前视觉闭环依赖用户在目标仓库提供 reference screenshots；actual screenshots 可选。真实 Qwen transport 只有显式提供 `QWEN_API_KEY` 时才会调用，单元测试仍使用 mock，不联网。
+- streaming SSE、Responses API、image/multimodal 文本模型调用、provider 私有协议、retry/backoff、local server/gateway、council、多 Agent、Keychain、`~/.config` 默认配置。
+- 自动截图、adb/hdc/Windows/macOS 截图、visual artifact 上传、多 provider 视觉、UI dashboard。当前视觉闭环依赖用户在目标仓库提供 reference screenshots；actual screenshots 可选。真实 Qwen transport 只有显式提供 `QWEN_API_KEY` 时才会调用，单元测试仍使用 mock，不联网。
 
 ## 当前已知 bug / 风险
 
 - `agent/build_target.sh` 的 `validation_commands` 通过 `bash -lc` 运行字符串命令，安全边界弱于 `command_runner.py` 的数组 allowlist。当前 workflow 将 cwd 限制到 `target_subdir`，但仍需谨慎维护。
 - `tests/test_forgis_config.py` 覆盖面广但文件很大，新增行为时容易漏读相关测试块。
-- `agent/forgis_config.py`、`agent/tool_loop.py`、`agent/staged_translation.py` 字段和状态面较宽，新增字段需要同时更新 env/output、report、tests、README 和 fixture。
+- `agent/forgis_config.py`、`agent/tool_loop.py`、`agent/staged_translation.py` 字段和状态面较宽，新增字段需要同时更新 env/output、report、tests、README、常驻文档和 fixture。
+- OpenAI-compatible providers 的 endpoint 形态、错误响应和 tool call 细节存在差异；差异应限制在 `agent/openai_compatible_client.py` 和配置字段内，不应污染工具沙箱、command allowlist 或迁移计划核心逻辑。
 - `visual_validation` 已驱动受控视觉工具、报告字段和 runtime gate。缺少 API key、provider 不可用或找不到 reference screenshots 时必须写 blocker；reference-only 可完成视觉迁移指导，但必须写 limitation，不能被当成完整真实渲染验收。真实 transport 的风险集中在 env 管理与 provider response 脱敏，测试必须保持 mock-first。
 - README 和 README.zh-CN 包含多个历史版本章节，容易误读为当前新增能力。当前行为应以源码、workflow 和 `RELEASE_NOTES.md` v5.0 为准。
 - `rules/` 目录当前为空，运行时含义未确认。

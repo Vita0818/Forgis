@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-import json
 import os
-import urllib.error
-import urllib.request
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from forgis_config import ResolvedConfig
 from model_env import require_model_env_values
+from openai_compatible_client import DEFAULT_TIMEOUT_SECONDS, OpenAICompatibleClient
 from skill_loader import SkillSelection, render_selected_skills, select_skills
 
 
@@ -474,9 +472,9 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
 @dataclass(frozen=True)
 class DeepSeekClient:
     api_base: str
-    api_key: str
+    api_key: str = field(repr=False)
     model: str
-    timeout_seconds: int = 120
+    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
 
     @classmethod
     def from_config(
@@ -491,30 +489,18 @@ class DeepSeekClient:
             or values.get("FORGIS_MODEL_API_KEY")
             or next(iter(values.values()))
         )
-        return cls(api_base=config.api_base, api_key=api_key, model=config.model)
+        return cls(
+            api_base=config.api_base,
+            api_key=api_key,
+            model=config.model,
+            timeout_seconds=getattr(config, "request_timeout_seconds", DEFAULT_TIMEOUT_SECONDS),
+        )
 
     def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> dict[str, Any]:
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "tools": tools,
-            "tool_choice": "auto",
-        }
-        body = json.dumps(payload).encode("utf-8")
-        request = urllib.request.Request(
-            self.api_base.rstrip("/") + "/chat/completions",
-            data=body,
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
+        client = OpenAICompatibleClient(
+            api_base=self.api_base,
+            api_key=self.api_key,
+            model=self.model,
+            timeout_seconds=self.timeout_seconds,
         )
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"DeepSeek API request failed with HTTP {exc.code}: {detail}") from exc
-        except urllib.error.URLError as exc:
-            raise RuntimeError(f"DeepSeek API request failed: {exc.reason}") from exc
+        return client.chat(messages=messages, tools=tools, tool_choice="auto")

@@ -1,6 +1,6 @@
 # Forgis
 
-Forgis is a thin DeepSeek-powered file interaction interface.
+Forgis is a local code migration assistant with a controlled file-tool runtime. The default backend remains DeepSeek, and v7.0 phase 1 also supports non-streaming OpenAI-compatible Chat Completions through the same safety boundary.
 
 Documentation:
 
@@ -10,8 +10,8 @@ Documentation:
 It only does three things:
 
 - reads `FORGIS_CONFIG.yml` and the configured task file from the target repository
-- calls DeepSeek when the run switches allow it
-- gives DeepSeek controlled file interaction tools
+- calls the configured OpenAI-compatible text model when the run switches allow it
+- gives the model controlled file interaction tools
 
 Forgis does not contain project migration intelligence. The target repository task file owns the work instructions.
 
@@ -25,14 +25,55 @@ target_repo: owner/target-repo
 
 Every other setting comes from `FORGIS_CONFIG.yml` at the target repository root.
 
+## Local CLI
+
+v7.0 phase 1 adds a local CLI entry that uses the same config resolver and tool loop as the workflow:
+
+```bash
+python3 -m venv /tmp/forgis-v7-local-venv
+/tmp/forgis-v7-local-venv/bin/python -m pip install -r requirements.txt
+
+python -m agent.cli help
+python -m agent.cli doctor
+python -m agent.cli smoke --workdir /tmp/forgis-smoke
+```
+
+Run local dry-run with an explicit config path:
+
+```bash
+python -m agent.cli run \
+  --source /path/to/source \
+  --target /path/to/target \
+  --target-repo local/my-migration \
+  --config examples/FORGIS_CONFIG.local.smoke.yml \
+  --summary-output /tmp/forgis-summary.md \
+  --dry-run
+```
+
+Run a real local OpenAI-compatible text model only after exporting the secret env yourself:
+
+```bash
+export FORGIS_MODEL_API_KEY="..."
+python -m agent.cli run \
+  --source /path/to/source \
+  --target /path/to/target \
+  --target-repo local/my-migration \
+  --config examples/FORGIS_CONFIG.local.openai-compatible.yml \
+  --summary-output /tmp/forgis-summary.md
+```
+
+`doctor` only checks the local runtime and prints API env names as set/unset; it does not call an API. `smoke` creates a temporary source/target/config under the requested workdir and runs dry-run, so it does not require an API key. When invoking from outside this repository root, set `PYTHONPATH=/path/to/Forgis` before `python -m agent.cli`.
+
+The CLI does not add new write permissions or shell execution powers. `source` stays read-only, target writes still go through `target_subdir`, and real model calls still require `dry_run=false`, `run_agent=true`, and `confirm_real_run=true`.
+
 ## FORGIS_CONFIG.yml Configuration Guide
 
-`FORGIS_CONFIG.yml` must exist at the target repository root, must be non-empty YAML, and must use only supported Forgis fields. Unknown fields fail during the Resolve Forgis config step before the model runs.
+`FORGIS_CONFIG.yml` must exist at the target repository root unless local CLI `--config` explicitly points at another config file. The config must be non-empty YAML and must use only supported Forgis fields. Unknown fields fail during config resolution before the model runs.
 
 Keep three kinds of information separate:
 
 - **GitHub Actions input / CLI, not config:** `target_repo`.
-- **`FORGIS_CONFIG.yml`:** repository refs, output branch/subdir, task file path, DeepSeek connection fields, run switches, skills, reports, repair-loop settings, migration-plan settings, and non-secret visual-validation switches.
+- **`FORGIS_CONFIG.yml`:** repository refs, output branch/subdir, task file path, OpenAI-compatible model connection fields, run switches, skills, reports, repair-loop settings, migration-plan settings, and non-secret visual-validation switches.
 - **`FORGIS_TASK.md`:** product and migration instructions, such as Android / Kotlin / Jetpack Compose, target stack, UI style, information architecture, migration scope, privacy rules, and "write only inside `target_subdir`" business constraints.
 
 Do not put these fields or values in `FORGIS_CONFIG.yml`:
@@ -41,7 +82,7 @@ Do not put these fields or values in `FORGIS_CONFIG.yml`:
 - `target_stack`; describe Android / Kotlin / Jetpack Compose in `FORGIS_TASK.md`.
 - `source_branch`; use `source_ref`.
 - `target_repo_url`, `source_repo_url`, `target_path`, or `source_path`.
-- `agent_backend: aider`; Forgis currently supports only `agent_backend: deepseek`.
+- `agent_backend: aider`; Forgis currently supports `agent_backend: deepseek` and `agent_backend: openai-compatible`.
 - `build_command: []` or `test_command: []`; omit the field when no command is configured.
 - `model: deepseek/deepseek-v4-pro`; use DeepSeek's accepted model id `deepseek-v4-pro` or `deepseek-v4-flash`.
 - Qwen API keys, tokens, evidence roots, screenshot file paths, or secret local paths in `FORGIS_CONFIG.yml`. v6.0 accepts only the non-secret `visual_validation` control block documented below; reference/actual screenshot directories must be target-repo-relative read-only inputs. Qwen credentials/base/model may be supplied only through explicit runtime environment variables and are never written to reports.
@@ -60,6 +101,7 @@ agent_backend: deepseek
 model: deepseek-v4-pro
 api_base: https://api.deepseek.com
 api_format: openai-compatible
+request_timeout_seconds: 120
 model_env:
   DEEPSEEK_API_KEY: DEEPSEEK_API_KEY
 
@@ -86,6 +128,7 @@ agent_backend: deepseek
 model: deepseek-v4-pro
 api_base: https://api.deepseek.com
 api_format: openai-compatible
+request_timeout_seconds: 120
 model_env:
   DEEPSEEK_API_KEY: DEEPSEEK_API_KEY
 
@@ -153,6 +196,7 @@ Common defaults:
 - `model: deepseek-v4-pro`
 - `api_base: https://api.deepseek.com`
 - `api_format: openai-compatible`
+- `request_timeout_seconds: 120`
 - `target_base_branch: main`
 - `run_log_path: {target_subdir}/FORGIS_LOG.md`
 - `dry_run: true`
@@ -188,6 +232,7 @@ Long-running migrations can explicitly raise runtime sizing fields while the def
 | `max_iterations` | `80` | `5000` |
 | `max_tool_result_chars` | `20000` | `5000000` |
 | `max_command_output_chars` | `8000` | `2000000` |
+| `request_timeout_seconds` | `120` | `600` |
 | `run_report_max_events` | `100` | `10000` |
 | `run_report_max_chars` | `200000` | `20000000` |
 
@@ -219,12 +264,14 @@ Forgis does not accept shell strings, shell expansion, glob patterns, absolute p
 
 For the first Android migration run, omit `build_command` and `test_command`. The Gradle project may not exist yet, and v5.0 does not recommend putting `./gradlew` into these fields unless the command runner explicitly allows it and tests cover that behavior.
 
-### DeepSeek Model and Secrets
+### Model API and Secrets
 
-Use one of DeepSeek's accepted model ids:
+The v7.0 phase 1 model transport is non-streaming OpenAI-compatible Chat Completions. DeepSeek remains the default compatibility path:
 
 ```yaml
+agent_backend: deepseek
 model: deepseek-v4-pro
+api_base: https://api.deepseek.com
 ```
 
 or:
@@ -233,14 +280,28 @@ or:
 model: deepseek-v4-flash
 ```
 
-Real model calls also need a secret mapping:
+Other OpenAI-compatible text providers can use the explicit backend alias and either `api_base` or `base_url`:
+
+```yaml
+agent_backend: openai-compatible
+model: deepseek-chat
+api_base: https://api.deepseek.com/v1
+api_format: openai-compatible
+request_timeout_seconds: 120
+model_env:
+  api_key: FORGIS_MODEL_API_KEY
+```
+
+Real model calls always need a secret mapping:
 
 ```yaml
 model_env:
   DEEPSEEK_API_KEY: DEEPSEEK_API_KEY
 ```
 
-Never put the actual API key value in `FORGIS_CONFIG.yml`.
+Never put the actual API key value in `FORGIS_CONFIG.yml`. Missing env errors print only the env var name, not the value. Model API keys, Authorization headers, raw provider responses, and full model outputs must not be written to logs, reports, PR bodies, or fixtures.
+
+v7.0 phase 1 does not implement streaming SSE, the Responses API, image/multimodal model calls, a local server/gateway, council mode, multi-agent orchestration, automatic screenshots, GUI, Keychain storage, `~/.config` defaults, or provider-specific private protocols.
 
 ### Qwen Visual Evidence Mode (v6.0 reference guidance)
 
@@ -658,9 +719,9 @@ confirm_real_run: true
 
 Rules:
 
-- `dry_run: true` does not call DeepSeek, write the target repository, push, or open a pull request.
+- `dry_run: true` does not call the configured model, write the target repository, push, or open a pull request.
 - `dry_run: false` requires `confirm_real_run: true`.
-- DeepSeek runs only when effective `run_agent` is true.
+- The configured model runs only when effective `run_agent` is true.
 - Push and pull request creation are skipped unless the run is confirmed and not dry.
 
 ## Pull Request Branch Collisions
@@ -685,15 +746,15 @@ If GitHub still rejects the body as too long, Forgis automatically retries once 
 
 ## Task File
 
-The task file is the source of execution instructions for DeepSeek. Forgis does not rewrite it into a larger strategy prompt and does not preload source repository contents.
+The task file is the source of execution instructions for the configured model. Forgis does not rewrite it into a larger strategy prompt and does not preload source repository contents.
 
-DeepSeek must read the task file through the file tools, then inspect the source and target repositories as needed through those same tools.
+The model must read the task file through the file tools, then inspect the source and target repositories as needed through those same tools.
 
 Do not put API keys, tokens, certificates, signing material, or private information in the task file or config file.
 
-## DeepSeek
+## Model API
 
-Forgis uses DeepSeek through the OpenAI-compatible Chat Completions API. `model_env` maps runtime environment variable names to GitHub Actions environment variable names that are populated from secrets.
+Forgis uses non-streaming OpenAI-compatible Chat Completions. `agent_backend: deepseek` remains the default and `agent_backend: openai-compatible` is the generic alias. `model_env` maps runtime environment variable names to GitHub Actions environment variable names that are populated from secrets.
 
 ```yaml
 model_env:

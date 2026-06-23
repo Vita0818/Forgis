@@ -1,0 +1,31 @@
+# Forgis v7.0 local OpenAI-compatible example.
+# Non-streaming Chat Completions only. Do not put API keys in this file.
+# Run with:
+#   export FORGIS_MODEL_API_KEY="..."
+#   python -m agent.cli run --source /path/to/source --target /path/to/target \
+#     --target-repo local/my-migration --config examples/FORGIS_CONFIG.local.openai-compatible.yml
+
+source_repo: local/source
+source_ref: main
+target_branch: forgis/local-openai-compatible
+target_base_branch: main
+target_subdir: target-output
+task_prompt_path: FORGIS_TASK.md
+
+agent_backend: openai-compatible
+model: deepseek-chat
+api_base: https://api.deepseek.com/v1
+api_format: openai-compatible
+request_timeout_seconds: 120
+model_env:
+  api_key: FORGIS_MODEL_API_KEY
+
+execution_mode: tool_loop
+dry_run: false
+run_agent: true
+confirm_real_run: true
+
+run_report_enabled: true
+run_report_output_dir: reports
+
+# Source is read-only. Writes remain limited to target_subdir.

@@ -1,4 +1,4 @@
-name: Forgis DeepSeek Interface
+name: Forgis Migration Interface
 
 on:
   workflow_dispatch:
@@ -116,7 +116,7 @@ jobs:
           bash -n forgis/agent/build_target.sh
           bash -n forgis/agent/create_pr.sh
 
-      - name: Run DeepSeek tool loop
+      - name: Run model tool loop
         id: tool_loop
         if: ${{ steps.run_controller.outcome == 'success' && steps.check_shell_scripts.outcome == 'success' }}
         env:
@@ -132,7 +132,7 @@ jobs:
           QWEN_VISION_MODEL: ${{ vars.QWEN_VISION_MODEL }}
         run: |
           if [[ "$RUN_AGENT" != "true" ]]; then
-            echo "RUN_AGENT is false. Skipping DeepSeek execution."
+            echo "RUN_AGENT is false. Skipping model execution."
             python forgis/agent/tool_loop.py \
               --source "$GITHUB_WORKSPACE/source-repo" \
               --target "$GITHUB_WORKSPACE/target-repo" \
@@ -219,7 +219,7 @@ jobs:
           TOOL_CALL_COUNT="0"
           READ_TOOL_COUNT="0"
           WRITE_TOOL_COUNT="0"
-          FINAL_SUMMARY="DeepSeek was not run."
+          FINAL_SUMMARY="Model was not run."
           if [[ -f "$GITHUB_WORKSPACE/forgis-runtime/deepseek_status.env" ]]; then
             source "$GITHUB_WORKSPACE/forgis-runtime/deepseek_status.env"
             DEEPSEEK_EXECUTED="${deepseek_executed:-false}"
@@ -227,7 +227,7 @@ jobs:
             TOOL_CALL_COUNT="${tool_call_count:-0}"
             READ_TOOL_COUNT="${read_tool_count:-0}"
             WRITE_TOOL_COUNT="${write_tool_count:-0}"
-            FINAL_SUMMARY="${final_summary:-DeepSeek was not run.}"
+            FINAL_SUMMARY="${final_summary:-Model was not run.}"
           fi
 
           python forgis/agent/write_run_log.py \
