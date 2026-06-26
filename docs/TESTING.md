@@ -9,7 +9,7 @@
 - Shell：`agent/build_target.sh` 和 `agent/create_pr.sh` 使用 bash。
 - Git/GitHub CLI：真实 PR 创建路径依赖 `git` 和 `gh`，在 `agent/create_pr.sh` 中使用。
 - GitHub Actions secrets：真实运行依赖 `FORGIS_TARGET_TOKEN`、`FORGIS_SOURCE_TOKEN` 和模型 secret 环境变量。不要在文档或配置中写入真实值。
-- v7.0 模型 client 测试只使用 mock HTTP，不真实调用任何 API。OpenAI-compatible API key 只能通过 `model_env` 指向环境变量名；异常、日志、报告和 fixture 不得包含真实 secret 值、Authorization header、raw provider response 或完整模型输出。
+- v7.x 模型 client 测试只使用 mock HTTP，不真实调用任何 API。OpenAI-compatible API key 只能通过 `model_env` 指向环境变量名；异常、日志、报告和 fixture 不得包含真实 secret 值、Authorization header、raw provider response 或完整模型输出。v7.1 local CLI `init/status/run --unit/resume` 测试也不得真实调用 API。
 - v6.0 视觉闭环测试不需要真实 Qwen API key。`visual_validation` 配置不得包含真实 token、API key、截图文件路径、evidence root 或本地敏感路径；`reference_screenshot_dirs` / `actual_screenshot_dirs` 只能是目标仓库相对目录。`agent/qwen_vision.py` 的 provider transport 在测试中必须 mock。真实 Qwen 调用只允许在运行时显式提供 `QWEN_API_KEY`，可选 `QWEN_API_BASE` 和 `QWEN_VISION_MODEL`，这些值不得写入报告。
 
 ## 依赖安装方式
@@ -57,7 +57,7 @@ python3 -m py_compile agent/*.py
 当前 CI 运行：
 
 ```bash
-python -m unittest tests/test_forgis_config.py tests/test_openai_compatible_client.py tests/test_v7_cli_config.py tests/test_v7_local_cli.py tests/test_v7_local_smoke.py
+python -m unittest tests/test_forgis_config.py tests/test_openai_compatible_client.py tests/test_v7_cli_config.py tests/test_v7_local_cli.py tests/test_v7_local_smoke.py tests/test_v7_local_init_status.py tests/test_v7_local_migration_flow.py tests/test_v7_validation_commands.py
 ```
 
 `RELEASE_NOTES.md` 的 release checklist 写的是：
@@ -66,7 +66,7 @@ python -m unittest tests/test_forgis_config.py tests/test_openai_compatible_clie
 python3 -m unittest
 ```
 
-两者都来自项目文件。若需要最接近 CI，请优先运行 `python -m unittest tests/test_forgis_config.py tests/test_openai_compatible_client.py tests/test_v7_cli_config.py tests/test_v7_local_cli.py tests/test_v7_local_smoke.py`。
+两者都来自项目文件。若需要最接近当前 v7.1 验证，请优先运行 `python -m unittest tests/test_openai_compatible_client.py tests/test_v7_cli_config.py tests/test_v7_local_cli.py tests/test_v7_local_smoke.py tests/test_v7_local_init_status.py tests/test_v7_local_migration_flow.py tests/test_v7_validation_commands.py tests/test_forgis_config.py`，发布前再运行完整 `python -m unittest`。
 
 v7.0 第一阶段的新增测试点：
 
@@ -74,6 +74,9 @@ v7.0 第一阶段的新增测试点：
 - `tests/test_v7_cli_config.py` 覆盖 `agent_backend: deepseek` 兼容、`agent_backend: openai-compatible` alias、`base_url` alias、`request_timeout_seconds`、env var 缺失错误只显示 env 名、CLI help/dry-run、command allowlist 未放宽、`validation_commands` 没被改成 shell bypass。
 - `tests/test_v7_local_cli.py` 覆盖 `python -m agent.cli help`、`doctor`、`run --config`、summary output、外部 config 解析、缺少 API key 错误脱敏、examples config 解析、DeepSeek shim 兼容。
 - `tests/test_v7_local_smoke.py` 覆盖 `python -m agent.cli smoke --workdir ...` 的本地 dry-run 闭环，不需要 API key、不调用 API、不写 target。
+- `tests/test_v7_local_init_status.py` 覆盖 `init` 生成最小 local config、`init` 不写 source/target、`status` 读取 local config、API key env 只显示 set/unset 且不泄露 secret。
+- `tests/test_v7_local_migration_flow.py` 覆盖 `run --unit` 只选择指定 unit、dry-run 不调用 API/不写 target、summary output 有界脱敏、local run 不依赖 `$GITHUB_ENV` / `$GITHUB_OUTPUT`、`resume` active/failed/pending/no-task 处理、examples fixture smoke。
+- `tests/test_v7_validation_commands.py` 覆盖 `validation_commands` argv 配置解析、allowlist 执行、`bash -lc` argv bypass 拒绝、旧 shell 字符串 warning、DeepSeek/openai-compatible/Qwen 配置兼容。
 - 所有 v7 API 测试必须 mock HTTP，不真实访问 provider。
 
 v6.0 视觉闭环的配置解析和视觉基础设施测试点集中在 `tests/test_forgis_config.py`：
@@ -113,13 +116,20 @@ python agent/forge.py \
 python -m agent.cli doctor
 python -m agent.cli smoke --workdir /tmp/forgis-smoke
 
+python -m agent.cli init \
+  --source /path/to/source \
+  --target /path/to/target \
+  --target-repo local/my-migration \
+  --output /tmp/FORGIS_CONFIG.local.yml
+
+python -m agent.cli status --config /tmp/FORGIS_CONFIG.local.yml
+
 python -m agent.cli run \
-  --source "$PWD/tmp/source" \
-  --target "$PWD/tmp/target" \
-  --target-repo "owner/target-repo" \
-  --config examples/FORGIS_CONFIG.local.smoke.yml \
-  --summary-output /tmp/forgis-summary.md \
-  --dry-run
+  --config /tmp/FORGIS_CONFIG.local.yml \
+  --unit "<unit-id>" \
+  --summary-output /tmp/forgis-summary.md
+
+python -m agent.cli resume --config /tmp/FORGIS_CONFIG.local.yml
 ```
 
 该命令仍受 `FORGIS_CONFIG.yml` 的 dry-run/real-run gate 约束，不应写 source，不应绕过 `target_subdir`。
@@ -129,10 +139,8 @@ python -m agent.cli run \
 ```bash
 export FORGIS_MODEL_API_KEY="..."
 python -m agent.cli run \
-  --source /path/to/source \
-  --target /path/to/target \
-  --target-repo local/my-migration \
-  --config examples/FORGIS_CONFIG.local.openai-compatible.yml \
+  --config /path/to/FORGIS_CONFIG.local.yml \
+  --unit "<unit-id>" \
   --summary-output /tmp/forgis-summary.md
 ```
 
@@ -163,6 +171,8 @@ bash -n agent/create_pr.sh
 - Visual tools/report/gate：schema、`list_visual_references`、sandbox dispatch、reference dirs 可读不可写、disabled/provider blocker、reference-only guidance limitation、reference+actual compare completed、auto 模式 required 判定、`NO_REFERENCE_SCREENSHOTS_FOUND`、`VISUAL_REPORT_INCOMPLETE`、run report / PR body 脱敏摘要。
 - Dry run：`dry_run=true` 时不调用模型、不写目标仓库、不 push/PR。
 - OpenAI-compatible model config：`agent_backend` alias、`api_base` / `base_url`、`model`、`request_timeout_seconds`、`model_env`、错误脱敏和 DeepSeek shim。
+- Local v7.1 flow：`init` 只写显式 output，`status` 不泄露 secret，`run --unit` 不自动 all-units，dry-run 不调用 API/不写 target，`resume` 默认不跳过 blocked/failed unit。
+- Validation commands：新配置使用 argv mapping 并复用 allowlist；旧 shell string 只兼容 warning；新增测试覆盖 shell bypass 不被 argv 接受。
 - Tool sandbox：读 source/target、写 `target_subdir`、拒绝 source 写入、拒绝 target root 写入、拒绝 symlink 和 secret-like 路径。
 - Build/test feedback：未配置时 skipped，安全命令成功/失败/超时/拒绝时返回结构化摘要。
 - Repair loop：失败后要求 diff/build/test gate，超过 attempts 时停止。

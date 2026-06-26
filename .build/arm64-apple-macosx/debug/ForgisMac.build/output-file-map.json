@@ -1,0 +1,47 @@
+{
+  "": {
+    "swift-dependencies": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/primary.swiftdeps"
+  },
+  "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisComponents.swift": {
+    "dependencies": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisComponents.d",
+    "object": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisComponents.swift.o",
+    "swiftmodule": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisComponents~partial.swiftmodule",
+    "swift-dependencies": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisComponents.swiftdeps",
+    "diagnostics": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisComponents.dia"
+  },
+  "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisDesign.swift": {
+    "dependencies": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisDesign.d",
+    "object": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisDesign.swift.o",
+    "swiftmodule": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisDesign~partial.swiftmodule",
+    "swift-dependencies": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisDesign.swiftdeps",
+    "diagnostics": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisDesign.dia"
+  },
+  "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisMacApp.swift": {
+    "dependencies": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisMacApp.d",
+    "object": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisMacApp.swift.o",
+    "swiftmodule": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisMacApp~partial.swiftmodule",
+    "swift-dependencies": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisMacApp.swiftdeps",
+    "diagnostics": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisMacApp.dia"
+  },
+  "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisModels.swift": {
+    "dependencies": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisModels.d",
+    "object": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisModels.swift.o",
+    "swiftmodule": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisModels~partial.swiftmodule",
+    "swift-dependencies": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisModels.swiftdeps",
+    "diagnostics": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisModels.dia"
+  },
+  "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisRootView.swift": {
+    "dependencies": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisRootView.d",
+    "object": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisRootView.swift.o",
+    "swiftmodule": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisRootView~partial.swiftmodule",
+    "swift-dependencies": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisRootView.swiftdeps",
+    "diagnostics": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisRootView.dia"
+  },
+  "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisViews.swift": {
+    "dependencies": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisViews.d",
+    "object": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisViews.swift.o",
+    "swiftmodule": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisViews~partial.swiftmodule",
+    "swift-dependencies": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisViews.swiftdeps",
+    "diagnostics": "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisViews.dia"
+  }
+}

@@ -4,7 +4,7 @@
 
 ## 不得破坏的用户数据格式
 
-- 目标仓库 `FORGIS_CONFIG.yml` 字段集合和默认值由 `agent/forgis_config.py` 管理。新增、改名或删除字段必须同步 README、测试和 workflow。
+- 目标仓库 `FORGIS_CONFIG.yml` 和 v7.1 local config 字段集合与默认值由 `agent/forgis_config.py` 管理。新增、改名或删除字段必须同步 README、测试和 workflow。
 - `ResolvedConfig.env()` 输出的环境变量名被 `.github/workflows/migrate.yml`、shell 脚本和报告链路使用，不得随意改名。
 - `visual_validation` 只允许 `enabled`、`provider`、`mode`、`reference_screenshot_dirs`、`actual_screenshot_dirs`、`max_visual_iterations`、`require_reference_first`、`require_actual_for_full_validation`、`upload_visual_artifact`。不得新增 secret、API key、API base、model name、截图文件路径或 evidence root 字段，除非先完成后续阶段设计和测试。
 - `FORGIS_VISUAL_VALIDATION_ENABLED`、`FORGIS_VISUAL_VALIDATION_PROVIDER`、`FORGIS_VISUAL_VALIDATION_MODE`、`FORGIS_VISUAL_REFERENCE_SCREENSHOT_DIRS_JSON`、`FORGIS_VISUAL_ACTUAL_SCREENSHOT_DIRS_JSON`、`FORGIS_VISUAL_MAX_ITERATIONS`、`FORGIS_VISUAL_REQUIRE_REFERENCE_FIRST`、`FORGIS_VISUAL_REQUIRE_ACTUAL_FOR_FULL_VALIDATION`、`FORGIS_VISUAL_UPLOAD_ARTIFACT` 是 v6.0 稳定脱敏 env/output 表面，不得写入 secret 值。
@@ -15,7 +15,7 @@
 
 ## 不得破坏的文件路径约定
 
-- 目标配置默认是目标仓库根目录 `FORGIS_CONFIG.yml`。本地 CLI `--config` 可以显式指定外部配置文件，但该路径必须是只读运行输入，不能位于 source repo 内，不能包含 secret-like 路径段，不能成为写工具目标。
+- 目标配置默认是目标仓库根目录 `FORGIS_CONFIG.yml`。本地 CLI `--config` 可以显式指定外部配置文件；v7.1 local config 可包含 `local_source_path`、`local_target_path`、`local_target_repo`。该配置路径必须是只读运行输入，不能位于 source repo 内，不能包含 secret-like 路径段，不能成为写工具目标。`agent.cli init --output` 不得写入 source 或 target 目录。
 - 目标任务文件默认 `FORGIS_TASK.md`，可配置但必须在目标仓库根内。
 - `target_subdir` 默认 `target-output`，必须是目标仓库内非根相对路径。
 - `run_log_path` 默认 `{target_subdir}/FORGIS_LOG.md`，必须位于 `target_subdir` 内。
@@ -35,7 +35,7 @@
 - `request_timeout_seconds` 是模型请求超时控制值，必须有安全默认值和上限；不得用配置绕过 dry-run/real-run gate。
 - `success_checks` 支持 `path_exists` 或 `command`，每个 mapping 只能包含其中一个。
 - `build_command` 和 `test_command` 是非空 YAML 参数数组，不是 shell 字符串。
-- `validation_commands` 是字符串列表，由 `agent/build_target.sh` 在 `target_subdir` 下执行。不要和 build/test command array 混淆。
+- `validation_commands` 新推荐形态是 argv mapping，例如 `- argv: ["python3", "--version"]`，由 `agent/build_target.sh` 在 `target_subdir` 下通过 `command_runner.py` allowlist 执行。旧字符串列表仅为兼容保留并 warning。不要和 build/test command array 混淆。
 - Qwen Visual Evidence Mode v6.0 已接入 reference-guided migration、受控 tool schema、sandbox dispatch、Qwen provider transport、run report / PR body 视觉摘要和 runtime gate。Qwen 是视觉理解 provider，不是代码 Agent；不得让 Qwen 读取源码、修改文件、运行命令或替代构建/测试。
 - `agent/qwen_vision.py` 只有在显式提供 `QWEN_API_KEY` 时才允许真实 HTTP 调用；单元测试必须通过 mock 替换 `_post_qwen_vision_payload` 或 HTTP 层。不得把 API key、headers、base64 原图、完整 response dump 或图片 bytes 写进异常、报告或 result。
 - 视觉工具只接受 Forgis 虚拟图片路径，并由 `agent/visual_evidence.py` 校验图片扩展名和 secret-like/source-like 路径。不得改成任意绝对路径或任意文件上传。
@@ -50,7 +50,7 @@
 - dry run 不得写 target。
 - secret leak check 必须扫描 `model_env` 对应 secret 值是否写入 `target_subdir`。
 - 命令执行不得开启任意 shell 权限。`run_command` 和 build/test feedback 必须经过 `command_runner.py`。
-- 本地 CLI 不得新增 shell runner，也不得让 `--config` 或 `smoke` 绕过 `command_runner.py`、dry-run gate、source readonly 或 `target_subdir` 写入边界。
+- 本地 CLI 不得新增 shell runner，也不得让 `--config`、`smoke`、`init`、`status`、`run --unit` 或 `resume` 绕过 `command_runner.py`、dry-run gate、source readonly 或 `target_subdir` 写入边界。
 - 报告、日志、PR body、migration plan 必须脱敏、截断、禁止完整 diff/source/model output 泄露。
 - OpenAI-compatible HTTP error、invalid JSON、missing choices、malformed message/tool_calls 等错误必须脱敏，不能打印 API key、Authorization header、cookie、raw provider response 或完整模型输出。
 - 不得向 Qwen 或任何视觉 provider 发送源码、secret、token、`.env`、证书、私钥、provisioning profile、完整仓库快照或私有本地配置。
@@ -102,7 +102,7 @@
 - 配置或 README 示例：`agent/forgis_config.py`、`README.md`、`README.zh-CN.md`、`tests/test_forgis_config.py`。
 - 视觉模式：`docs/QWEN_VISUAL_MODE.md`、`skills/qwen_visual_mode.md`、`agent/forgis_config.py`、`agent/visual_evidence.py`、`agent/qwen_vision.py`、`tests/test_forgis_config.py`。
 - Tool schema 或文件权限：`agent/deepseek_agent.py`、`agent/file_tools.py`、`tests/test_forgis_config.py`。
-- 命令执行：`agent/command_runner.py`、`agent/build_runner.py`、`agent/build_target.sh`。
+- 命令执行：`agent/command_runner.py`、`agent/build_runner.py`、`agent/build_target.sh`。新增 `validation_commands` 示例必须使用 argv mapping，不得新增 shell-string validation。
 - Guardrails：`agent/guardrails.py`、`agent/validate_target_output.py`、`.github/workflows/migrate.yml`。
 - 模型调用：`agent/openai_compatible_client.py`、`agent/deepseek_agent.py`、`agent/model_env.py`、`agent/tool_loop.py`.
 - Staged translation：`agent/staged_translation.py`、`agent/source_inventory.py`。

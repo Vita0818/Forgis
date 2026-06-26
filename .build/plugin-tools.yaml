@@ -1,0 +1,81 @@
+client:
+  name: basic
+  file-system: device-agnostic
+tools: {}
+targets:
+  "ForgisMac-arm64-apple-macosx-debug.exe": ["<ForgisMac-arm64-apple-macosx-debug.exe>"]
+  "ForgisMac-arm64-apple-macosx-debug.module": ["<ForgisMac-arm64-apple-macosx-debug.module>"]
+  "PackageStructure": ["<PackageStructure>"]
+  "main": ["<ForgisMac-arm64-apple-macosx-debug.exe>","<ForgisMac-arm64-apple-macosx-debug.module>"]
+  "test": ["<ForgisMac-arm64-apple-macosx-debug.exe>","<ForgisMac-arm64-apple-macosx-debug.module>"]
+default: "main"
+nodes:
+  "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/":
+    is-directory-structure: true
+    content-exclusion-patterns: [".git",".build"]
+  "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac":
+    is-mutated: true
+commands:
+  "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac-entitlement.plist":
+    tool: write-auxiliary-file
+    inputs: ["<entitlement-plist>","<com.apple.security.get-task-allow>"]
+    outputs: ["/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac-entitlement.plist"]
+    description: "Write auxiliary file /Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac-entitlement.plist"
+
+  "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/sources":
+    tool: write-auxiliary-file
+    inputs: ["<sources-file-list>","/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisComponents.swift","/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisDesign.swift","/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisMacApp.swift","/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisModels.swift","/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisRootView.swift","/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisViews.swift"]
+    outputs: ["/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/sources"]
+    description: "Write auxiliary file /Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/sources"
+
+  "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.product/Objects.LinkFileList":
+    tool: write-auxiliary-file
+    inputs: ["<link-file-list>","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisComponents.swift.o","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisDesign.swift.o","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisMacApp.swift.o","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisModels.swift.o","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisRootView.swift.o","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisViews.swift.o"]
+    outputs: ["/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.product/Objects.LinkFileList"]
+    description: "Write auxiliary file /Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.product/Objects.LinkFileList"
+
+  "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt":
+    tool: write-auxiliary-file
+    inputs: ["<swift-get-version>","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"]
+    outputs: ["/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"]
+    always-out-of-date: "true"
+    description: "Write auxiliary file /Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+
+  "<ForgisMac-arm64-apple-macosx-debug.exe>":
+    tool: phony
+    inputs: ["<ForgisMac-arm64-apple-macosx-debug.exe-CodeSigning>"]
+    outputs: ["<ForgisMac-arm64-apple-macosx-debug.exe>"]
+
+  "<ForgisMac-arm64-apple-macosx-debug.module>":
+    tool: phony
+    inputs: ["/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisComponents.swift.o","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisDesign.swift.o","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisMacApp.swift.o","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisModels.swift.o","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisRootView.swift.o","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisViews.swift.o","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/Modules/ForgisMac.swiftmodule"]
+    outputs: ["<ForgisMac-arm64-apple-macosx-debug.module>"]
+
+  "C.ForgisMac-arm64-apple-macosx-debug.exe":
+    tool: shell
+    inputs: ["/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisComponents.swift.o","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisDesign.swift.o","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisMacApp.swift.o","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisModels.swift.o","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisRootView.swift.o","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisViews.swift.o","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.product/Objects.LinkFileList"]
+    outputs: ["/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac"]
+    description: "Linking ./.build/arm64-apple-macosx/debug/ForgisMac"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-L","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug","-o","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac","-module-name","ForgisMac","-Xlinker","-no_warn_duplicate_libraries","-emit-executable","-Xlinker","-alias","-Xlinker","_ForgisMac_main","-Xlinker","_main","-Xlinker","-rpath","-Xlinker","@loader_path","@/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.product/Objects.LinkFileList","-Xlinker","-rpath","-Xlinker","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-6.2/macosx","-target","arm64-apple-macosx13.0","-Xlinker","-add_ast_path","-Xlinker","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/Modules/ForgisMac.swiftmodule","-plugin-path","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g"]
+
+  "C.ForgisMac-arm64-apple-macosx-debug.exe-entitlements":
+    tool: shell
+    inputs: ["/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac-entitlement.plist"]
+    outputs: ["<ForgisMac-arm64-apple-macosx-debug.exe-CodeSigning>"]
+    description: "Applying debug entitlements to ./.build/arm64-apple-macosx/debug/ForgisMac"
+    args: ["codesign","--force","--sign","-","--entitlements","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac-entitlement.plist","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac"]
+
+  "C.ForgisMac-arm64-apple-macosx-debug.module":
+    tool: shell
+    inputs: ["/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisComponents.swift","/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisDesign.swift","/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisMacApp.swift","/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisModels.swift","/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisRootView.swift","/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisViews.swift","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/sources"]
+    outputs: ["/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisComponents.swift.o","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisDesign.swift.o","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisMacApp.swift.o","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisModels.swift.o","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisRootView.swift.o","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisViews.swift.o","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/Modules/ForgisMac.swiftmodule"]
+    description: "Compiling Swift Module 'ForgisMac' (6 sources)"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-module-name","ForgisMac","-emit-dependencies","-emit-module","-emit-module-path","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/Modules/ForgisMac.swiftmodule","-output-file-map","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/output-file-map.json","-incremental","-c","@/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/sources","-I","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/Modules","-target","arm64-apple-macosx13.0","-incremental","-enable-batch-mode","-serialize-diagnostics","-index-store-path","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/index/store","-Onone","-enable-testing","-j10","-DSWIFT_PACKAGE","-DDEBUG","-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE","-module-cache-path","/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ModuleCache","-parseable-output","-Xfrontend","-entry-point-function-name","-Xfrontend","ForgisMac_main","-color-diagnostics","-swift-version","5","-plugin-path","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g","-Xcc","-isysroot","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-Xcc","-fPIC","-Xcc","-g","-package-name","forgis"]
+
+  "PackageStructure":
+    tool: package-structure-tool
+    inputs: ["/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/","/Users/vita/Vitemis/Forgis/Package.swift","/Users/vita/Vitemis/Forgis/Package.resolved"]
+    outputs: ["<PackageStructure>"]
+    description: "Planning build"
+    allow-missing-inputs: true
+

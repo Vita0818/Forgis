@@ -1,6 +1,6 @@
 # 项目地图
 
-最近自查日期：2026-06-23
+最近自查日期：2026-06-25
 
 ## 顶层目录树
 
@@ -14,6 +14,15 @@
 │   ├── openai_compatible_client.py
 │   ├── visual_evidence.py
 │   └── qwen_vision.py
+├── Apps/
+│   └── ForgisMac/
+│       └── Sources/
+│           ├── ForgisMacApp.swift
+│           ├── ForgisRootView.swift
+│           ├── ForgisDesign.swift
+│           ├── ForgisModels.swift
+│           ├── ForgisComponents.swift
+│           └── ForgisViews.swift
 ├── docs/
 │   ├── DS_GUIDE_Swift_Kotlin.md
 │   ├── ARCHITECTURE.md
@@ -34,10 +43,13 @@
 │   ├── test_forgis_config.py
 │   ├── test_openai_compatible_client.py
 │   └── test_v7_cli_config.py
+├── examples/
+│   └── local_migration_fixture/
 ├── tmp/
 ├── README.md
 ├── README.zh-CN.md
 ├── RELEASE_NOTES.md
+├── Package.swift
 ├── requirements.txt
 └── AGENTS.md
 ```
@@ -47,6 +59,7 @@
 ## 关键目录职责
 
 - `agent/`：Forgis 核心 Python 和 shell 运行时。包括配置解析、OpenAI-compatible client、DeepSeek compatibility shim、本地 CLI、受控文件工具、tool loop、staged translation、guardrails、报告、PR body 和 GitHub Actions 辅助脚本。
+- `Apps/ForgisMac/Sources/`：v7.2 Mac SwiftUI shell。当前只展示静态/mock migration run、migration units、report、validation、settings 和 safety boundary，不接真实 API、不执行迁移、不写 source/target、不显示 secret。
 - `.github/workflows/`：CI 与主运行工作流。`migrate.yml` 是真实 Forgis 运行链路，`validate-forgis.yml` 是本仓库脚本验证链路。
 - `skills/`：仓库本地可注入的短技能文档。`agent/skill_loader.py` 只允许从仓库本地 `skills/*.md` 读取安全 slug。
 - `prompts/`：Agent 系统提示词。`agent/deepseek_agent.py` 优先读取 `prompts/system_agent_v3.md`，失败时回落到内置 legacy prompt。
@@ -59,9 +72,16 @@
 
 ## 关键文件清单
 
+- `Package.swift`：v7.2 SwiftPM manifest，新增 `ForgisMac` macOS executable target，不引入第三方依赖。
+- `Apps/ForgisMac/Sources/ForgisMacApp.swift`：SwiftUI `@main` 入口和 `WindowGroup`。
+- `Apps/ForgisMac/Sources/ForgisRootView.swift`：三栏主界面组合，左栏 navigation，中栏 migration/report/settings，右栏 inspector。
+- `Apps/ForgisMac/Sources/ForgisDesign.swift`：淡橙色主题 token、字体 token 和轻量 card modifier。
+- `Apps/ForgisMac/Sources/ForgisModels.swift`：UI mock data、migration unit、report、run mode、validation/status/risk 枚举。
+- `Apps/ForgisMac/Sources/ForgisComponents.swift`：`StatusPill`、`SafetyStrip`、`ValidationBadge`、`PathLabel`、`InfoRow` 等小组件。
+- `Apps/ForgisMac/Sources/ForgisViews.swift`：sidebar、migration unit list/detail、inspector、report panel 和 settings 页面。
 - `agent/forgis_config.py`：解析 `FORGIS_CONFIG.yml`、支持字段、默认值、路径安全、真实运行 gate、`ResolvedConfig.env()` 输出。
 - `agent/forge.py`：旧控制器入口，校验 source/target 目录并输出运行摘要；保留既有参数形式。
-- `agent/cli.py`：v7.0 本地 CLI 入口，支持 `python -m agent.cli help`、`doctor`、`smoke` 与 `run --source ... --target ... --target-repo ... [--config ...] [--dry-run]`，复用现有 config resolver 和 tool loop。
+- `agent/cli.py`：v7.1 本地 CLI 入口，支持 `help`、`doctor`、`smoke`、`init`、`status`、`run --config ... --unit ...`、`resume`，并继续兼容旧式 `run --source ... --target ... --target-repo ... [--config ...] [--dry-run]`。
 - `agent/resolve_config.py`：GitHub Actions 中解析目标仓库配置并写入 `$GITHUB_ENV` / `$GITHUB_OUTPUT`。
 - `agent/openai_compatible_client.py`：v7.0 非 streaming OpenAI-compatible Chat Completions client，负责 URL 拼接、request schema、timeout、脱敏错误和 response/tool_call shape 校验。
 - `agent/deepseek_agent.py`：系统提示词、工具 schema、DeepSeek public API compatibility shim。底层 HTTP 通过 `OpenAICompatibleClient`；v6.0 视觉工具包括 `list_visual_references`、`inspect_visual_reference`、`inspect_visual_actual`、`compare_visual_screenshots`。
@@ -82,7 +102,7 @@
 - `agent/skill_loader.py`：本地技能选择、加载、长度限制和 secret-like 内容检查。
 - `docs/QWEN_VISUAL_MODE.md`：v6.0 Qwen Visual Evidence Mode 契约文档，说明 reference-guided migration、provider 边界、reference-first、证据状态、证据目录、mock-first provider adapter、真实 transport 启用条件、视觉 tool schema、report/PR 字段和 runtime gate。
 - `skills/qwen_visual_mode.md`：可显式注入主 Agent 的短 skill，只记录 Qwen 视觉 provider 的安全边界。
-- `agent/build_target.sh`：GitHub Actions 中运行 `validation_commands` 的脚本，作用域限定在目标仓库 `target_subdir`。
+- `agent/build_target.sh`：GitHub Actions 中运行 `validation_commands` 的脚本，作用域限定在目标仓库 `target_subdir`。v7.1 新增 argv mapping 路径，复用 `command_runner.py` allowlist；旧字符串保留兼容 warning。
 - `agent/create_pr.sh`：真实运行后的 target branch 准备、提交、push 和 PR 创建。已有远程分支时改用 fallback branch，避免 force push。
 - `agent/pr_body.py`：有界 PR body 生成，超长时可生成 short body；从 run report 中摘取脱敏 Visual Validation 摘要。
 - `.github/workflows/migrate.yml`：完整运行工作流。
@@ -102,9 +122,10 @@
 
 - `requirements.txt`：当前仅声明 `PyYAML>=6.0.2`。
 - `.gitignore`：忽略 Python 缓存、虚拟环境、`.env`、日志、`reports/`、`forgis-runtime/`、`tmp/`、证书和 secrets 目录。
-- 目标仓库运行配置默认是目标仓库根目录的 `FORGIS_CONFIG.yml`；本地 CLI 可用 `--config` 指向仓库外配置文件。`agent/forgis_config.py` 拒绝未知字段和 secret-like config path。
+- 目标仓库运行配置默认是目标仓库根目录的 `FORGIS_CONFIG.yml`；本地 CLI 可用 `--config` 指向仓库外配置文件。v7.1 local config 可额外包含 `local_source_path`、`local_target_path`、`local_target_repo`，供 `status`、`run --unit`、`resume` 不依赖 GitHub Actions 输入。`agent/forgis_config.py` 拒绝未知字段和 secret-like config path。
 - 目标仓库任务文件默认 `FORGIS_TASK.md`，可由 `task_prompt_path` 指定，但必须位于目标仓库根内且非空。
-- v7.0 模型配置支持 `agent_backend: deepseek`、`agent_backend: openai-compatible`、`api_base` / `base_url`、`api_format: openai-compatible`、`model`、`request_timeout_seconds` 和 `model_env`。API key 只能通过 env 映射注入，不应写入配置。
+- v7.0+ 模型配置支持 `agent_backend: deepseek`、`agent_backend: openai-compatible`、`api_base` / `base_url`、`api_format: openai-compatible`、`model`、`request_timeout_seconds` 和 `model_env`。API key 只能通过 env 映射注入，不应写入配置。
+- v7.1 `validation_commands` 推荐形态是 `- argv: ["python3", "--version"]` 或其它 allowlist 内 argv 数组。旧字符串仍可解析并由 `build_target.sh` 兼容运行，但会 warning。
 - v6.0 `visual_validation` 配置块包含 `enabled`、`provider`、`mode`、`reference_screenshot_dirs`、`actual_screenshot_dirs`、`max_visual_iterations`、`require_reference_first`、`require_actual_for_full_validation`、`upload_visual_artifact`。默认 `mode=reference_guidance`，`reference_screenshot_dirs` / `actual_screenshot_dirs` 默认为空以保持兼容。
 - v6.0 已接通 reference-guided migration、`list_visual_references`、视觉工具 schema、`FileToolSandbox` 分发、runtime visual state/gate、run report / PR body 视觉字段和显式 env 下的 Qwen HTTP transport。仍不自动截图、不上传 visual artifact、不支持多 provider。
 
@@ -115,6 +136,9 @@
 - `tests/test_v7_cli_config.py`：覆盖 v7.0 config 字段、backend alias、env 缺失、CLI help/dry-run、command allowlist 和 `validation_commands` 回归。
 - `tests/test_v7_local_cli.py`：覆盖 `doctor`、`run --config`、summary output、缺失 env 错误脱敏、examples config 解析和 DeepSeek shim 本地配置兼容。
 - `tests/test_v7_local_smoke.py`：覆盖 `python -m agent.cli smoke --workdir ...` 的 dry-run 本地闭环、不调用 API、不写 target。
+- `tests/test_v7_local_init_status.py`：覆盖 v7.1 `init` 生成 local config、不写 source/target、`status` 读取 config 和 secret 不泄露。
+- `tests/test_v7_local_migration_flow.py`：覆盖 v7.1 `run --unit`、dry-run 不调用 API/不写 target、resume active/blocked/pending/no-task 和 examples fixture smoke。
+- `tests/test_v7_validation_commands.py`：覆盖 `validation_commands` argv 解析、allowlist 执行、shell bypass 拒绝、旧字符串 warning，以及 DeepSeek/openai-compatible/Qwen 配置兼容。
 - `tests/fixtures/reports/*.json`：报告 fixture 和 golden-like 样本。
 - `tests/__init__.py`：测试包标记文件。
 
@@ -126,6 +150,7 @@
 - `docs/QWEN_VISUAL_MODE.md`：Qwen Visual Evidence Mode 的长期维护说明。当前 v6.0 已接入 reference guidance、受控视觉工具、报告字段、gate 和真实 provider transport；自动截图采集、artifact 上传和多 provider 仍未实现。
 - `examples/FORGIS_CONFIG.local.openai-compatible.yml`：真实本地 OpenAI-compatible 模板，只通过 env 注入 API key。
 - `examples/FORGIS_CONFIG.local.smoke.yml`：无 API key dry-run smoke 模板。
+- `examples/local_migration_fixture/`：v7.1 最小本地迁移 fixture，包含 toy SwiftUI-style source、toy target task 和小型 target-output 文件，不包含 secret 或外部依赖。
 
 ## 生成物和缓存目录
 

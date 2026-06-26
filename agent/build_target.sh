@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 if [[ -z "${TARGET_REPO_DIR:-}" ]]; then
   echo "TARGET_REPO_DIR is required." >&2
   exit 1
@@ -47,7 +49,7 @@ echo "Forgis validation command scope:"
 echo "  target repository: $TARGET_REPO_DIR"
 echo "  target output directory: $TARGET_SUBDIR_REL"
 
-python3 - "$TARGET_BUILD_DIR" "$VALIDATION_COMMANDS_JSON" <<'PY'
+python3 - "$TARGET_BUILD_DIR" "$VALIDATION_COMMANDS_JSON" "$SCRIPT_DIR" <<'PY'
 import json
 import subprocess
 import sys
@@ -55,6 +57,12 @@ from pathlib import Path
 
 cwd = Path(sys.argv[1]).resolve()
 raw = sys.argv[2]
+agent_dir = Path(sys.argv[3]).resolve()
+sys.path.insert(0, str(agent_dir))
+
+from build_feedback import redact_secrets
+from command_runner import CommandRunnerError, safe_run_command
+
 try:
     commands = json.loads(raw or "[]")
 except json.JSONDecodeError as exc:
@@ -68,21 +76,59 @@ if not commands:
     raise SystemExit(0)
 
 for index, command in enumerate(commands):
-    if not isinstance(command, str) or not command.strip():
-        raise SystemExit(f"validation_commands[{index}] must be a non-empty string.")
-    print(f"Running validation_commands[{index}]: {command}")
-    result = subprocess.run(
-        ["bash", "-lc", command],
-        cwd=cwd,
-        check=False,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-    )
-    if result.stdout:
-        print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
-    if result.returncode != 0:
-        raise SystemExit(f"validation_commands[{index}] failed with exit {result.returncode}.")
+    if isinstance(command, dict):
+        unsupported = sorted(str(key) for key in command if key != "argv")
+        if unsupported:
+            raise SystemExit(
+                f"validation_commands[{index}] contains unsupported field(s): {', '.join(unsupported)}"
+            )
+        argv = command.get("argv")
+        if not isinstance(argv, list) or not argv or not all(isinstance(item, str) and item for item in argv):
+            raise SystemExit(f"validation_commands[{index}].argv must be a non-empty array of strings.")
+        print(f"Running validation_commands[{index}].argv: {[Path(argv[0]).name, *argv[1:]]}")
+        try:
+            result = safe_run_command(
+                cwd=cwd,
+                command=argv,
+                timeout_seconds=60,
+                max_output_chars=8000,
+                profile="build_test",
+            )
+        except CommandRunnerError as exc:
+            raise SystemExit(f"validation_commands[{index}] rejected by allowlist: {exc}") from exc
+        for key in ("stdout", "stderr"):
+            output = redact_secrets(str(result.get(key) or ""))
+            if output:
+                print(output, end="" if output.endswith("\n") else "\n")
+        if not result.get("ok"):
+            exit_code = result.get("exit_code")
+            suffix = "timeout" if result.get("timed_out") else f"exit {exit_code}"
+            raise SystemExit(f"validation_commands[{index}] failed with {suffix}.")
+        continue
+
+    if isinstance(command, str) and command.strip():
+        print(
+            f"WARNING: validation_commands[{index}] uses legacy shell string mode; "
+            "prefer {argv: [...]} so Forgis can enforce the command allowlist.",
+            file=sys.stderr,
+        )
+        print(f"Running validation_commands[{index}] legacy shell string.")
+        result = subprocess.run(
+            ["bash", "-lc", command],
+            cwd=cwd,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        if result.stdout:
+            output = redact_secrets(result.stdout)
+            print(output, end="" if output.endswith("\n") else "\n")
+        if result.returncode != 0:
+            raise SystemExit(f"validation_commands[{index}] failed with exit {result.returncode}.")
+        continue
+
+    raise SystemExit(f"validation_commands[{index}] must be a non-empty string or argv mapping.")
 
 print("Configured validation_commands completed successfully.")
 PY

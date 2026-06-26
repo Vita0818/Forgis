@@ -127,6 +127,9 @@ WINDOWS_ABSOLUTE_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
 CONFIG_FIELDS = {
     "source_repo",
     "source_ref",
+    "local_source_path",
+    "local_target_path",
+    "local_target_repo",
     "target_subdir",
     "task_prompt_path",
     "agent_backend",
@@ -293,6 +296,9 @@ class ResolvedConfig:
     source_repo: str
     source_ref: str
     target_repo: str
+    local_source_path: str
+    local_target_path: str
+    local_target_repo: str
     target_subdir: str
     task_prompt_path: str
     agent_backend: str
@@ -365,7 +371,7 @@ class ResolvedConfig:
     migration_plan_allow_manual_defer: bool
     migration_plan_allow_manual_activate: bool
     migration_plan_status_update_requires_resume: bool
-    validation_commands: tuple[str, ...]
+    validation_commands: tuple[Any, ...]
     success_checks: tuple[dict[str, str], ...]
     strict_mode: bool
     execution_mode: str
@@ -591,6 +597,56 @@ def select_command_array(config: dict[str, Any], field: str) -> tuple[str, ...]:
             raise ValueError(f"{field}[{index}] contains an unsafe character.")
         args.append(cleaned)
     return tuple(args)
+
+
+def select_validation_commands(config: dict[str, Any]) -> tuple[Any, ...]:
+    if "validation_commands" not in config or config["validation_commands"] is None:
+        return ()
+
+    value = config["validation_commands"]
+    if not isinstance(value, list):
+        raise ValueError("validation_commands must be a YAML list.")
+
+    commands: list[Any] = []
+    for index, item in enumerate(value):
+        if isinstance(item, str):
+            text = non_empty(item)
+            if text is None:
+                raise ValueError(f"validation_commands[{index}] must be a non-empty string or argv mapping.")
+            commands.append(clean_single_line(text, f"validation_commands[{index}]"))
+            continue
+
+        if not isinstance(item, dict):
+            raise ValueError(f"validation_commands[{index}] must be a string or a mapping with argv.")
+
+        unsupported = sorted(str(key) for key in item if key != "argv")
+        if unsupported:
+            raise ValueError(
+                f"validation_commands[{index}] contains unsupported field(s): "
+                + ", ".join(unsupported)
+            )
+        argv = item.get("argv")
+        if not isinstance(argv, list) or not argv:
+            raise ValueError(f"validation_commands[{index}].argv must be a non-empty YAML list of strings.")
+
+        args: list[str] = []
+        for arg_index, arg in enumerate(argv):
+            text = non_empty(arg)
+            if text is None:
+                raise ValueError(
+                    f"validation_commands[{index}].argv[{arg_index}] must be a non-empty string."
+                )
+            cleaned = clean_single_line(text, f"validation_commands[{index}].argv[{arg_index}]")
+            if "\x00" in cleaned:
+                raise ValueError(f"validation_commands[{index}].argv[{arg_index}] contains an unsafe character.")
+            args.append(cleaned)
+
+        from command_runner import validate_command
+
+        validate_command(args, profile="build_test")
+        commands.append({"argv": tuple(args)})
+
+    return tuple(commands)
 
 
 def validate_env_name(value: str, label: str) -> str:
@@ -1442,13 +1498,16 @@ def resolve_config(
 
     config, resolved_config_path = load_config_file(target_root, config_path)
 
-    target_repo_value = non_empty(target_repo)
+    target_repo_value = non_empty(target_repo) or select_value("local_target_repo", config)
     if target_repo_value is not None:
         target_repo_value = clean_single_line(target_repo_value, "target_repo")
 
     values: dict[str, str | None] = {
         "source_repo": select_value("source_repo", config),
         "source_ref": select_value("source_ref", config, DEFAULT_SOURCE_REF),
+        "local_source_path": select_value("local_source_path", config, ""),
+        "local_target_path": select_value("local_target_path", config, ""),
+        "local_target_repo": select_value("local_target_repo", config, ""),
         "target_repo": target_repo_value,
         "target_subdir": select_value("target_subdir", config, DEFAULT_TARGET_SUBDIR),
         "task_prompt_path": select_value("task_prompt_path", config, DEFAULT_TASK_PROMPT_PATH),
@@ -1502,7 +1561,7 @@ def resolve_config(
     run_agent_config = select_config_bool(config, "run_agent", False)
     confirm_real_run = select_config_bool(config, "confirm_real_run", False)
     model_env = select_model_env(config)
-    validation_commands = select_string_list(config, "validation_commands")
+    validation_commands = select_validation_commands(config)
     success_checks = select_success_checks(config)
     build_command = select_command_array(config, "build_command")
     test_command = select_command_array(config, "test_command")
@@ -1808,6 +1867,9 @@ def resolve_config(
         source_repo=values["source_repo"] or "",
         source_ref=values["source_ref"] or DEFAULT_SOURCE_REF,
         target_repo=values["target_repo"] or "",
+        local_source_path=values["local_source_path"] or "",
+        local_target_path=values["local_target_path"] or "",
+        local_target_repo=values["local_target_repo"] or "",
         target_subdir=target_subdir_relative,
         task_prompt_path=task_prompt_relative,
         agent_backend=agent_backend,

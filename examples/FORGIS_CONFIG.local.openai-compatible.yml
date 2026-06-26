@@ -1,9 +1,11 @@
-# Forgis v7.0 local OpenAI-compatible example.
+# Forgis v7.1 local OpenAI-compatible example.
 # Non-streaming Chat Completions only. Do not put API keys in this file.
 # Run with:
+#   python -m agent.cli init --source /path/to/source --target /path/to/target \
+#     --target-repo local/my-migration --output /path/to/FORGIS_CONFIG.local.yml
 #   export FORGIS_MODEL_API_KEY="..."
-#   python -m agent.cli run --source /path/to/source --target /path/to/target \
-#     --target-repo local/my-migration --config examples/FORGIS_CONFIG.local.openai-compatible.yml
+#   python -m agent.cli status --config /path/to/FORGIS_CONFIG.local.yml
+#   python -m agent.cli run --config /path/to/FORGIS_CONFIG.local.yml --unit <unit-id>
 
 source_repo: local/source
 source_ref: main
@@ -27,5 +29,10 @@ confirm_real_run: true
 
 run_report_enabled: true
 run_report_output_dir: reports
+migration_scheduler_enabled: true
+migration_plan_persistence_enabled: true
+migration_plan_output_dir: reports
+migration_plan_resume_enabled: true
 
 # Source is read-only. Writes remain limited to target_subdir.
+# v7.1 does not support streaming, a local server, council, GUI, or automatic screenshots.
