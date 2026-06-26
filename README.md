@@ -1,6 +1,6 @@
 # Forgis
 
-Forgis is a local code migration assistant with a controlled file-tool runtime. The default backend remains DeepSeek, and v7.0 phase 1 also supports non-streaming OpenAI-compatible Chat Completions through the same safety boundary.
+Forgis is a local code migration assistant with a controlled file-tool runtime. The default backend remains DeepSeek, and v7.1 adds a full local MVP for init/status/run-one-unit/resume/report without depending on GitHub Actions.
 
 Documentation:
 
@@ -27,7 +27,7 @@ Every other setting comes from `FORGIS_CONFIG.yml` at the target repository root
 
 ## Local CLI
 
-v7.0 phase 1 adds a local CLI entry that uses the same config resolver and tool loop as the workflow:
+v7.1 local CLI uses the same config resolver, tool loop, migration plan persistence, report writer, and sandbox as the workflow:
 
 ```bash
 python3 -m venv /tmp/forgis-v7-local-venv
@@ -38,33 +38,62 @@ python -m agent.cli doctor
 python -m agent.cli smoke --workdir /tmp/forgis-smoke
 ```
 
-Run local dry-run with an explicit config path:
+Initialize a local migration config outside the source and target directories:
 
 ```bash
-python -m agent.cli run \
+python -m agent.cli init \
   --source /path/to/source \
   --target /path/to/target \
   --target-repo local/my-migration \
-  --config examples/FORGIS_CONFIG.local.smoke.yml \
-  --summary-output /tmp/forgis-summary.md \
-  --dry-run
+  --output /path/to/FORGIS_CONFIG.local.yml
 ```
 
-Run a real local OpenAI-compatible text model only after exporting the secret env yourself:
+The generated config records only local paths, non-secret provider settings, and env var names such as `FORGIS_MODEL_API_KEY`; it does not read secrets or call an API. It defaults to `dry_run: true`, `run_agent: false`, and `confirm_real_run: false`.
+
+Inspect local state:
+
+```bash
+python -m agent.cli status --config /path/to/FORGIS_CONFIG.local.yml
+```
+
+`status` prints JSON containing source/target paths, `target_subdir`, backend/model, whether `api_base` is configured, API key env names as set/unset, migration unit counts, active/next unit, and last report path when present. It never prints API key values, source contents, or diffs.
+
+Run exactly one migration unit:
+
+```bash
+python -m agent.cli run \
+  --config /path/to/FORGIS_CONFIG.local.yml \
+  --unit <unit-id> \
+  --summary-output /tmp/forgis-summary.md
+```
+
+`run --unit` selects that unit in the persisted migration plan and does not automatically run every unit. Dry-run still skips model calls and target writes. Real local execution still requires `dry_run=false`, `run_agent=true`, `confirm_real_run=true`, and the configured API key env to be set.
+
+Inspect resume state without running a model:
+
+```bash
+python -m agent.cli resume --config /path/to/FORGIS_CONFIG.local.yml
+```
+
+`resume` reads the persisted migration plan, reports active/pending/failed counts, does not skip failed/blocked units unless `--skip-failed` is explicit, and prints the next `run --unit` command to use.
+
+Run a real local OpenAI-compatible text model only after exporting the secret env yourself and changing the run gate in config:
 
 ```bash
 export FORGIS_MODEL_API_KEY="..."
 python -m agent.cli run \
-  --source /path/to/source \
-  --target /path/to/target \
-  --target-repo local/my-migration \
-  --config examples/FORGIS_CONFIG.local.openai-compatible.yml \
+  --config /path/to/FORGIS_CONFIG.local.yml \
+  --unit <unit-id> \
   --summary-output /tmp/forgis-summary.md
 ```
 
 `doctor` only checks the local runtime and prints API env names as set/unset; it does not call an API. `smoke` creates a temporary source/target/config under the requested workdir and runs dry-run, so it does not require an API key. When invoking from outside this repository root, set `PYTHONPATH=/path/to/Forgis` before `python -m agent.cli`.
 
-The CLI does not add new write permissions or shell execution powers. `source` stays read-only, target writes still go through `target_subdir`, and real model calls still require `dry_run=false`, `run_agent=true`, and `confirm_real_run=true`.
+The CLI does not add new write permissions or shell execution powers. `source` stays read-only, target writes still go through `target_subdir`, reports are bounded and redacted, and real model calls still require `dry_run=false`, `run_agent=true`, and `confirm_real_run=true`.
+
+v7.1 intentionally does not add streaming, Responses API, a local server/gateway, council, multi-agent orchestration, GUI, automatic screenshots, Keychain storage, or global `~/.config` defaults.
+
+A tiny no-dependency fixture lives at `examples/local_migration_fixture/` for smoke tests and demos.
 
 ## FORGIS_CONFIG.yml Configuration Guide
 
@@ -831,12 +860,15 @@ No platform structure or project-specific success marker is built into Forgis.
 
 ## Validation
 
-If configured, `validation_commands` run inside `target_subdir`.
+If configured, `validation_commands` run inside `target_subdir`. New configs should use argv mappings so Forgis can enforce the existing command allowlist:
 
 ```yaml
 validation_commands:
-  - "some validation command"
+  - argv: ["python3", "--version"]
+  - argv: ["python3", "-m", "unittest", "discover"]
 ```
+
+Legacy shell strings are still accepted for compatibility, but they emit a warning and should not be used in new examples.
 
 If configured, `success_checks` are evaluated inside `target_subdir`.
 

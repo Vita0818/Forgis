@@ -1,6 +1,6 @@
 # Forgis
 
-Forgis 是一个带受控文件工具运行时的本地代码迁移助手。默认 backend 仍是 DeepSeek，v7.0 第一阶段也支持非 streaming 的 OpenAI-compatible Chat Completions，并继续使用同一套安全边界。
+Forgis 是一个带受控文件工具运行时的本地代码迁移助手。默认 backend 仍是 DeepSeek，v7.1 已加入本地 init/status/单 unit run/resume/report 最小闭环，不依赖 GitHub Actions。
 
 它不是内置迁移智能的迁移器，而是一个很薄的工具壳：从目标仓库读取配置和任务提示词，在显式允许时调用配置的 OpenAI-compatible 文本模型，并把受控文件工具交给模型使用。迁移策略、平台差异和具体项目规则，都应该写在任务提示词或参考文档里。
 
@@ -32,7 +32,7 @@ target_repo: owner/target-repo
 
 ## 本地 CLI
 
-v7.0 第一阶段新增本地 CLI 入口，它复用 workflow 使用的 config resolver 和 tool loop：
+v7.1 本地 CLI 复用 workflow 使用的 config resolver、tool loop、migration plan 持久化、report writer 和文件沙箱：
 
 ```bash
 python3 -m venv /tmp/forgis-v7-local-venv
@@ -43,33 +43,62 @@ python -m agent.cli doctor
 python -m agent.cli smoke --workdir /tmp/forgis-smoke
 ```
 
-显式指定本地 config 并 dry-run：
+初始化本地迁移配置。`--output` 必须显式指定，并且应位于 source 和 target 目录之外：
 
 ```bash
-python -m agent.cli run \
+python -m agent.cli init \
   --source /path/to/source \
   --target /path/to/target \
   --target-repo local/my-migration \
-  --config examples/FORGIS_CONFIG.local.smoke.yml \
-  --summary-output /tmp/forgis-summary.md \
-  --dry-run
+  --output /path/to/FORGIS_CONFIG.local.yml
 ```
 
-真实 OpenAI-compatible 本地运行只在你自己导出 secret env 后执行：
+生成的配置只记录本地路径、非 secret 的 provider 设置和 env var 名称，例如 `FORGIS_MODEL_API_KEY`；不会读取 secret，也不会调用 API。默认 gate 是 `dry_run: true`、`run_agent: false`、`confirm_real_run: false`。
+
+查看本地迁移状态：
+
+```bash
+python -m agent.cli status --config /path/to/FORGIS_CONFIG.local.yml
+```
+
+`status` 输出 JSON，包括 source/target 路径、`target_subdir`、backend/model、`api_base` 是否配置、API key env 名称的 set/unset 状态、migration unit 数量、active/next unit，以及存在时的最近 report 路径。它不会输出 API key 值、源码内容或完整 diff。
+
+只运行一个 migration unit：
+
+```bash
+python -m agent.cli run \
+  --config /path/to/FORGIS_CONFIG.local.yml \
+  --unit <unit-id> \
+  --summary-output /tmp/forgis-summary.md
+```
+
+`run --unit` 会把指定 unit 选为 persisted migration plan 的 active unit，不会默认自动跑所有 unit。dry-run 仍然不调用模型、不写 target。真实本地运行仍必须同时满足 `dry_run=false`、`run_agent=true`、`confirm_real_run=true`，并且配置的 API key env 已设置。
+
+查看 resume 状态但不运行模型：
+
+```bash
+python -m agent.cli resume --config /path/to/FORGIS_CONFIG.local.yml
+```
+
+`resume` 读取现有 migration plan，报告 active/pending/failed 数量；默认不会跳过 failed/blocked unit，除非显式传 `--skip-failed`；输出下一步应使用的 `run --unit` 命令。
+
+真实 OpenAI-compatible 本地运行只在你自己导出 secret env 并修改 config gate 后执行：
 
 ```bash
 export FORGIS_MODEL_API_KEY="..."
 python -m agent.cli run \
-  --source /path/to/source \
-  --target /path/to/target \
-  --target-repo local/my-migration \
-  --config examples/FORGIS_CONFIG.local.openai-compatible.yml \
+  --config /path/to/FORGIS_CONFIG.local.yml \
+  --unit <unit-id> \
   --summary-output /tmp/forgis-summary.md
 ```
 
 `doctor` 只检查本地运行环境，并且只显示 API env 名称的 set/unset 状态；不会调用 API。`smoke` 会在指定 workdir 下创建临时 source/target/config 并执行 dry-run，所以不需要 API key。从仓库根目录之外运行时，请先设置 `PYTHONPATH=/path/to/Forgis` 再执行 `python -m agent.cli`。
 
-CLI 不新增写入权限，也不新增 shell 执行能力。source 仍保持只读，target 写入仍只能通过 `target_subdir`，真实模型调用仍必须同时满足 `dry_run=false`、`run_agent=true`、`confirm_real_run=true`。
+CLI 不新增写入权限，也不新增 shell 执行能力。source 仍保持只读，target 写入仍只能通过 `target_subdir`，报告有界且脱敏，真实模型调用仍必须同时满足 `dry_run=false`、`run_agent=true`、`confirm_real_run=true`。
+
+v7.1 明确不包含 streaming、Responses API、local server/gateway、council、多 Agent、GUI、自动截图、Keychain 或默认 `~/.config` 全局配置。
+
+最小无外部依赖 fixture 位于 `examples/local_migration_fixture/`，可用于 smoke test 和演示。
 
 ## 仓库和文件布局
 
@@ -1040,7 +1069,15 @@ max_tool_result_chars: 20000
 execution_mode: tool_loop
 ```
 
-不需要 build/test feedback 时，不要写 `build_command` 或 `test_command`。如果确实配置 `validation_commands` 或 `success_checks`，它们会在 `target_subdir` 内执行或评估；不要在这里写入会访问外部项目、打印 secret 或破坏工作区的命令。
+不需要 build/test feedback 时，不要写 `build_command` 或 `test_command`。如果确实配置 `validation_commands`，新配置只推荐 argv mapping，这样 Forgis 可以复用现有命令 allowlist：
+
+```yaml
+validation_commands:
+  - argv: ["python3", "--version"]
+  - argv: ["python3", "-m", "unittest", "discover"]
+```
+
+旧的 shell 字符串 `validation_commands` 仍为兼容保留，但会输出 warning，不要在新示例里使用。`success_checks` 仍在 `target_subdir` 内评估；不要在这些字段里写会访问外部项目、打印 secret 或破坏工作区的命令。
 
 ## 示例任务提示词
 

@@ -1,4 +1,4 @@
-# Forgis v7.0 local smoke example.
+# Forgis v7.1 local smoke example.
 # This config is for dry-run validation only. It does not call any API.
 
 source_repo: local/smoke-source
@@ -26,3 +26,4 @@ run_report_output_dir: reports
 migration_plan_persistence_enabled: false
 
 # Source is read-only. Dry-run must not write target files.
+# Prefer `python -m agent.cli init` for a runnable local config with local_source_path/local_target_path.

@@ -1,0 +1,348 @@
+{
+  "builtTestProducts" : [
+
+  ],
+  "copyCommands" : {
+
+  },
+  "explicitTargetDependencyImportCheckingMode" : {
+    "none" : {
+
+    }
+  },
+  "generatedSourceTargetSet" : [
+
+  ],
+  "pluginDescriptions" : [
+
+  ],
+  "swiftCommands" : {
+    "C.ForgisMac-arm64-apple-macosx-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/sources",
+      "importPath" : "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisComponents.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisDesign.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisMacApp.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisModels.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisRootView.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisViews.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/sources"
+        }
+      ],
+      "isLibrary" : false,
+      "moduleName" : "ForgisMac",
+      "moduleOutputPath" : "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/Modules/ForgisMac.swiftmodule",
+      "objects" : [
+        "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisComponents.swift.o",
+        "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisDesign.swift.o",
+        "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisMacApp.swift.o",
+        "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisModels.swift.o",
+        "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisRootView.swift.o",
+        "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisViews.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx13.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-j10",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-Xfrontend",
+        "-entry-point-function-name",
+        "-Xfrontend",
+        "ForgisMac_main",
+        "-color-diagnostics",
+        "-swift-version",
+        "5",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "forgis"
+      ],
+      "outputFileMapPath" : "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisComponents.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisDesign.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisMacApp.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisModels.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisRootView.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisViews.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/Modules/ForgisMac.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisComponents.swift",
+        "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisDesign.swift",
+        "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisMacApp.swift",
+        "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisModels.swift",
+        "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisRootView.swift",
+        "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisViews.swift"
+      ],
+      "tempsPath" : "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build",
+      "wholeModuleOptimization" : false
+    }
+  },
+  "swiftFrontendCommands" : {
+
+  },
+  "swiftTargetScanArgs" : {
+    "ForgisMac" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "ForgisMac",
+      "-package-name",
+      "forgis",
+      "-c",
+      "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisComponents.swift",
+      "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisDesign.swift",
+      "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisMacApp.swift",
+      "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisModels.swift",
+      "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisRootView.swift",
+      "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisViews.swift",
+      "-I",
+      "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx13.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-j10",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-Xfrontend",
+      "-entry-point-function-name",
+      "-Xfrontend",
+      "ForgisMac_main",
+      "-color-diagnostics",
+      "-swift-version",
+      "5",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "forgis",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ]
+  },
+  "targetDependencyMap" : {
+    "ForgisMac" : [
+
+    ]
+  },
+  "testDiscoveryCommands" : {
+
+  },
+  "testEntryPointCommands" : {
+
+  },
+  "traitConfiguration" : {
+    "default" : {
+
+    }
+  },
+  "writeCommands" : {
+    "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac-entitlement.plist" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<entitlement-plist>"
+        },
+        {
+          "kind" : "virtual",
+          "name" : "<com.apple.security.get-task-allow>"
+        }
+      ],
+      "outputFilePath" : "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac-entitlement.plist"
+    },
+    "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisComponents.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisDesign.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisMacApp.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisModels.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisRootView.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/vita/Vitemis/Forgis/Apps/ForgisMac/Sources/ForgisViews.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/sources"
+    },
+    "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.product/Objects.LinkFileList" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<link-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisComponents.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisDesign.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisMacApp.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisModels.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisRootView.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.build/ForgisViews.swift.o"
+        }
+      ],
+      "outputFilePath" : "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/ForgisMac.product/Objects.LinkFileList"
+    },
+    "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt" : {
+      "alwaysOutOfDate" : true,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<swift-get-version>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+        }
+      ],
+      "outputFilePath" : "/Users/vita/Vitemis/Forgis/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+    }
+  }
+}
