@@ -22,15 +22,15 @@ struct ForgisRootView: View {
     var body: some View {
         NavigationSplitView {
             SidebarView(selection: $section, run: run, mode: runMode)
-                .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 260)
+                .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 250)
         } content: {
             content
-                .navigationSplitViewColumnWidth(min: 440, ideal: 620)
+                .navigationSplitViewColumnWidth(min: 360, ideal: 560)
         } detail: {
             InspectorView(unit: selectedUnit, report: report, safety: MockForgisData.safety)
-                .navigationSplitViewColumnWidth(min: 280, ideal: 320, max: 380)
+                .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 360)
         }
-        .frame(minWidth: 1120, minHeight: 700)
+        .frame(minWidth: 900, minHeight: 600)
     }
 
     @ViewBuilder private var content: some View {

@@ -1,6 +1,6 @@
 # 当前状态
 
-最近自查日期：2026-06-25
+最近自查日期：2026-06-26
 
 ## 当前工作区状态摘要
 
@@ -12,7 +12,7 @@ git root: <PROJECT_ROOT>
 git status --short: 本轮存在 v6.0 未提交修改，具体文件以最终报告和 `git status --short` 为准
 ```
 
-v7.2 在 v7.1 Full Local Migration MVP 之上新增最小 Mac UI shell：`Package.swift` 提供 `ForgisMac` SwiftPM executable target，`Apps/ForgisMac/Sources/` 提供 SwiftUI 三栏壳、淡橙色主题、静态 migration units、selected unit detail、report / validation / safety inspector 和 settings 页面。该 UI 只展示 mock / fixture-like 数据，不调用真实 API，不执行真实迁移，不写 source/target，不显示 secret。v7.1 CLI 仍保留 `agent_backend: deepseek` 默认行为和 `agent_backend: openai-compatible` alias，继续使用非 streaming Chat Completions client，并提供本地 `init`、`status`、`run --unit`、`resume` 闭环。v6.0 视觉闭环仍按 reference-guided migration 优先：Qwen 只读截图并输出视觉指导，不能读源码、写文件、运行命令或接收 secret。当前仍不包含 streaming、Responses API、local server/gateway、council、多 Agent、自动截图、artifact 上传、Keychain、多 provider 视觉或任意 shell 扩展。
+v7.2 在 v7.1 Full Local Migration MVP 之上新增最小 Mac UI shell，并已 materialize `Forgis.xcodeproj` 作为推荐 Xcode 打开方式。用户可执行 `open Forgis.xcodeproj`，或用 `xcodebuild -project Forgis.xcodeproj -scheme ForgisMac -configuration Debug build` 命令行构建。`Package.swift` 仍保留为轻量 SwiftPM build entry。`Apps/ForgisMac/Sources/` 提供 SwiftUI 三栏壳、淡橙色主题、静态 migration units、selected unit detail、report / validation / safety inspector 和 settings 页面。该 UI 只展示 mock / fixture-like 数据，不调用真实 API，不执行真实迁移，不写 source/target，不显示 secret。v7.1 CLI 仍保留 `agent_backend: deepseek` 默认行为和 `agent_backend: openai-compatible` alias，继续使用非 streaming Chat Completions client，并提供本地 `init`、`status`、`run --unit`、`resume` 闭环。v6.0 视觉闭环仍按 reference-guided migration 优先：Qwen 只读截图并输出视觉指导，不能读源码、写文件、运行命令或接收 secret。当前仍不包含 streaming、Responses API、local server/gateway、council、多 Agent、自动截图、artifact 上传、Keychain、多 provider 视觉或任意 shell 扩展。
 
 ## 当前项目已实现能力
 
@@ -20,7 +20,7 @@ v7.2 在 v7.1 Full Local Migration MVP 之上新增最小 Mac UI shell：`Packag
 - 运行开关：真实模型执行需要 `dry_run=false`、`run_agent=true`、`confirm_real_run=true` 同时成立。
 - 模型调用：`agent/openai_compatible_client.py` 提供非 streaming OpenAI-compatible Chat Completions transport；`agent/deepseek_agent.py` 保留 public API 并作为 DeepSeek 兼容 shim，模型默认 `deepseek-v4-pro`。
 - 本地 CLI：`agent/cli.py` 支持 `python -m agent.cli help`、`doctor`、`smoke`、`init`、`status`、`run --config ... --unit ...`、`resume`，并继续兼容旧式 `run --source ... --target ... --target-repo ... [--config ...] [--dry-run]`。本地 config 可记录 `local_source_path`、`local_target_path`、`local_target_repo`，但只保存 env var 名，不保存 secret 值。
-- Mac UI shell：`Apps/ForgisMac/Sources/` 是 v7.2 SwiftUI 壳，展示 Source repo、Target repo、Target subdir、Migration run、Migration unit、Report、Validation、Provider/env status、Dry-run mode 和 Safety boundary。按钮未接真实执行，API key 只显示 env name 与 set/unset mock 状态。
+- Mac UI shell：`Forgis.xcodeproj` 是当前推荐打开方式，target/scheme 为 `ForgisMac`。`Apps/ForgisMac/Sources/` 是 v7.2 SwiftUI 壳，展示 Source repo、Target repo、Target subdir、Migration run、Migration unit、Report、Validation、Provider/env status、Dry-run mode 和 Safety boundary。按钮未接真实执行，API key 只显示 env name 与 set/unset mock 状态。
 - 受控文件工具：支持 list/tree/read/file_exists/search/git_status/git_diff/mkdir/write/append/delete/edit/apply_patch/run_command/run_build/run_tests。
 - 文件沙箱：source 只读，target outside `target_subdir` 只读，写入仅限 `target_subdir`，并拒绝 secret-like 路径、symlink 写入、workflow 文件写入。
 - build/test feedback：可选 `build_command`、`test_command` 参数数组，经保守 allowlist 执行，输出会截断和脱敏。

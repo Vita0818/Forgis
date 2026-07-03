@@ -50,30 +50,66 @@ struct MigrationWorkspaceView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("Migration Units")
-                    .font(ForgisType.sectionTitle(20))
-                    .foregroundStyle(ForgisTheme.textPrimary(scheme))
-                Spacer()
-                Button("Run doctor") {}
-                    .disabled(true)
-                Button("Run smoke") {}
-                    .disabled(true)
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    workspaceTitle
+                    Spacer(minLength: 12)
+                    workspaceActions
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    workspaceTitle
+                    workspaceActions
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 18)
             .padding(.top, 18)
             .padding(.bottom, 10)
 
             Divider()
 
-            HSplitView {
-                MigrationUnitListView(units: units, selectedUnitID: $selectedUnitID)
-                    .frame(minWidth: 280, idealWidth: 330)
-                MigrationUnitDetailView(unit: selectedUnit, safety: safety)
-                    .frame(minWidth: 300, idealWidth: 420)
-            }
+            workspaceLayout
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(ForgisTheme.background(scheme))
+    }
+
+    private var workspaceTitle: some View {
+        Text("Migration Units")
+            .font(ForgisType.sectionTitle(20))
+            .foregroundStyle(ForgisTheme.textPrimary(scheme))
+            .lineLimit(1)
+    }
+
+    private var workspaceActions: some View {
+        HStack(spacing: 8) {
+            Button("Run doctor") {}
+                .disabled(true)
+            Button("Run smoke") {}
+                .disabled(true)
+        }
+        .controlSize(.small)
+        .fixedSize()
+    }
+
+    @ViewBuilder private var workspaceLayout: some View {
+        ViewThatFits(in: .horizontal) {
+            HSplitView {
+                MigrationUnitListView(units: units, selectedUnitID: $selectedUnitID)
+                    .frame(minWidth: 240, idealWidth: 300)
+                MigrationUnitDetailView(unit: selectedUnit, safety: safety)
+                    .frame(minWidth: 260, idealWidth: 360)
+            }
+
+            VStack(spacing: 0) {
+                MigrationUnitListView(units: units, selectedUnitID: $selectedUnitID)
+                    .frame(minHeight: 220)
+                Divider()
+                MigrationUnitDetailView(unit: selectedUnit, safety: safety)
+                    .frame(minHeight: 260)
+            }
+        }
     }
 }
 
@@ -90,28 +126,42 @@ struct MigrationUnitListView: View {
             } else {
                 ForEach(units) { unit in
                     VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 8) {
-                            Text(unit.id)
-                                .font(ForgisType.mono(11, weight: .semibold))
-                                .foregroundStyle(ForgisTheme.textTertiary(scheme))
-                            Spacer(minLength: 8)
-                            StatusPill(text: unit.status.rawValue, tone: statusTone(unit.status))
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 8) {
+                                unitID(unit.id)
+                                Spacer(minLength: 8)
+                                StatusPill(text: unit.status.rawValue, tone: statusTone(unit.status))
+                            }
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                unitID(unit.id)
+                                StatusPill(text: unit.status.rawValue, tone: statusTone(unit.status))
+                            }
                         }
 
                         Text(unit.title)
                             .font(ForgisType.body(13, weight: .semibold))
                             .foregroundStyle(ForgisTheme.textPrimary(scheme))
                             .lineLimit(1)
+                            .truncationMode(.tail)
 
                         PathLabel(path: unit.sourcePath)
                         PathLabel(path: unit.targetPath)
 
-                        HStack(spacing: 6) {
-                            StatusPill(text: unit.risk.rawValue, tone: riskTone(unit.risk))
-                            ValidationBadge(state: unit.validation)
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 6) {
+                                StatusPill(text: unit.risk.rawValue, tone: riskTone(unit.risk))
+                                ValidationBadge(state: unit.validation)
+                            }
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                StatusPill(text: unit.risk.rawValue, tone: riskTone(unit.risk))
+                                ValidationBadge(state: unit.validation)
+                            }
                         }
                     }
                     .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .tag(unit.id)
                 }
             }
@@ -119,6 +169,14 @@ struct MigrationUnitListView: View {
         .listStyle(.inset)
         .scrollContentBackground(.hidden)
         .background(ForgisTheme.background(scheme))
+    }
+
+    private func unitID(_ id: String) -> some View {
+        Text(id)
+            .font(ForgisType.mono(11, weight: .semibold))
+            .foregroundStyle(ForgisTheme.textTertiary(scheme))
+            .lineLimit(1)
+            .truncationMode(.middle)
     }
 }
 
@@ -134,10 +192,18 @@ struct MigrationUnitDetailView: View {
                     SectionCard(title: "Summary") {
                         InfoRow(title: "Unit", value: unit.id, monospaced: true)
                         InfoRow(title: "Title", value: unit.title)
-                        HStack(spacing: 8) {
-                            StatusPill(text: unit.status.rawValue, tone: statusTone(unit.status))
-                            StatusPill(text: unit.risk.rawValue, tone: riskTone(unit.risk))
-                            ValidationBadge(state: unit.validation)
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 8) {
+                                StatusPill(text: unit.status.rawValue, tone: statusTone(unit.status))
+                                StatusPill(text: unit.risk.rawValue, tone: riskTone(unit.risk))
+                                ValidationBadge(state: unit.validation)
+                            }
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                StatusPill(text: unit.status.rawValue, tone: statusTone(unit.status))
+                                StatusPill(text: unit.risk.rawValue, tone: riskTone(unit.risk))
+                                ValidationBadge(state: unit.validation)
+                            }
                         }
                     }
 
@@ -159,11 +225,12 @@ struct MigrationUnitDetailView: View {
                     Text("No run selected")
                         .font(ForgisType.body(13))
                         .foregroundStyle(ForgisTheme.textSecondary(scheme))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                        .frame(maxWidth: .infinity, alignment: .center)
                         .padding(24)
                 }
             }
             .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(ForgisTheme.background(scheme))
     }
@@ -217,6 +284,7 @@ struct InspectorView: View {
                 }
             }
             .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(ForgisTheme.surface(scheme))
     }
@@ -245,6 +313,7 @@ struct ReportPanelView: View {
                     .disabled(true)
             }
             .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(ForgisTheme.background(scheme))
     }
@@ -267,13 +336,12 @@ struct SettingsView: View {
                     InfoRow(title: "Model", value: run.model, monospaced: true)
                     InfoRow(title: "API base", value: run.apiBase, monospaced: true)
                     InfoRow(title: "API key env", value: run.apiKeyEnvName, monospaced: true)
-                    HStack {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
                         Text("API key")
                             .font(ForgisType.caption(11, weight: .semibold))
                             .foregroundStyle(ForgisTheme.textTertiary(scheme))
-                            .frame(width: 96, alignment: .leading)
                         StatusPill(text: run.apiKeyStatus, tone: run.apiKeyStatus == "set" ? .success : .warning)
-                        Spacer()
+                        Spacer(minLength: 0)
                     }
                 }
 
@@ -288,16 +356,30 @@ struct SettingsView: View {
                     StatusPill(text: mode.title, tone: .accent)
                 }
 
-                HStack {
-                    Button("Open config") {}
-                        .disabled(true)
-                    Button("Dry run") {}
-                        .disabled(true)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) {
+                        settingsActions
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        settingsActions
+                    }
                 }
             }
             .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(ForgisTheme.background(scheme))
+    }
+
+    private var settingsActions: some View {
+        Group {
+            Button("Open config") {}
+                .disabled(true)
+            Button("Dry run") {}
+                .disabled(true)
+        }
+        .controlSize(.small)
     }
 }
 #endif

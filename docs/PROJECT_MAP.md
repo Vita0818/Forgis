@@ -1,6 +1,6 @@
 # 项目地图
 
-最近自查日期：2026-06-25
+最近自查日期：2026-06-26
 
 ## 顶层目录树
 
@@ -23,6 +23,9 @@
 │           ├── ForgisModels.swift
 │           ├── ForgisComponents.swift
 │           └── ForgisViews.swift
+├── Forgis.xcodeproj/
+│   ├── project.pbxproj
+│   └── xcshareddata/xcschemes/ForgisMac.xcscheme
 ├── docs/
 │   ├── DS_GUIDE_Swift_Kotlin.md
 │   ├── ARCHITECTURE.md
@@ -60,6 +63,7 @@
 
 - `agent/`：Forgis 核心 Python 和 shell 运行时。包括配置解析、OpenAI-compatible client、DeepSeek compatibility shim、本地 CLI、受控文件工具、tool loop、staged translation、guardrails、报告、PR body 和 GitHub Actions 辅助脚本。
 - `Apps/ForgisMac/Sources/`：v7.2 Mac SwiftUI shell。当前只展示静态/mock migration run、migration units、report、validation、settings 和 safety boundary，不接真实 API、不执行迁移、不写 source/target、不显示 secret。
+- `Forgis.xcodeproj/`：v7.2 Xcode project materialization。推荐用 `open Forgis.xcodeproj` 打开；命令行构建为 `xcodebuild -project Forgis.xcodeproj -scheme ForgisMac -configuration Debug build`。
 - `.github/workflows/`：CI 与主运行工作流。`migrate.yml` 是真实 Forgis 运行链路，`validate-forgis.yml` 是本仓库脚本验证链路。
 - `skills/`：仓库本地可注入的短技能文档。`agent/skill_loader.py` 只允许从仓库本地 `skills/*.md` 读取安全 slug。
 - `prompts/`：Agent 系统提示词。`agent/deepseek_agent.py` 优先读取 `prompts/system_agent_v3.md`，失败时回落到内置 legacy prompt。
@@ -73,6 +77,8 @@
 ## 关键文件清单
 
 - `Package.swift`：v7.2 SwiftPM manifest，新增 `ForgisMac` macOS executable target，不引入第三方依赖。
+- `Forgis.xcodeproj/project.pbxproj`：Xcode project，包含 macOS app target `ForgisMac`，bundle id `com.vita.forgis.mac`，deployment target macOS 13.0，generated Info.plist，无 entitlements。
+- `Forgis.xcodeproj/xcshareddata/xcschemes/ForgisMac.xcscheme`：shared scheme，使 Xcode 和 `xcodebuild -scheme ForgisMac` 能直接找到 Mac app target。
 - `Apps/ForgisMac/Sources/ForgisMacApp.swift`：SwiftUI `@main` 入口和 `WindowGroup`。
 - `Apps/ForgisMac/Sources/ForgisRootView.swift`：三栏主界面组合，左栏 navigation，中栏 migration/report/settings，右栏 inspector。
 - `Apps/ForgisMac/Sources/ForgisDesign.swift`：淡橙色主题 token、字体 token 和轻量 card modifier。

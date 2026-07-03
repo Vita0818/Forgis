@@ -1,6 +1,6 @@
 # 构建与测试说明
 
-最近自查日期：2026-06-23
+最近自查日期：2026-06-26
 
 ## 环境要求
 
@@ -148,7 +148,15 @@ python -m agent.cli run \
 
 ## UI 测试命令
 
-不适用。当前项目没有前端 UI 或客户端 UI。v6.0 只允许模型使用目标仓库中用户提供的 reference/actual screenshot 目录进行受控视觉工具调用；测试默认不调用真实 Qwen，运行时只有显式 `QWEN_API_KEY` 才能调用 provider。仍不自动截图、不上传 artifacts。
+v7.2 Mac UI shell 可用 Xcode project 或 SwiftPM 构建：
+
+```bash
+xcodebuild -list -project Forgis.xcodeproj
+xcodebuild -project Forgis.xcodeproj -scheme ForgisMac -configuration Debug build
+swift build --scratch-path /tmp/forgis-v7-2-swift-build
+```
+
+该 UI 当前只展示 static/mock 数据，不调用 API、不执行真实迁移、不写 source/target、不显示 secret。v6.0 视觉工具测试仍默认不调用真实 Qwen；运行时只有显式 `QWEN_API_KEY` 才能调用 provider。仍不自动截图、不上传 artifacts。
 
 ## 静态检查 / lint / format
 

@@ -15,6 +15,17 @@ It only does three things:
 
 Forgis does not contain project migration intelligence. The target repository task file owns the work instructions.
 
+## Mac UI
+
+The recommended Mac UI entry is the Xcode project:
+
+```bash
+open Forgis.xcodeproj
+xcodebuild -project Forgis.xcodeproj -scheme ForgisMac -configuration Debug build
+```
+
+`Package.swift` is still kept as a lightweight SwiftPM build entry. The Mac UI is currently a static/mock shell: it does not call an API, does not execute a real migration, does not write source or target files, and does not display secret values.
+
 ## Workflow Input
 
 The main workflow exposes one manual input:
@@ -91,7 +102,7 @@ python -m agent.cli run \
 
 The CLI does not add new write permissions or shell execution powers. `source` stays read-only, target writes still go through `target_subdir`, reports are bounded and redacted, and real model calls still require `dry_run=false`, `run_agent=true`, and `confirm_real_run=true`.
 
-v7.1 intentionally does not add streaming, Responses API, a local server/gateway, council, multi-agent orchestration, GUI, automatic screenshots, Keychain storage, or global `~/.config` defaults.
+v7.1 intentionally does not add streaming, Responses API, a local server/gateway, council, multi-agent orchestration, automatic screenshots, Keychain storage, or global `~/.config` defaults. v7.2 adds only the static/mock Mac UI shell described above.
 
 A tiny no-dependency fixture lives at `examples/local_migration_fixture/` for smoke tests and demos.
 

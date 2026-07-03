@@ -1,10 +1,10 @@
 # 架构说明
 
-最近自查日期：2026-06-23
+最近自查日期：2026-06-26
 
 ## 总体架构
 
-Forgis 是一个 Python CLI/Agent 工具。它本身不内置具体平台迁移智能，而是读取目标仓库或 v7.1 local config 的配置与任务文件，在满足真实运行开关时调用非 streaming OpenAI-compatible Chat Completions，并把受控文件工具交给模型使用。`agent_backend: deepseek` 仍是默认兼容路径，`agent_backend: openai-compatible` 是通用 alias。v7.1 新增本地 init/status/run-one-unit/resume/report 最小闭环，但不新增 server、GUI、streaming、多 Agent 或 shell runner。v6.0 已为 Qwen Visual Evidence Mode 接入 reference-guided migration、受控视觉工具、报告字段、runtime gate 和显式 env 下的安全 provider transport；Qwen 仍只是视觉理解 provider，不是核心迁移智能，也不是第二个代码 Agent。
+Forgis 是一个 Python CLI/Agent 工具。它本身不内置具体平台迁移智能，而是读取目标仓库或 v7.1 local config 的配置与任务文件，在满足真实运行开关时调用非 streaming OpenAI-compatible Chat Completions，并把受控文件工具交给模型使用。`agent_backend: deepseek` 仍是默认兼容路径，`agent_backend: openai-compatible` 是通用 alias。v7.1 新增本地 init/status/run-one-unit/resume/report 最小闭环；v7.2 新增 `Forgis.xcodeproj` 和静态/mock Mac UI shell，但不新增真实迁移执行、server、streaming、多 Agent 或 shell runner。v6.0 已为 Qwen Visual Evidence Mode 接入 reference-guided migration、受控视觉工具、报告字段、runtime gate 和显式 env 下的安全 provider transport；Qwen 仍只是视觉理解 provider，不是核心迁移智能，也不是第二个代码 Agent。
 
 核心运行方式：
 
@@ -89,7 +89,7 @@ v6.0 建立契约、配置解析、证据目录/状态 helper、mock-first provi
 
 ## UI 与业务逻辑分层
 
-本项目没有前端 UI。唯一用户可见界面是 CLI 输出、GitHub Actions logs、GitHub Step Summary、PR body、Markdown/JSON 报告和目标仓库 run log。
+v7.2 新增最小 Mac UI shell。推荐入口是 `Forgis.xcodeproj`，target/scheme 为 `ForgisMac`；`Package.swift` 仍保留为轻量 SwiftPM build entry。当前 UI 只展示静态/mock migration run、migration units、report、validation、settings 和 safety boundary，不调用 API、不执行真实迁移、不写 source/target、不显示 secret。真实运行逻辑仍由 Python CLI / GitHub Actions 驱动，受 dry-run/real-run gate、`target_subdir`、command allowlist 和 secret redaction 约束。
 
 ## 平台相关与共享代码边界
 

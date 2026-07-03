@@ -52,6 +52,7 @@ struct StatusPill: View {
         Text(text)
             .font(ForgisType.caption(10, weight: .semibold))
             .foregroundStyle(tone.foreground(scheme))
+            .lineLimit(1)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(tone.background(scheme), in: Capsule(style: .continuous))
@@ -59,6 +60,7 @@ struct StatusPill: View {
                 Capsule(style: .continuous)
                     .stroke(tone.border(scheme), lineWidth: 1)
             }
+            .fixedSize(horizontal: true, vertical: false)
     }
 }
 
@@ -96,11 +98,16 @@ struct SafetyStrip: View {
     let items: [SafetyItem]
 
     var body: some View {
-        FlowLayout(spacing: 6) {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 112), spacing: 6, alignment: .leading)],
+            alignment: .leading,
+            spacing: 6
+        ) {
             ForEach(items) { item in
                 StatusPill(text: item.title, tone: item.tone)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -111,18 +118,18 @@ struct InfoRow: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text(title)
                 .font(ForgisType.caption(11, weight: .semibold))
                 .foregroundStyle(ForgisTheme.textTertiary(scheme))
-                .frame(width: 96, alignment: .leading)
             Text(value)
                 .font(monospaced ? ForgisType.mono(12) : ForgisType.body(12))
                 .foregroundStyle(ForgisTheme.textPrimary(scheme))
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .textSelection(.enabled)
-            Spacer(minLength: 0)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
         }
     }
 }
@@ -142,18 +149,6 @@ struct SectionCard<Content: View>: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .forgisCard()
-    }
-}
-
-struct FlowLayout<Content: View>: View {
-    let spacing: CGFloat
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        HStack(spacing: spacing) {
-            content
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

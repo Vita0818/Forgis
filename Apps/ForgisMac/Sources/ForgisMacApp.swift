@@ -7,6 +7,7 @@ struct ForgisMacApp: App {
         WindowGroup {
             ForgisRootView()
         }
+        .windowResizability(.contentMinSize)
     }
 }
 #else

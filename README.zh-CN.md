@@ -14,6 +14,17 @@ Forgis 本体只做三件事：
 
 这种设计让 Forgis 保持通用。它负责边界、工具和日志，不负责把某个平台或某个项目的迁移经验写死到系统逻辑里。
 
+## Mac UI
+
+当前推荐的 Mac UI 打开方式是 Xcode project：
+
+```bash
+open Forgis.xcodeproj
+xcodebuild -project Forgis.xcodeproj -scheme ForgisMac -configuration Debug build
+```
+
+`Package.swift` 仍保留作为轻量 SwiftPM 构建入口。Mac UI 目前是 static/mock shell：不调用 API，不执行真实迁移，不写 source/target 文件，不显示 secret 值。
+
 ## Forgis 不是什么
 
 Forgis 不是平台迁移器，不是 Android、iOS、Web 或任何单一技术栈专用工具，也不是内置项目理解系统、脚手架生成器或自动保证迁移成功的工具。
@@ -96,7 +107,7 @@ python -m agent.cli run \
 
 CLI 不新增写入权限，也不新增 shell 执行能力。source 仍保持只读，target 写入仍只能通过 `target_subdir`，报告有界且脱敏，真实模型调用仍必须同时满足 `dry_run=false`、`run_agent=true`、`confirm_real_run=true`。
 
-v7.1 明确不包含 streaming、Responses API、local server/gateway、council、多 Agent、GUI、自动截图、Keychain 或默认 `~/.config` 全局配置。
+v7.1 明确不包含 streaming、Responses API、local server/gateway、council、多 Agent、自动截图、Keychain 或默认 `~/.config` 全局配置。v7.2 只新增上面描述的 static/mock Mac UI shell。
 
 最小无外部依赖 fixture 位于 `examples/local_migration_fixture/`，可用于 smoke test 和演示。
 
