@@ -1,6 +1,6 @@
 # 当前状态
 
-最近自查日期：2026-06-26
+最近自查日期：2026-07-03
 
 ## 当前工作区状态摘要
 
@@ -12,7 +12,7 @@ git root: <PROJECT_ROOT>
 git status --short: 本轮存在 v6.0 未提交修改，具体文件以最终报告和 `git status --short` 为准
 ```
 
-v7.2 在 v7.1 Full Local Migration MVP 之上新增最小 Mac UI shell，并已 materialize `Forgis.xcodeproj` 作为推荐 Xcode 打开方式。用户可执行 `open Forgis.xcodeproj`，或用 `xcodebuild -project Forgis.xcodeproj -scheme ForgisMac -configuration Debug build` 命令行构建。`Package.swift` 仍保留为轻量 SwiftPM build entry。`Apps/ForgisMac/Sources/` 提供 SwiftUI 三栏壳、淡橙色主题、静态 migration units、selected unit detail、report / validation / safety inspector 和 settings 页面。该 UI 只展示 mock / fixture-like 数据，不调用真实 API，不执行真实迁移，不写 source/target，不显示 secret。v7.1 CLI 仍保留 `agent_backend: deepseek` 默认行为和 `agent_backend: openai-compatible` alias，继续使用非 streaming Chat Completions client，并提供本地 `init`、`status`、`run --unit`、`resume` 闭环。v6.0 视觉闭环仍按 reference-guided migration 优先：Qwen 只读截图并输出视觉指导，不能读源码、写文件、运行命令或接收 secret。当前仍不包含 streaming、Responses API、local server/gateway、council、多 Agent、自动截图、artifact 上传、Keychain、多 provider 视觉或任意 shell 扩展。
+v7.3 在 v7.2 Mac UI shell 之上新增 AI Chat 页面和 Swift OpenAI-compatible Chat Completions 接口。`Forgis.xcodeproj` 仍是推荐 Xcode 打开方式；`Package.swift` 仍保留为轻量 SwiftPM build entry。`Apps/ForgisMac/Sources/` 现在提供 SwiftUI 三栏壳、AI Chat、可编辑 provider/model/API base/auth 配置、Keychain 或 env secret 解析、静态 migration units、selected unit detail、report / validation / safety inspector 和 settings 页面。AI Chat 采用非 streaming Chat Completions，与 Python agent 核心协议保持一致；非 secret 偏好写入 UserDefaults，API key 可写入 macOS Keychain 或从显式 env 名回退读取，UI 只显示状态和引用名，不显示 secret。Settings 可保存 provider 设置并执行手动 provider test；`--forgis-chat-smoke` 可对 localhost mock OpenAI-compatible endpoint 做 bounded smoke。该 UI 仍不执行真实迁移、不写 source/target、不接 CLI/run state。v7.1 CLI 仍保留 `agent_backend: deepseek` 默认行为和 `agent_backend: openai-compatible` alias，并提供本地 `init`、`status`、`run --unit`、`resume` 闭环。v6.0 视觉闭环仍按 reference-guided migration 优先：Qwen 只读截图并输出视觉指导，不能读源码、写文件、运行命令或接收 secret。当前仍不包含 streaming、Responses API、local server/gateway、council、多 Agent、自动截图、artifact 上传、多 provider 视觉或任意 shell 扩展。
 
 ## 当前项目已实现能力
 
@@ -20,7 +20,7 @@ v7.2 在 v7.1 Full Local Migration MVP 之上新增最小 Mac UI shell，并已 
 - 运行开关：真实模型执行需要 `dry_run=false`、`run_agent=true`、`confirm_real_run=true` 同时成立。
 - 模型调用：`agent/openai_compatible_client.py` 提供非 streaming OpenAI-compatible Chat Completions transport；`agent/deepseek_agent.py` 保留 public API 并作为 DeepSeek 兼容 shim，模型默认 `deepseek-v4-pro`。
 - 本地 CLI：`agent/cli.py` 支持 `python -m agent.cli help`、`doctor`、`smoke`、`init`、`status`、`run --config ... --unit ...`、`resume`，并继续兼容旧式 `run --source ... --target ... --target-repo ... [--config ...] [--dry-run]`。本地 config 可记录 `local_source_path`、`local_target_path`、`local_target_repo`，但只保存 env var 名，不保存 secret 值。
-- Mac UI shell：`Forgis.xcodeproj` 是当前推荐打开方式，target/scheme 为 `ForgisMac`。`Apps/ForgisMac/Sources/` 是 v7.2 SwiftUI 壳，展示 Source repo、Target repo、Target subdir、Migration run、Migration unit、Report、Validation、Provider/env status、Dry-run mode 和 Safety boundary。按钮未接真实执行，API key 只显示 env name 与 set/unset mock 状态。
+- Mac UI shell：`Forgis.xcodeproj` 是当前推荐打开方式，target/scheme 为 `ForgisMac`。`Apps/ForgisMac/Sources/` 是 v7.3 SwiftUI 壳，展示 AI Chat、Source repo、Target repo、Target subdir、Migration run、Migration unit、Report、Validation、Provider/Auth status、Dry-run mode 和 Safety boundary。Settings 可保存非 secret provider/model/API base/API key env/auth requirement/timeout 偏好并手动测试 provider；API key 可保存到 Keychain，缺失时回退到 configured env，关闭 auth 时可调用本地无鉴权 OpenAI-compatible endpoint。其它迁移按钮未接真实执行。
 - 受控文件工具：支持 list/tree/read/file_exists/search/git_status/git_diff/mkdir/write/append/delete/edit/apply_patch/run_command/run_build/run_tests。
 - 文件沙箱：source 只读，target outside `target_subdir` 只读，写入仅限 `target_subdir`，并拒绝 secret-like 路径、symlink 写入、workflow 文件写入。
 - build/test feedback：可选 `build_command`、`test_command` 参数数组，经保守 allowlist 执行，输出会截断和脱敏。
@@ -47,16 +47,16 @@ v7.2 在 v7.1 Full Local Migration MVP 之上新增最小 Mac UI shell，并已 
 - Aider 后端。
 - 跨语言 build adapter、真实 UI 控制台。
 - 上传 legacy runtime diagnostics artifacts、业务源码、完整 diff、secret、未脱敏模型输出或 target repository snapshot。
-- streaming SSE、Responses API、image/multimodal 文本模型调用、provider 私有协议、retry/backoff、local server/gateway、council、多 Agent、Keychain、`~/.config` 默认配置。
+- streaming SSE、Responses API、image/multimodal 文本模型调用、provider 私有协议、retry/backoff、local server/gateway、council、多 Agent、`~/.config` 默认配置。Mac AI Chat 当前仅是非 streaming 单轮 HTTP 接口，支持手动 provider 配置和手动连接测试，但不是完整 provider catalog。
 - 自动截图、adb/hdc/Windows/macOS 截图、visual artifact 上传、多 provider 视觉、UI dashboard。当前视觉闭环依赖用户在目标仓库提供 reference screenshots；actual screenshots 可选。真实 Qwen transport 只有显式提供 `QWEN_API_KEY` 时才会调用，单元测试仍使用 mock，不联网。
-- Mac UI shell 尚未接 CLI/run state、真实 report 文件读取、doctor/smoke 执行或 target 写入；后续接线必须继续遵守 dry-run/real-run gate、target_subdir、command allowlist 和 secret redaction。
+- Mac UI shell 尚未接 CLI/run state、真实 report 文件读取、doctor/smoke 执行或 target 写入；AI Chat 也没有工具调用或文件系统访问。后续接线必须继续遵守 dry-run/real-run gate、target_subdir、command allowlist 和 secret redaction。
 
 ## 当前已知 bug / 风险
 
 - 旧式字符串 `validation_commands` 仍会通过 `bash -lc` 兼容运行，并打印 warning；新文档和示例必须使用 argv mapping。不要把旧字符串用于新增本地 full migration 配置。
 - `tests/test_forgis_config.py` 覆盖面广但文件很大，新增行为时容易漏读相关测试块。
 - `agent/forgis_config.py`、`agent/tool_loop.py`、`agent/staged_translation.py` 字段和状态面较宽，新增字段需要同时更新 env/output、report、tests、README、常驻文档和 fixture。
-- OpenAI-compatible providers 的 endpoint 形态、错误响应和 tool call 细节存在差异；差异应限制在 `agent/openai_compatible_client.py` 和配置字段内，不应污染工具沙箱、command allowlist 或迁移计划核心逻辑。
+- OpenAI-compatible providers 的 endpoint 形态、错误响应和 tool call 细节存在差异；Python agent 差异应限制在 `agent/openai_compatible_client.py` 和配置字段内，不应污染工具沙箱、command allowlist 或迁移计划核心逻辑。Mac AI Chat 只做非 streaming chat text 接口，错误文本必须有界脱敏。
 - `visual_validation` 已驱动受控视觉工具、报告字段和 runtime gate。缺少 API key、provider 不可用或找不到 reference screenshots 时必须写 blocker；reference-only 可完成视觉迁移指导，但必须写 limitation，不能被当成完整真实渲染验收。真实 transport 的风险集中在 env 管理与 provider response 脱敏，测试必须保持 mock-first。
 - README 和 README.zh-CN 包含多个历史版本章节，容易误读为当前新增能力。当前行为应以源码、workflow 和 `RELEASE_NOTES.md` v5.0 为准。
 - `rules/` 目录当前为空，运行时含义未确认。

@@ -168,4 +168,17 @@ func riskTone(_ risk: UnitRisk) -> PillTone {
     case .high: return .danger
     }
 }
+
+func chatSecretTone(_ status: ForgisChatSecretStatus) -> PillTone {
+    switch status {
+    case .notRequired:
+        return .info
+    case .keychainSet, .environmentSet:
+        return .success
+    case .unset:
+        return .warning
+    case .error:
+        return .danger
+    }
+}
 #endif

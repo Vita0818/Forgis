@@ -3,6 +3,7 @@ import Foundation
 import SwiftUI
 
 enum ForgisSection: String, CaseIterable, Identifiable, Hashable {
+    case aiChat
     case migration
     case reports
     case settings
@@ -11,6 +12,7 @@ enum ForgisSection: String, CaseIterable, Identifiable, Hashable {
 
     var title: String {
         switch self {
+        case .aiChat: return "AI Chat"
         case .migration: return "Migration"
         case .reports: return "Reports"
         case .settings: return "Settings"
@@ -19,6 +21,7 @@ enum ForgisSection: String, CaseIterable, Identifiable, Hashable {
 
     var icon: String {
         switch self {
+        case .aiChat: return "bubble.left.and.bubble.right"
         case .migration: return "arrow.triangle.2.circlepath"
         case .reports: return "doc.text.magnifyingglass"
         case .settings: return "gearshape"
@@ -110,9 +113,9 @@ enum MockForgisData {
         targetPath: "examples/local_migration_fixture/target",
         targetSubdir: "target-output",
         mode: .dryRun,
-        provider: "openai-compatible",
-        model: "local-smoke-model",
-        apiBase: "https://example.invalid/v1",
+        provider: "deepseek",
+        model: "deepseek-v4-pro",
+        apiBase: "https://api.deepseek.com/v1",
         apiKeyEnvName: "FORGIS_MODEL_API_KEY",
         apiKeyStatus: "unset",
         configPath: "examples/FORGIS_CONFIG.local.smoke.yml"

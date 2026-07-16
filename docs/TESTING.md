@@ -1,6 +1,6 @@
 # 构建与测试说明
 
-最近自查日期：2026-06-26
+最近自查日期：2026-07-03
 
 ## 环境要求
 
@@ -9,7 +9,7 @@
 - Shell：`agent/build_target.sh` 和 `agent/create_pr.sh` 使用 bash。
 - Git/GitHub CLI：真实 PR 创建路径依赖 `git` 和 `gh`，在 `agent/create_pr.sh` 中使用。
 - GitHub Actions secrets：真实运行依赖 `FORGIS_TARGET_TOKEN`、`FORGIS_SOURCE_TOKEN` 和模型 secret 环境变量。不要在文档或配置中写入真实值。
-- v7.x 模型 client 测试只使用 mock HTTP，不真实调用任何 API。OpenAI-compatible API key 只能通过 `model_env` 指向环境变量名；异常、日志、报告和 fixture 不得包含真实 secret 值、Authorization header、raw provider response 或完整模型输出。v7.1 local CLI `init/status/run --unit/resume` 测试也不得真实调用 API。
+- v7.x 模型 client 测试只使用 mock HTTP，不真实调用任何 API。Python OpenAI-compatible API key 只能通过 `model_env` 指向环境变量名；Mac UI API key 只能通过 Keychain 或显式 env name fallback 解析，UserDefaults 只保存非 secret provider 偏好。异常、日志、报告和 fixture 不得包含真实 secret 值、Authorization header、raw provider response 或完整模型输出。v7.1 local CLI `init/status/run --unit/resume` 测试也不得真实调用 API。
 - v6.0 视觉闭环测试不需要真实 Qwen API key。`visual_validation` 配置不得包含真实 token、API key、截图文件路径、evidence root 或本地敏感路径；`reference_screenshot_dirs` / `actual_screenshot_dirs` 只能是目标仓库相对目录。`agent/qwen_vision.py` 的 provider transport 在测试中必须 mock。真实 Qwen 调用只允许在运行时显式提供 `QWEN_API_KEY`，可选 `QWEN_API_BASE` 和 `QWEN_VISION_MODEL`，这些值不得写入报告。
 
 ## 依赖安装方式
@@ -148,15 +148,33 @@ python -m agent.cli run \
 
 ## UI 测试命令
 
-v7.2 Mac UI shell 可用 Xcode project 或 SwiftPM 构建：
+v7.3 Mac UI shell 可用 Xcode project 或 SwiftPM 构建：
 
 ```bash
 xcodebuild -list -project Forgis.xcodeproj
 xcodebuild -project Forgis.xcodeproj -scheme ForgisMac -configuration Debug build
-swift build --scratch-path /tmp/forgis-v7-2-swift-build
+swift build --scratch-path /tmp/forgis-v7-3-swift-build
 ```
 
-该 UI 当前只展示 static/mock 数据，不调用 API、不执行真实迁移、不写 source/target、不显示 secret。v6.0 视觉工具测试仍默认不调用真实 Qwen；运行时只有显式 `QWEN_API_KEY` 才能调用 provider。仍不自动截图、不上传 artifacts。
+建议本地构建把 DerivedData 放在 `/tmp`，避免污染默认 DerivedData：
+
+```bash
+xcodebuild -project Forgis.xcodeproj -scheme ForgisMac -configuration Debug -derivedDataPath /tmp/forgis-v7-3-derived-data build
+```
+
+编译后的 app 也提供一个只面向本地 mock provider 的 Chat smoke 入口，用于验证 Swift client 的真实 HTTP 路径：
+
+```bash
+/tmp/forgis-v7-3-derived-data/Build/Products/Debug/ForgisMac.app/Contents/MacOS/ForgisMac \
+  --forgis-chat-smoke \
+  --api-base http://127.0.0.1:8765/v1 \
+  --model forgis-smoke-model \
+  --timeout 5
+```
+
+该 smoke 默认无鉴权；若显式加 `--auth`，只能通过 `--api-key-env <ENV_NAME>` 指定环境变量名，不得传入 raw key。测试时应搭配本地 OpenAI-compatible mock server 返回 `FORGIS_SMOKE_OK`，不得调用真实 provider。
+
+该 UI 当前展示 AI Chat 与 static/mock migration 数据。AI Chat 只有在用户发送消息、Settings 手动测试 provider 且 Keychain/env key 可解析，或 auth 被显式关闭时才调用非 streaming Chat Completions；测试/构建不得设置真实 key 或真实调用 provider。不执行真实迁移、不写 source/target、不显示 secret。v6.0 视觉工具测试仍默认不调用真实 Qwen；运行时只有显式 `QWEN_API_KEY` 才能调用 provider。仍不自动截图、不上传 artifacts。
 
 ## 静态检查 / lint / format
 
@@ -179,6 +197,7 @@ bash -n agent/create_pr.sh
 - Visual tools/report/gate：schema、`list_visual_references`、sandbox dispatch、reference dirs 可读不可写、disabled/provider blocker、reference-only guidance limitation、reference+actual compare completed、auto 模式 required 判定、`NO_REFERENCE_SCREENSHOTS_FOUND`、`VISUAL_REPORT_INCOMPLETE`、run report / PR body 脱敏摘要。
 - Dry run：`dry_run=true` 时不调用模型、不写目标仓库、不 push/PR。
 - OpenAI-compatible model config：`agent_backend` alias、`api_base` / `base_url`、`model`、`request_timeout_seconds`、`model_env`、错误脱敏和 DeepSeek shim。
+- Mac AI Chat：缺少 Keychain/env key 且 auth required 时不发请求并显示 blocker；Keychain/env key 可解析时只调用非 streaming Chat Completions；Settings Test 复用同一条有界请求路径且不追加聊天消息；auth disabled 时允许本地无鉴权 endpoint；`--forgis-chat-smoke` 可对 localhost mock endpoint 返回 `FORGIS_SMOKE_OK`；provider/HTTP 错误脱敏且有界；不写 source/target、report、FORGIS_CONFIG、UserDefaults secret 或 fixture。
 - Local v7.1 flow：`init` 只写显式 output，`status` 不泄露 secret，`run --unit` 不自动 all-units，dry-run 不调用 API/不写 target，`resume` 默认不跳过 blocked/failed unit。
 - Validation commands：新配置使用 argv mapping 并复用 allowlist；旧 shell string 只兼容 warning；新增测试覆盖 shell bypass 不被 argv 接受。
 - Tool sandbox：读 source/target、写 `target_subdir`、拒绝 source 写入、拒绝 target root 写入、拒绝 symlink 和 secret-like 路径。

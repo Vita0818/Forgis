@@ -12,6 +12,7 @@
 - 不绕过 target_subdir 写入边界、read-only config/task、source-repo 只读、secret 扫描、report bounding。
 - 不把 Forgis 扩展成任意 shell 执行器。
 - 不把平台迁移智能硬编码进 Forgis 核心。
+- 不把 Mac AI Chat 扩展成带文件工具的代码 Agent；它只能做无工具、非 streaming Chat Completions，不得写 source/target/config/report。
 - 不把 Qwen 扩展成代码 Agent（不读源码/改文件/运行命令/接收 secret）。
 - 不把 reference-only 视觉指导当完整真实渲染验收。
 - 无显式 `QWEN_API_KEY` 不得发起 Qwen 真实 HTTP。
@@ -30,9 +31,12 @@
 ## 协议禁区
 
 - 非流式 OpenAI 兼容 Chat Completions。
+- Mac AI Chat 也必须保持非流式 Chat Completions；不得引入 SSE streaming 或 Responses API。
 - `api_base`/`base_url` 别名（不可同时用）。
 - `deepseek_agent.py` 的 tool schema 名必须与 `file_tools.py invoke()` 匹配。
 - `model_env` 仅 env 名。
+- Mac AI Chat API key 只能来自 macOS Keychain generic-password item 或 runtime env fallback；UserDefaults 只能保存非 secret provider/model/API base/env 名/auth/timeout 偏好。不得把 API key 写入源码、日志、report、fixture、FORGIS_CONFIG 或 UserDefaults。
+- `--forgis-chat-smoke` 只能复用 Mac AI Chat 的非 streaming client；默认应访问 localhost mock endpoint，不得接受 raw API key CLI 参数，不得读写 source/target/config/report。
 - `success_checks` = `path_exists` XOR `command`。
 - `build_command`/`test_command` = YAML 数组（非 shell 字符串）。
 - `validation_commands` argv mapping 推荐；legacy 字符串经 `bash -lc`（有 warning）。

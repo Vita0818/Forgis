@@ -10,6 +10,7 @@
 3. `docs/ARCHITECTURE.md`
 4. `docs/DO_NOT_BREAK.md`
 5. `docs/TESTING.md`
+6. `docs/NEXT_TARGET.md`（如果存在）
 
 额外必读（涉及视觉模式时）：
 - `docs/QWEN_VISUAL_MODE.md`（Qwen Visual Evidence Mode 契约，修改 visual_validation/qwen_vision/visual_evidence 前）
@@ -94,6 +95,7 @@ git status --short
 - `docs/CURRENT_STATE.md`：当前真实状态（v7.2/v7.1/v6.0）、已有能力、未完成项、风险、工作区状态。
 - `docs/TESTING.md`：环境、依赖、构建、测试、lint/format、手动验证矩阵。
 - `docs/DO_NOT_BREAK.md`：不可破坏的格式、路径、协议、安全边界和回归要求。
+- `docs/NEXT_TARGET.md`：临时下一目标记录；目标完成或不再有效后删除。
 - `docs/QWEN_VISUAL_MODE.md`：Qwen Visual Evidence Mode 契约（reference-guided workflow、provider 边界、reference-first 规则、证据状态、报告字段、runtime gate、真实 transport 启用条件）。
 - `docs/DS_GUIDE_Swift_Kotlin.md`：SwiftUI 到 Kotlin/Compose 迁移风险与策略参考，不是 Forgis 核心运行逻辑。
 
@@ -106,6 +108,7 @@ git status --short
 - 保留用户已有改动。
 - 运行与改动风险匹配的检查。最少应考虑 `git diff --check`；代码改动通常还应运行 `python3 -m unittest tests/test_forgis_config.py` 或更窄测试。
 - 检查 `git status --short`，明确哪些文件是本轮改动。
+- 将本轮已完成的持久性改动及时回写到相关项目文档；若无需更新文档，最终报告说明原因。
 - 若未运行构建或测试，必须在最终报告中说明原因。
 
 ## 最终报告格式

@@ -13,6 +13,11 @@
 		4A1000010000000000000004 /* ForgisModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A2000010000000000000004 /* ForgisModels.swift */; };
 		4A1000010000000000000005 /* ForgisComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A2000010000000000000005 /* ForgisComponents.swift */; };
 		4A1000010000000000000006 /* ForgisViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A2000010000000000000006 /* ForgisViews.swift */; };
+		4A1000010000000000000007 /* ForgisChatModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A2000010000000000000008 /* ForgisChatModels.swift */; };
+		4A1000010000000000000008 /* ForgisChatService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A2000010000000000000009 /* ForgisChatService.swift */; };
+		4A1000010000000000000009 /* ForgisChatViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A200001000000000000000A /* ForgisChatViews.swift */; };
+		4A100001000000000000000A /* ForgisChatStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A200001000000000000000B /* ForgisChatStorage.swift */; };
+		4A100001000000000000000B /* ForgisChatSmoke.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A200001000000000000000C /* ForgisChatSmoke.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -23,6 +28,11 @@
 		4A2000010000000000000005 /* ForgisComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForgisComponents.swift; sourceTree = "<group>"; };
 		4A2000010000000000000006 /* ForgisViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForgisViews.swift; sourceTree = "<group>"; };
 		4A2000010000000000000007 /* ForgisMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ForgisMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4A2000010000000000000008 /* ForgisChatModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForgisChatModels.swift; sourceTree = "<group>"; };
+		4A2000010000000000000009 /* ForgisChatService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForgisChatService.swift; sourceTree = "<group>"; };
+		4A200001000000000000000A /* ForgisChatViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForgisChatViews.swift; sourceTree = "<group>"; };
+		4A200001000000000000000B /* ForgisChatStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForgisChatStorage.swift; sourceTree = "<group>"; };
+		4A200001000000000000000C /* ForgisChatSmoke.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForgisChatSmoke.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -69,6 +79,11 @@
 				4A2000010000000000000004 /* ForgisModels.swift */,
 				4A2000010000000000000005 /* ForgisComponents.swift */,
 				4A2000010000000000000006 /* ForgisViews.swift */,
+				4A2000010000000000000008 /* ForgisChatModels.swift */,
+				4A200001000000000000000B /* ForgisChatStorage.swift */,
+				4A2000010000000000000009 /* ForgisChatService.swift */,
+				4A200001000000000000000C /* ForgisChatSmoke.swift */,
+				4A200001000000000000000A /* ForgisChatViews.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -155,6 +170,11 @@
 				4A1000010000000000000004 /* ForgisModels.swift in Sources */,
 				4A1000010000000000000005 /* ForgisComponents.swift in Sources */,
 				4A1000010000000000000006 /* ForgisViews.swift in Sources */,
+				4A1000010000000000000007 /* ForgisChatModels.swift in Sources */,
+				4A100001000000000000000A /* ForgisChatStorage.swift in Sources */,
+				4A1000010000000000000008 /* ForgisChatService.swift in Sources */,
+				4A100001000000000000000B /* ForgisChatSmoke.swift in Sources */,
+				4A1000010000000000000009 /* ForgisChatViews.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -295,7 +315,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.vita.forgis.mac;
+				PRODUCT_BUNDLE_IDENTIFIER = com.Vita0818.ForgisMac;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SUPPORTED_PLATFORMS = macosx;
@@ -325,7 +345,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.vita.forgis.mac;
+				PRODUCT_BUNDLE_IDENTIFIER = com.Vita0818.ForgisMac;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SUPPORTED_PLATFORMS = macosx;

@@ -3,6 +3,10 @@ import SwiftUI
 
 @main
 struct ForgisMacApp: App {
+    init() {
+        ForgisChatSmokeRunner.runIfRequested()
+    }
+
     var body: some Scene {
         WindowGroup {
             ForgisRootView()
