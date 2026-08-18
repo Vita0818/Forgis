@@ -1,6 +1,6 @@
 # 当前状态
 
-最近自查日期：2026-07-03
+最近自查日期：2026-07-28
 
 ## 当前工作区状态摘要
 
@@ -9,10 +9,10 @@
 ```text
 pwd: <PROJECT_ROOT>
 git root: <PROJECT_ROOT>
-git status --short: 本轮存在 v6.0 未提交修改，具体文件以最终报告和 `git status --short` 为准
+git status --short: 以当前 checkout 和任务最终报告为准，不在常驻文档中固化临时修改清单
 ```
 
-v7.3 在 v7.2 Mac UI shell 之上新增 AI Chat 页面和 Swift OpenAI-compatible Chat Completions 接口。`Forgis.xcodeproj` 仍是推荐 Xcode 打开方式；`Package.swift` 仍保留为轻量 SwiftPM build entry。`Apps/ForgisMac/Sources/` 现在提供 SwiftUI 三栏壳、AI Chat、可编辑 provider/model/API base/auth 配置、Keychain 或 env secret 解析、静态 migration units、selected unit detail、report / validation / safety inspector 和 settings 页面。AI Chat 采用非 streaming Chat Completions，与 Python agent 核心协议保持一致；非 secret 偏好写入 UserDefaults，API key 可写入 macOS Keychain 或从显式 env 名回退读取，UI 只显示状态和引用名，不显示 secret。Settings 可保存 provider 设置并执行手动 provider test；`--forgis-chat-smoke` 可对 localhost mock OpenAI-compatible endpoint 做 bounded smoke。该 UI 仍不执行真实迁移、不写 source/target、不接 CLI/run state。v7.1 CLI 仍保留 `agent_backend: deepseek` 默认行为和 `agent_backend: openai-compatible` alias，并提供本地 `init`、`status`、`run --unit`、`resume` 闭环。v6.0 视觉闭环仍按 reference-guided migration 优先：Qwen 只读截图并输出视觉指导，不能读源码、写文件、运行命令或接收 secret。当前仍不包含 streaming、Responses API、local server/gateway、council、多 Agent、自动截图、artifact 上传、多 provider 视觉或任意 shell 扩展。
+v7.3 在 v7.2 Mac UI shell 之上新增 AI Chat 页面和 Swift OpenAI-compatible Chat Completions 接口。`Forgis.xcodeproj` 仍是推荐 Xcode 打开方式；`Package.swift` 仍保留为轻量 SwiftPM build entry。`Apps/ForgisMac/Sources/` 现在提供 SwiftUI 三栏壳、AI Chat、可编辑 provider/model/API base/auth 配置、Keychain 或 env secret 解析、静态 migration units、selected unit detail、合并后的 section-aware inspector 和 settings 页面。2026-07-26 起，ForgisMac 采用 Apple-native 工作台设计语言：动态 system canvas 与 semantic color、serif 页面标题、system body、monospaced 技术字段、结构化 Material 卡片，以及 macOS 26 Liquid Glass / macOS 13–15 Material 与 bordered control fallback；详细契约见 `docs/FORGIS_MAC_DESIGN_LANGUAGE.md`。AI Chat 采用非 streaming Chat Completions，与 Python agent 核心协议保持一致；非 secret 偏好写入 UserDefaults，API key 可写入 macOS Keychain 或从显式 env 名回退读取，UI 只显示状态和引用名，不显示 secret。Settings 可保存 provider 设置并执行手动 provider test；`--forgis-chat-smoke` 可对 localhost mock OpenAI-compatible endpoint 做 bounded smoke。该 UI 仍不执行真实迁移、不写 source/target、不接 CLI/run state。v7.1 CLI 仍保留 `agent_backend: deepseek` 默认行为和 `agent_backend: openai-compatible` alias，并提供本地 `init`、`status`、`run --unit`、`resume` 闭环。v6.0 视觉闭环仍按 reference-guided migration 优先：Qwen 只读截图并输出视觉指导，不能读源码、写文件、运行命令或接收 secret。当前仍不包含 streaming、Responses API、local server/gateway、council、多 Agent、自动截图、artifact 上传、多 provider 视觉或任意 shell 扩展。
 
 ## 当前项目已实现能力
 
@@ -20,7 +20,7 @@ v7.3 在 v7.2 Mac UI shell 之上新增 AI Chat 页面和 Swift OpenAI-compatibl
 - 运行开关：真实模型执行需要 `dry_run=false`、`run_agent=true`、`confirm_real_run=true` 同时成立。
 - 模型调用：`agent/openai_compatible_client.py` 提供非 streaming OpenAI-compatible Chat Completions transport；`agent/deepseek_agent.py` 保留 public API 并作为 DeepSeek 兼容 shim，模型默认 `deepseek-v4-pro`。
 - 本地 CLI：`agent/cli.py` 支持 `python -m agent.cli help`、`doctor`、`smoke`、`init`、`status`、`run --config ... --unit ...`、`resume`，并继续兼容旧式 `run --source ... --target ... --target-repo ... [--config ...] [--dry-run]`。本地 config 可记录 `local_source_path`、`local_target_path`、`local_target_repo`，但只保存 env var 名，不保存 secret 值。
-- Mac UI shell：`Forgis.xcodeproj` 是当前推荐打开方式，target/scheme 为 `ForgisMac`。`Apps/ForgisMac/Sources/` 是 v7.3 SwiftUI 壳，展示 AI Chat、Source repo、Target repo、Target subdir、Migration run、Migration unit、Report、Validation、Provider/Auth status、Dry-run mode 和 Safety boundary。Settings 可保存非 secret provider/model/API base/API key env/auth requirement/timeout 偏好并手动测试 provider；API key 可保存到 Keychain，缺失时回退到 configured env，关闭 auth 时可调用本地无鉴权 OpenAI-compatible endpoint。其它迁移按钮未接真实执行。
+- Mac UI shell：`Forgis.xcodeproj` 是当前推荐打开方式，target/scheme 为 `ForgisMac`。`Apps/ForgisMac/Sources/` 是 v7.3 SwiftUI 壳，展示 AI Chat、Source repo、Target repo、Target subdir、Migration run、Migration unit、Report、Validation、Provider/Auth status、Dry-run mode 和 Safety boundary。其视觉层使用 system semantic colors、system window/sidebar canvas、Material structured surfaces、functional Glass、SF Symbols 和 serif/system/monospaced 字体分层；普通 assistant 回复无卡片，composer 采用 40pt 单排控制，列表只保留一个主状态，健康安全项合并为一行，Provider/Auth 详情集中在 Settings 与 Inspector。Settings 可保存非 secret provider/model/API base/API key env/auth requirement/timeout 偏好并手动测试 provider；API key 可保存到 Keychain，缺失时回退到 configured env，关闭 auth 时可调用本地无鉴权 OpenAI-compatible endpoint。未接线的迁移操作不作为常驻按钮，且未接入真实执行。
 - 受控文件工具：支持 list/tree/read/file_exists/search/git_status/git_diff/mkdir/write/append/delete/edit/apply_patch/run_command/run_build/run_tests。
 - 文件沙箱：source 只读，target outside `target_subdir` 只读，写入仅限 `target_subdir`，并拒绝 secret-like 路径、symlink 写入、workflow 文件写入。
 - build/test feedback：可选 `build_command`、`test_command` 参数数组，经保守 allowlist 执行，输出会截断和脱敏。

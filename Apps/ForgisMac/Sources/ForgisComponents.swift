@@ -12,7 +12,7 @@ enum PillTone {
     func foreground(_ scheme: ColorScheme) -> Color {
         switch self {
         case .neutral: return ForgisTheme.textSecondary(scheme)
-        case .accent: return scheme == .dark ? Color(red: 1.000, green: 0.690, blue: 0.455) : ForgisTheme.accentDeep
+        case .accent: return ForgisTheme.accentDeep
         case .success: return ForgisTheme.success
         case .warning: return ForgisTheme.warning
         case .danger: return ForgisTheme.danger
@@ -25,9 +25,9 @@ enum PillTone {
         case .neutral: return ForgisTheme.surfaceMuted(scheme)
         case .accent: return ForgisTheme.accentSoft(scheme)
         case .success: return ForgisTheme.success.opacity(scheme == .dark ? 0.20 : 0.12)
-        case .warning: return ForgisTheme.warning.opacity(scheme == .dark ? 0.22 : 0.14)
-        case .danger: return ForgisTheme.danger.opacity(scheme == .dark ? 0.22 : 0.12)
-        case .info: return ForgisTheme.info.opacity(scheme == .dark ? 0.22 : 0.12)
+        case .warning: return ForgisTheme.warning.opacity(scheme == .dark ? 0.20 : 0.12)
+        case .danger: return ForgisTheme.danger.opacity(scheme == .dark ? 0.20 : 0.12)
+        case .info: return ForgisTheme.info.opacity(scheme == .dark ? 0.20 : 0.12)
         }
     }
 
@@ -64,22 +64,6 @@ struct StatusPill: View {
     }
 }
 
-struct ValidationBadge: View {
-    let state: ValidationState
-
-    var body: some View {
-        StatusPill(text: state.rawValue, tone: tone)
-    }
-
-    private var tone: PillTone {
-        switch state {
-        case .notRun: return .neutral
-        case .passed: return .success
-        case .failed: return .danger
-        }
-    }
-}
-
 struct PathLabel: View {
     let path: String
     @Environment(\.colorScheme) private var scheme
@@ -98,16 +82,31 @@ struct SafetyStrip: View {
     let items: [SafetyItem]
 
     var body: some View {
-        LazyVGrid(
-            columns: [GridItem(.adaptive(minimum: 112), spacing: 6, alignment: .leading)],
-            alignment: .leading,
-            spacing: 6
-        ) {
-            ForEach(items) { item in
-                StatusPill(text: item.title, tone: item.tone)
-            }
-        }
+        Label(
+            isProtected ? "Protected" : "Review safeguards",
+            systemImage: isProtected ? "checkmark.shield" : "exclamationmark.shield"
+        )
+        .font(ForgisType.caption(11, weight: .semibold))
+        .foregroundStyle(
+            isProtected
+                ? ForgisTheme.success
+                : ForgisTheme.warning
+        )
         .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityLabel(
+            isProtected
+                ? "All \(items.count) safeguards active"
+                : "Safeguards need review"
+        )
+    }
+
+    private var isProtected: Bool {
+        !items.isEmpty && items.allSatisfy { item in
+            if case .success = item.tone {
+                return true
+            }
+            return false
+        }
     }
 }
 
@@ -122,15 +121,18 @@ struct InfoRow: View {
             Text(title)
                 .font(ForgisType.caption(11, weight: .semibold))
                 .foregroundStyle(ForgisTheme.textTertiary(scheme))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
             Text(value)
                 .font(monospaced ? ForgisType.mono(12) : ForgisType.body(12))
                 .foregroundStyle(ForgisTheme.textPrimary(scheme))
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
                 .layoutPriority(1)
+            Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -148,7 +150,7 @@ struct SectionCard<Content: View>: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .forgisCard()
+        .forgisCard(cornerRadius: 14)
     }
 }
 
@@ -161,24 +163,4 @@ func statusTone(_ status: UnitStatus) -> PillTone {
     }
 }
 
-func riskTone(_ risk: UnitRisk) -> PillTone {
-    switch risk {
-    case .low: return .success
-    case .medium: return .warning
-    case .high: return .danger
-    }
-}
-
-func chatSecretTone(_ status: ForgisChatSecretStatus) -> PillTone {
-    switch status {
-    case .notRequired:
-        return .info
-    case .keychainSet, .environmentSet:
-        return .success
-    case .unset:
-        return .warning
-    case .error:
-        return .danger
-    }
-}
 #endif

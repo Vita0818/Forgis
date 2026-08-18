@@ -3,41 +3,69 @@ import SwiftUI
 
 struct SidebarView: View {
     @Binding var selection: ForgisSection?
-    let run: MigrationRun
     let mode: RunMode
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        List(selection: $selection) {
-            Section {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Forgis")
-                        .font(ForgisType.appTitle())
-                        .foregroundStyle(ForgisTheme.textPrimary(scheme))
-                    Text("Mac")
-                        .font(ForgisType.caption(11, weight: .semibold))
-                        .foregroundStyle(ForgisTheme.textSecondary(scheme))
-                }
-                .padding(.vertical, 8)
-            }
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Forgis")
+                .font(ForgisType.appTitle())
+                .foregroundStyle(ForgisTheme.textPrimary(scheme))
+            .padding(.horizontal, 8)
+            .padding(.top, 8)
+            .padding(.bottom, 18)
 
-            Section {
-                ForEach(ForgisSection.allCases) { item in
-                    Label(item.title, systemImage: item.icon)
-                        .tag(item)
+            VStack(spacing: 6) {
+                ForEach(primarySections) { item in
+                    navigationRow(item)
                 }
             }
 
-            Section("Run") {
-                VStack(alignment: .leading, spacing: 7) {
-                    PathLabel(path: run.sourcePath)
-                    PathLabel(path: run.targetPath)
-                    StatusPill(text: mode.title, tone: .accent)
-                }
-                .padding(.vertical, 4)
-            }
+            Text(mode.title)
+                .font(ForgisType.caption(11, weight: .medium))
+                .foregroundStyle(ForgisTheme.textTertiary(scheme))
+                .padding(.horizontal, 10)
+                .padding(.top, 18)
+
+            Spacer(minLength: 16)
+
+            Divider()
+                .padding(.bottom, 10)
+            navigationRow(.settings)
         }
-        .listStyle(.sidebar)
+        .padding(12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var primarySections: [ForgisSection] {
+        [.aiChat, .migration, .reports]
+    }
+
+    @ViewBuilder private func navigationRow(_ item: ForgisSection) -> some View {
+        if selection == item {
+            navigationButton(item)
+                .forgisLiquidGlass(cornerRadius: 10, interactive: true)
+        } else {
+            navigationButton(item)
+        }
+    }
+
+    private func navigationButton(_ item: ForgisSection) -> some View {
+        Button {
+            selection = item
+        } label: {
+            Label(item.title, systemImage: item.icon)
+                .font(ForgisType.body(13, weight: selection == item ? .semibold : .medium))
+                .foregroundStyle(
+                    selection == item
+                        ? ForgisTheme.textPrimary(scheme)
+                        : ForgisTheme.textSecondary(scheme)
+                )
+                .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+                .padding(.horizontal, 10)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -45,23 +73,10 @@ struct MigrationWorkspaceView: View {
     let units: [MigrationUnit]
     @Binding var selectedUnitID: MigrationUnit.ID?
     let selectedUnit: MigrationUnit?
-    let safety: [SafetyItem]
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         VStack(spacing: 0) {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    workspaceTitle
-                    Spacer(minLength: 12)
-                    workspaceActions
-                }
-
-                VStack(alignment: .leading, spacing: 10) {
-                    workspaceTitle
-                    workspaceActions
-                }
-            }
+            ForgisPageHeader(title: "Migration Units")
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 18)
             .padding(.top, 18)
@@ -72,25 +87,9 @@ struct MigrationWorkspaceView: View {
             workspaceLayout
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(ForgisTheme.background(scheme))
-    }
-
-    private var workspaceTitle: some View {
-        Text("Migration Units")
-            .font(ForgisType.sectionTitle(20))
-            .foregroundStyle(ForgisTheme.textPrimary(scheme))
-            .lineLimit(1)
-    }
-
-    private var workspaceActions: some View {
-        HStack(spacing: 8) {
-            Button("Run doctor") {}
-                .disabled(true)
-            Button("Run smoke") {}
-                .disabled(true)
+        .background {
+            ForgisSystemCanvas()
         }
-        .controlSize(.small)
-        .fixedSize()
     }
 
     @ViewBuilder private var workspaceLayout: some View {
@@ -98,7 +97,7 @@ struct MigrationWorkspaceView: View {
             HSplitView {
                 MigrationUnitListView(units: units, selectedUnitID: $selectedUnitID)
                     .frame(minWidth: 240, idealWidth: 300)
-                MigrationUnitDetailView(unit: selectedUnit, safety: safety)
+                MigrationUnitDetailView(unit: selectedUnit)
                     .frame(minWidth: 260, idealWidth: 360)
             }
 
@@ -106,7 +105,7 @@ struct MigrationWorkspaceView: View {
                 MigrationUnitListView(units: units, selectedUnitID: $selectedUnitID)
                     .frame(minHeight: 220)
                 Divider()
-                MigrationUnitDetailView(unit: selectedUnit, safety: safety)
+                MigrationUnitDetailView(unit: selectedUnit)
                     .frame(minHeight: 260)
             }
         }
@@ -148,17 +147,6 @@ struct MigrationUnitListView: View {
                         PathLabel(path: unit.sourcePath)
                         PathLabel(path: unit.targetPath)
 
-                        ViewThatFits(in: .horizontal) {
-                            HStack(spacing: 6) {
-                                StatusPill(text: unit.risk.rawValue, tone: riskTone(unit.risk))
-                                ValidationBadge(state: unit.validation)
-                            }
-
-                            VStack(alignment: .leading, spacing: 6) {
-                                StatusPill(text: unit.risk.rawValue, tone: riskTone(unit.risk))
-                                ValidationBadge(state: unit.validation)
-                            }
-                        }
                     }
                     .padding(.vertical, 8)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -168,7 +156,9 @@ struct MigrationUnitListView: View {
         }
         .listStyle(.inset)
         .scrollContentBackground(.hidden)
-        .background(ForgisTheme.background(scheme))
+        .background {
+            ForgisSystemCanvas()
+        }
     }
 
     private func unitID(_ id: String) -> some View {
@@ -182,7 +172,6 @@ struct MigrationUnitListView: View {
 
 struct MigrationUnitDetailView: View {
     let unit: MigrationUnit?
-    let safety: [SafetyItem]
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
@@ -192,19 +181,9 @@ struct MigrationUnitDetailView: View {
                     SectionCard(title: "Summary") {
                         InfoRow(title: "Unit", value: unit.id, monospaced: true)
                         InfoRow(title: "Title", value: unit.title)
-                        ViewThatFits(in: .horizontal) {
-                            HStack(spacing: 8) {
-                                StatusPill(text: unit.status.rawValue, tone: statusTone(unit.status))
-                                StatusPill(text: unit.risk.rawValue, tone: riskTone(unit.risk))
-                                ValidationBadge(state: unit.validation)
-                            }
-
-                            VStack(alignment: .leading, spacing: 6) {
-                                StatusPill(text: unit.status.rawValue, tone: statusTone(unit.status))
-                                StatusPill(text: unit.risk.rawValue, tone: riskTone(unit.risk))
-                                ValidationBadge(state: unit.validation)
-                            }
-                        }
+                        InfoRow(title: "Status", value: unit.status.rawValue)
+                        InfoRow(title: "Risk", value: unit.risk.rawValue)
+                        InfoRow(title: "Validation", value: unit.validation.rawValue)
                     }
 
                     SectionCard(title: "Paths") {
@@ -214,12 +193,6 @@ struct MigrationUnitDetailView: View {
 
                     SectionCard(title: "Report") {
                         InfoRow(title: "Last report", value: unit.lastReport, monospaced: true)
-                        Button("Open report") {}
-                            .disabled(true)
-                    }
-
-                    SectionCard(title: "Safety") {
-                        SafetyStrip(items: safety)
                     }
                 } else {
                     Text("No run selected")
@@ -232,7 +205,9 @@ struct MigrationUnitDetailView: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(ForgisTheme.background(scheme))
+        .background {
+            ForgisSystemCanvas()
+        }
     }
 }
 
@@ -254,30 +229,21 @@ struct InspectorView: View {
                 switch activeSection {
                 case .aiChat:
                     ChatInspectorView(model: chatModel, safety: safety)
-                    SectionCard(title: "Report") {
-                        InfoRow(title: "Schema", value: report.schema, monospaced: true)
-                        ValidationBadge(state: report.validation)
-                    }
 
                 case .migration:
                     if let unit {
-                        SectionCard(title: "Summary") {
+                        SectionCard(title: "Unit") {
                             InfoRow(title: "Unit", value: unit.id, monospaced: true)
                             InfoRow(title: "Status", value: unit.status.rawValue)
                             InfoRow(title: "Risk", value: unit.risk.rawValue)
-                        }
-
-                        SectionCard(title: "Source / Target") {
                             InfoRow(title: "Source", value: unit.sourcePath, monospaced: true)
                             InfoRow(title: "Target", value: unit.targetPath, monospaced: true)
                         }
 
-                        SectionCard(title: "Last report") {
+                        SectionCard(title: "Run") {
+                            InfoRow(title: "Validation", value: unit.validation.rawValue)
                             InfoRow(title: "Report", value: unit.lastReport, monospaced: true)
-                        }
-
-                        SectionCard(title: "Validation") {
-                            ValidationBadge(state: unit.validation)
+                            SafetyStrip(items: safety)
                         }
                     } else {
                         Text("No run selected")
@@ -285,41 +251,20 @@ struct InspectorView: View {
                             .foregroundStyle(ForgisTheme.textSecondary(scheme))
                     }
 
-                    SectionCard(title: "Safety") {
-                        SafetyStrip(items: safety)
-                    }
-
-                    SectionCard(title: "Report") {
-                        InfoRow(title: "Schema", value: report.schema, monospaced: true)
-                        ValidationBadge(state: report.validation)
-                    }
-
                 case .reports:
                     SectionCard(title: "Report") {
                         InfoRow(title: "Name", value: report.title)
                         InfoRow(title: "Status", value: report.status)
                         InfoRow(title: "Schema", value: report.schema, monospaced: true)
-                        ValidationBadge(state: report.validation)
-                    }
-
-                    SectionCard(title: "Safety") {
+                        InfoRow(title: "Validation", value: report.validation.rawValue)
                         SafetyStrip(items: safety)
                     }
 
                 case .settings:
-                    SectionCard(title: "Provider") {
-                        InfoRow(title: "Provider", value: chatModel.configuration.provider)
+                    SectionCard(title: "Connection") {
                         InfoRow(title: "Model", value: chatModel.configuration.model, monospaced: true)
                         InfoRow(title: "API base", value: chatModel.configuration.apiBase, monospaced: true)
-                        InfoRow(title: "Auth", value: chatModel.configuration.requiresAuthentication ? "required" : "disabled")
-                        InfoRow(title: "API key env", value: chatModel.configuration.apiKeyEnvName, monospaced: true)
-                        StatusPill(
-                            text: chatModel.apiKeyStatus,
-                            tone: chatSecretTone(chatModel.secretStatus)
-                        )
-                    }
-
-                    SectionCard(title: "Safety") {
+                        InfoRow(title: "Auth", value: chatModel.apiKeyStatus)
                         SafetyStrip(items: safety)
                     }
                 }
@@ -327,36 +272,36 @@ struct InspectorView: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(ForgisTheme.surface(scheme))
+        .background {
+            ForgisSystemCanvas()
+        }
     }
 }
 
 struct ReportPanelView: View {
     let report: ReportSummary
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Report")
-                    .font(ForgisType.sectionTitle(20))
-                    .foregroundStyle(ForgisTheme.textPrimary(scheme))
+                ForgisPageHeader(
+                    title: "Report"
+                )
 
                 SectionCard(title: "Current") {
                     InfoRow(title: "Name", value: report.title)
                     InfoRow(title: "Status", value: report.status)
                     InfoRow(title: "Path", value: report.path, monospaced: true)
                     InfoRow(title: "Schema", value: report.schema, monospaced: true)
-                    ValidationBadge(state: report.validation)
+                    InfoRow(title: "Validation", value: report.validation.rawValue)
                 }
-
-                Button("Open report") {}
-                    .disabled(true)
             }
             .padding(18)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(ForgisTheme.background(scheme))
+        .background {
+            ForgisSystemCanvas()
+        }
     }
 }
 
@@ -388,9 +333,9 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Settings")
-                    .font(ForgisType.sectionTitle(20))
-                    .foregroundStyle(ForgisTheme.textPrimary(scheme))
+                ForgisPageHeader(
+                    title: "Settings"
+                )
 
                 SectionCard(title: "Provider") {
                     SettingsFieldRow(title: "Provider", text: $providerDraft)
@@ -418,16 +363,7 @@ struct SettingsView: View {
                 }
 
                 SectionCard(title: "API key") {
-                    HStack(alignment: .firstTextBaseline, spacing: 10) {
-                        Text("API key")
-                            .font(ForgisType.caption(11, weight: .semibold))
-                            .foregroundStyle(ForgisTheme.textTertiary(scheme))
-                        StatusPill(
-                            text: chatModel.apiKeyStatus,
-                            tone: chatSecretTone(chatModel.secretStatus)
-                        )
-                        Spacer(minLength: 0)
-                    }
+                    InfoRow(title: "Status", value: chatModel.apiKeyStatus)
                     InfoRow(title: "Source", value: chatModel.secretStatus.detail)
                     SecureField("New API key", text: $apiKeyDraft)
                         .textFieldStyle(.roundedBorder)
@@ -456,16 +392,15 @@ struct SettingsView: View {
                     InfoRow(title: "Source", value: run.sourcePath, monospaced: true)
                     InfoRow(title: "Target", value: run.targetPath, monospaced: true)
                     InfoRow(title: "Target subdir", value: run.targetSubdir, monospaced: true)
-                }
-
-                SectionCard(title: "Run mode") {
-                    StatusPill(text: mode.title, tone: .accent)
+                    InfoRow(title: "Mode", value: mode.title)
                 }
             }
             .padding(18)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(ForgisTheme.background(scheme))
+        .background {
+            ForgisSystemCanvas()
+        }
         .onAppear {
             syncDrafts()
             chatModel.refreshSecretStatus()
@@ -484,6 +419,7 @@ struct SettingsView: View {
             } label: {
                 Label("Save", systemImage: "checkmark")
             }
+            .forgisGlassButton(prominent: true)
 
             Button {
                 chatModel.resetConfiguration()
@@ -491,6 +427,7 @@ struct SettingsView: View {
             } label: {
                 Label("Reset", systemImage: "arrow.counterclockwise")
             }
+            .forgisGlassButton()
 
             Button {
                 if saveProviderSettings() {
@@ -505,6 +442,7 @@ struct SettingsView: View {
                 }
             }
             .disabled(chatModel.isSending || chatModel.isTestingConnection)
+            .forgisGlassButton()
         }
         .controlSize(.small)
     }
@@ -519,6 +457,7 @@ struct SettingsView: View {
                 Label("Save key", systemImage: "key.fill")
             }
             .disabled(!requiresAuthenticationDraft || apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .forgisGlassButton()
 
             Button(role: .destructive) {
                 chatModel.deleteStoredAPIKey()
@@ -526,6 +465,7 @@ struct SettingsView: View {
                 Label("Delete key", systemImage: "trash")
             }
             .disabled(!chatModel.hasStoredAPIKey)
+            .forgisGlassButton()
         }
         .controlSize(.small)
     }

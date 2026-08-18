@@ -24,34 +24,42 @@ struct ForgisRootView: View {
 
     var body: some View {
         NavigationSplitView {
-            SidebarView(selection: $section, run: run, mode: runMode)
-                .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 250)
+            SidebarView(selection: $section, mode: runMode)
+                .navigationSplitViewColumnWidth(min: 200, ideal: 236, max: 270)
         } content: {
-            content
-                .navigationSplitViewColumnWidth(min: 360, ideal: 560)
+            ZStack {
+                ForgisSystemCanvas()
+                    .ignoresSafeArea()
+                content
+            }
+            .navigationSplitViewColumnWidth(min: 360, ideal: 580)
         } detail: {
-            InspectorView(
-                activeSection: activeSection,
-                unit: selectedUnit,
-                report: report,
-                safety: MockForgisData.safety,
-                chatModel: chatModel
-            )
-                .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 360)
+            ZStack {
+                ForgisSystemCanvas()
+                    .ignoresSafeArea()
+                InspectorView(
+                    activeSection: activeSection,
+                    unit: selectedUnit,
+                    report: report,
+                    safety: MockForgisData.safety,
+                    chatModel: chatModel
+                )
+            }
+            .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 360)
         }
+        .tint(.accentColor)
         .frame(minWidth: 900, minHeight: 600)
     }
 
     @ViewBuilder private var content: some View {
         switch activeSection {
         case .aiChat:
-            AIChatWorkspaceView(model: chatModel, safety: MockForgisData.safety)
+            AIChatWorkspaceView(model: chatModel)
         case .migration:
             MigrationWorkspaceView(
                 units: units,
                 selectedUnitID: $selectedUnitID,
-                selectedUnit: selectedUnit,
-                safety: MockForgisData.safety
+                selectedUnit: selectedUnit
             )
         case .reports:
             ReportPanelView(report: report)

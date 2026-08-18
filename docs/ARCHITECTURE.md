@@ -1,5 +1,16 @@
 # 架构说明
 
+## 外部依赖优先与禁止功能兜底（Vitemis 强制规则）
+
+本项目继承 `/Users/vita/Vitemis/docs/DEPENDENCY_POLICY.md`。本节是强制约束，不是建议。
+
+- 当用户指定、仓库已经采用，或经许可证、provenance、安全与平台审查可采用的外部依赖提供同等能力时，必须直接集成该依赖的官方 API 或官方扩展点。
+- 不得自行重写同等能力，不得新增替代 adapter、shim、compatibility layer、wrapper、proxy、facade、协议翻译层、parallel backend、preview backend、shadow implementation 或“先兜底、以后再换”的实现。
+- 本地代码只允许保留官方 API 必需的最薄生命周期、类型、权限、配置和 bundle 接线；不得重新实现、解释、扩展或替代依赖的核心能力。
+- exact 依赖因版本、构建、签名、许可证、平台、安全或官方 API 限制无法接入时，必须停止该能力、明确失败、报告 blocker 并请求用户决定；不得静默降级、切换 legacy/另一 provider/backend、使用 cache/mock/简化路径或继续交付不完整替代实现。
+- 现有 fallback、adapter 或重复实现不构成先例，后续不得扩展。安全 fail-closed 与明确要求的旧数据解码/迁移不是功能兜底，但必须保持最窄范围，不能演化成备用产品实现。
+- 只有用户针对 exact 依赖、exact 范围和退出条件作出的新明文决定才能例外。
+
 最近自查日期：2026-07-03
 
 ## 总体架构
@@ -95,7 +106,9 @@ v6.0 建立契约、配置解析、证据目录/状态 helper、mock-first provi
 
 ## UI 与业务逻辑分层
 
-v7.3 Mac UI shell 推荐入口是 `Forgis.xcodeproj`，target/scheme 为 `ForgisMac`；`Package.swift` 仍保留为轻量 SwiftPM build entry。当前 UI 展示 AI Chat、静态/mock migration run、migration units、report、validation、settings 和 safety boundary。AI Chat 可以配置 provider/model/API base/auth，并调用非 streaming OpenAI-compatible Chat Completions；Settings 可保存配置并测试 provider；`--forgis-chat-smoke` 可用本地 mock endpoint 验证编译产物的 HTTP 路径。该层没有文件工具、没有 CLI/run state 接线、不执行真实迁移、不写 source/target、不显示 secret。真实迁移运行逻辑仍由 Python CLI / GitHub Actions 驱动，受 dry-run/real-run gate、`target_subdir`、command allowlist 和 secret redaction 约束。
+v7.3 Mac UI shell 推荐入口是 `Forgis.xcodeproj`，target/scheme 为 `ForgisMac`；`Package.swift` 仍保留为轻量 SwiftPM build entry。当前 UI 展示 AI Chat、静态/mock migration run、migration units、report、validation、settings 和 safety boundary。视觉架构由 `ForgisDesign.swift` 集中提供：`ForgisSystemCanvas` 负责动态 window surface，结构化数据使用 Material + system separator，功能性导航/composer/button 在 macOS 26 使用原生 Liquid Glass 并在 macOS 13–15 回退为 Material/bordered controls；页面标题、正文和技术字段分别使用 serif、system 与 monospaced。普通 assistant 消息直接落在 conversation canvas，user/system/error 才使用有边界表面。完整视觉契约见 `docs/FORGIS_MAC_DESIGN_LANGUAGE.md`。
+
+AI Chat 可以配置 provider/model/API base/auth，并调用非 streaming OpenAI-compatible Chat Completions；Settings 可保存配置并测试 provider；`--forgis-chat-smoke` 可用本地 mock endpoint 验证编译产物的 HTTP 路径。视觉层没有文件工具、没有 CLI/run state 接线、不执行真实迁移、不写 source/target、不显示 secret。真实迁移运行逻辑仍由 Python CLI / GitHub Actions 驱动，受 dry-run/real-run gate、`target_subdir`、command allowlist 和 secret redaction 约束。
 
 ## 平台相关与共享代码边界
 

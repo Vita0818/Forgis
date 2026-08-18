@@ -1,108 +1,263 @@
 #if canImport(SwiftUI)
 import SwiftUI
+#if canImport(AppKit)
+import AppKit
+#endif
+
+// MARK: - Semantic color tokens
 
 enum ForgisTheme {
-    static let accent = Color(red: 0.918, green: 0.568, blue: 0.314)
-    static let accentDeep = Color(red: 0.624, green: 0.314, blue: 0.157)
-    static let accentStroke = Color(red: 0.843, green: 0.467, blue: 0.231)
-    static let success = Color(red: 0.243, green: 0.584, blue: 0.341)
-    static let warning = Color(red: 0.741, green: 0.498, blue: 0.137)
-    static let danger = Color(red: 0.706, green: 0.216, blue: 0.196)
-    static let info = Color(red: 0.278, green: 0.459, blue: 0.702)
+    static let accentDeep = Color.accentColor
+    static let accentStroke = Color.accentColor
+    static let success = Color.green
+    static let warning = Color.orange
+    static let danger = Color.red
+    static let info = Color.blue
 
-    static func background(_ scheme: ColorScheme) -> Color {
-        scheme == .dark
-            ? Color(red: 0.090, green: 0.087, blue: 0.082)
-            : Color(red: 0.979, green: 0.975, blue: 0.968)
+    static func surfaceMuted(_: ColorScheme) -> Color {
+        .secondary.opacity(0.12)
     }
 
-    static func surface(_ scheme: ColorScheme) -> Color {
-        scheme == .dark
-            ? Color(red: 0.135, green: 0.130, blue: 0.121)
-            : Color(red: 1.000, green: 0.996, blue: 0.988)
+    static func accentSoft(_: ColorScheme) -> Color {
+        .accentColor.opacity(0.12)
     }
 
-    static func surfaceElevated(_ scheme: ColorScheme) -> Color {
-        scheme == .dark
-            ? Color(red: 0.172, green: 0.162, blue: 0.148)
-            : Color(red: 1.000, green: 1.000, blue: 0.998)
+    static func separator(_: ColorScheme) -> Color {
+        #if canImport(AppKit)
+        return Color(nsColor: .separatorColor)
+        #else
+        return .secondary.opacity(0.28)
+        #endif
     }
 
-    static func surfaceMuted(_ scheme: ColorScheme) -> Color {
-        scheme == .dark
-            ? Color(red: 0.118, green: 0.112, blue: 0.103)
-            : Color(red: 0.955, green: 0.948, blue: 0.936)
+    static func textPrimary(_: ColorScheme) -> Color {
+        .primary
     }
 
-    static func accentSoft(_ scheme: ColorScheme) -> Color {
-        scheme == .dark
-            ? Color(red: 0.278, green: 0.169, blue: 0.105)
-            : Color(red: 0.996, green: 0.925, blue: 0.866)
+    static func textSecondary(_: ColorScheme) -> Color {
+        .secondary
     }
 
-    static func separator(_ scheme: ColorScheme) -> Color {
-        scheme == .dark
-            ? Color.white.opacity(0.10)
-            : Color.black.opacity(0.10)
-    }
-
-    static func textPrimary(_ scheme: ColorScheme) -> Color {
-        scheme == .dark
-            ? Color(red: 0.918, green: 0.902, blue: 0.871)
-            : Color(red: 0.137, green: 0.125, blue: 0.110)
-    }
-
-    static func textSecondary(_ scheme: ColorScheme) -> Color {
-        scheme == .dark
-            ? Color(red: 0.690, green: 0.663, blue: 0.612)
-            : Color(red: 0.420, green: 0.392, blue: 0.349)
-    }
-
-    static func textTertiary(_ scheme: ColorScheme) -> Color {
-        scheme == .dark
-            ? Color(red: 0.502, green: 0.478, blue: 0.435)
-            : Color(red: 0.612, green: 0.573, blue: 0.510)
+    static func textTertiary(_: ColorScheme) -> Color {
+        .secondary.opacity(0.72)
     }
 }
+
+/// The native macOS window surface. It follows the active appearance,
+/// wallpaper tint, contrast, transparency, and window state.
+struct ForgisSystemCanvas: View {
+    @ViewBuilder var body: some View {
+        if #available(macOS 14.0, *) {
+            Rectangle().fill(.windowBackground)
+        } else {
+            legacyWindowBackground
+        }
+    }
+
+    @ViewBuilder private var legacyWindowBackground: some View {
+        #if canImport(AppKit)
+        ForgisLegacyWindowBackground()
+        #else
+        Rectangle().fill(.background)
+        #endif
+    }
+}
+
+#if canImport(AppKit)
+private struct ForgisLegacyWindowBackground: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .windowBackground
+        view.blendingMode = .behindWindow
+        view.state = .followsWindowActiveState
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
+}
+#endif
+
+// MARK: - Typography
 
 enum ForgisType {
-    static func appTitle(_ size: CGFloat = 25, weight: Font.Weight = .semibold) -> Font {
+    static func appTitle(_ size: CGFloat = 30, weight: Font.Weight = .semibold) -> Font {
         .system(size: size, weight: weight, design: .serif)
     }
 
-    static func sectionTitle(_ size: CGFloat = 18, weight: Font.Weight = .semibold) -> Font {
+    static func largeTitle(_ size: CGFloat = 30, weight: Font.Weight = .semibold) -> Font {
         .system(size: size, weight: weight, design: .serif)
     }
 
-    static func body(_ size: CGFloat = 13, weight: Font.Weight = .regular) -> Font {
+    static func sectionTitle(_ size: CGFloat = 20, weight: Font.Weight = .semibold) -> Font {
+        .system(size: size, weight: weight, design: .serif)
+    }
+
+    static func headline(_ size: CGFloat = 16, weight: Font.Weight = .semibold) -> Font {
         .system(size: size, weight: weight)
     }
 
-    static func caption(_ size: CGFloat = 11, weight: Font.Weight = .medium) -> Font {
+    static func body(_ size: CGFloat = 14, weight: Font.Weight = .regular) -> Font {
         .system(size: size, weight: weight)
     }
 
-    static func mono(_ size: CGFloat = 12, weight: Font.Weight = .regular) -> Font {
+    static func caption(_ size: CGFloat = 12, weight: Font.Weight = .medium) -> Font {
+        .system(size: size, weight: weight)
+    }
+
+    static func mono(_ size: CGFloat = 13, weight: Font.Weight = .regular) -> Font {
         .system(size: size, weight: weight, design: .monospaced)
+    }
+
+    static func chat(_ size: CGFloat = 15, weight: Font.Weight = .regular) -> Font {
+        .system(size: size, weight: weight)
     }
 }
 
-struct ForgisCardModifier: ViewModifier {
+// MARK: - Native surfaces and controls
+
+private struct ForgisContentSurfaceModifier: ViewModifier {
     @Environment(\.colorScheme) private var scheme
+    let cornerRadius: CGFloat
 
     func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         content
-            .background(ForgisTheme.surfaceElevated(scheme), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .background(.regularMaterial, in: shape)
             .overlay {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(ForgisTheme.separator(scheme), lineWidth: 1)
+                shape.stroke(ForgisTheme.separator(scheme), lineWidth: 1)
             }
     }
 }
 
+private struct ForgisLiquidGlassModifier: ViewModifier {
+    @Environment(\.colorScheme) private var scheme
+    let cornerRadius: CGFloat
+    let isInteractive: Bool
+
+    @ViewBuilder func body(content: Content) -> some View {
+        #if compiler(>=6.2)
+        if #available(macOS 26.0, *) {
+            content.glassEffect(
+                isInteractive ? .regular.interactive() : .regular,
+                in: .rect(cornerRadius: cornerRadius)
+            )
+        } else {
+            fallback(content)
+        }
+        #else
+        fallback(content)
+        #endif
+    }
+
+    private func fallback(_ content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        return content
+            .background(.regularMaterial, in: shape)
+            .overlay {
+                shape.stroke(ForgisTheme.separator(scheme), lineWidth: 1)
+            }
+    }
+}
+
+private struct ForgisGlassButtonModifier: ViewModifier {
+    let isProminent: Bool
+
+    @ViewBuilder func body(content: Content) -> some View {
+        #if compiler(>=6.2)
+        if #available(macOS 26.0, *) {
+            if isProminent {
+                content.buttonStyle(.glassProminent)
+            } else {
+                content.buttonStyle(.glass)
+            }
+        } else {
+            fallback(content)
+        }
+        #else
+        fallback(content)
+        #endif
+    }
+
+    @ViewBuilder private func fallback(_ content: Content) -> some View {
+        if isProminent {
+            content.buttonStyle(.borderedProminent)
+        } else {
+            content.buttonStyle(.bordered)
+        }
+    }
+}
+
 extension View {
-    func forgisCard() -> some View {
-        modifier(ForgisCardModifier())
+    func forgisCard(cornerRadius: CGFloat = 16) -> some View {
+        modifier(ForgisContentSurfaceModifier(cornerRadius: cornerRadius))
+    }
+
+    func forgisLiquidGlass(
+        cornerRadius: CGFloat = 16,
+        interactive: Bool = false
+    ) -> some View {
+        modifier(
+            ForgisLiquidGlassModifier(
+                cornerRadius: cornerRadius,
+                isInteractive: interactive
+            )
+        )
+    }
+
+    func forgisGlassButton(prominent: Bool = false) -> some View {
+        modifier(ForgisGlassButtonModifier(isProminent: prominent))
+    }
+
+    @ViewBuilder func forgisCompactIconButton(prominent: Bool = false) -> some View {
+        if #available(macOS 14.0, *) {
+            labelStyle(.iconOnly)
+                .controlSize(.regular)
+                .buttonBorderShape(.circle)
+                .forgisGlassButton(prominent: prominent)
+        } else {
+            labelStyle(.iconOnly)
+                .controlSize(.regular)
+                .forgisGlassButton(prominent: prominent)
+        }
+    }
+
+    func forgisComposerIconLabel() -> some View {
+        font(.system(size: 15, weight: .semibold))
+            .frame(
+                width: ForgisComposerMetrics.iconLabelExtent,
+                height: ForgisComposerMetrics.iconLabelExtent
+            )
+    }
+}
+
+enum ForgisComposerMetrics {
+    static let controlHeight: CGFloat = 40
+    static let iconLabelExtent: CGFloat = 32
+    static let rowSpacing: CGFloat = 8
+    static let inputHorizontalPadding: CGFloat = 14
+    static let inputVerticalPadding: CGFloat = 9
+    static let inputCornerRadius: CGFloat = controlHeight / 2
+}
+
+struct ForgisPageHeader: View {
+    let title: String
+    var subtitle: String?
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(ForgisType.largeTitle())
+                .foregroundStyle(ForgisTheme.textPrimary(scheme))
+            if let subtitle {
+                Text(subtitle)
+                    .font(ForgisType.caption(13))
+                    .foregroundStyle(ForgisTheme.textSecondary(scheme))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 #endif

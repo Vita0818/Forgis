@@ -1,6 +1,6 @@
 # 项目地图
 
-最近自查日期：2026-07-03
+最近自查日期：2026-07-26
 
 ## 顶层目录树
 
@@ -36,6 +36,7 @@
 │   ├── ARCHITECTURE.md
 │   ├── CURRENT_STATE.md
 │   ├── DO_NOT_BREAK.md
+│   ├── FORGIS_MAC_DESIGN_LANGUAGE.md
 │   ├── PROJECT_MAP.md
 │   ├── QWEN_VISUAL_MODE.md
 │   └── TESTING.md
@@ -67,7 +68,7 @@
 ## 关键目录职责
 
 - `agent/`：Forgis 核心 Python 和 shell 运行时。包括配置解析、OpenAI-compatible client、DeepSeek compatibility shim、本地 CLI、受控文件工具、tool loop、staged translation、guardrails、报告、PR body 和 GitHub Actions 辅助脚本。
-- `Apps/ForgisMac/Sources/`：v7.3 Mac SwiftUI shell。当前展示 AI Chat、静态/mock migration run、migration units、report、validation、settings 和 safety boundary。AI Chat 可通过 Keychain key、env fallback 或无鉴权本地模式调用非 streaming OpenAI-compatible Chat Completions；Settings 提供手动 provider test；`--forgis-chat-smoke` 提供本地 mock endpoint smoke。仍不执行迁移、不写 source/target、不显示 secret。
+- `Apps/ForgisMac/Sources/`：v7.3 Mac SwiftUI shell。当前展示 AI Chat、静态/mock migration run、migration units、report、validation、settings 和 safety boundary；视觉层使用 system semantic colors、system canvas、Material content surfaces、functional Liquid Glass/fallback、SF Symbols 与 serif/system/monospaced 字体分层。AI Chat 可通过 Keychain key、env fallback 或无鉴权本地模式调用非 streaming OpenAI-compatible Chat Completions；Settings 提供手动 provider test；`--forgis-chat-smoke` 提供本地 mock endpoint smoke。仍不执行迁移、不写 source/target、不显示 secret。
 - `Forgis.xcodeproj/`：v7.2+ Xcode project materialization。推荐用 `open Forgis.xcodeproj` 打开；命令行构建为 `xcodebuild -project Forgis.xcodeproj -scheme ForgisMac -configuration Debug build`。
 - `.github/workflows/`：CI 与主运行工作流。`migrate.yml` 是真实 Forgis 运行链路，`validate-forgis.yml` 是本仓库脚本验证链路。
 - `skills/`：仓库本地可注入的短技能文档。`agent/skill_loader.py` 只允许从仓库本地 `skills/*.md` 读取安全 slug。
@@ -84,17 +85,18 @@
 - `Package.swift`：v7.2 SwiftPM manifest，包含 `ForgisMac` macOS executable target，不引入第三方依赖。
 - `Forgis.xcodeproj/project.pbxproj`：Xcode project，包含 macOS app target `ForgisMac`，bundle id `com.Vita0818.ForgisMac`，deployment target macOS 13.0，generated Info.plist，无 entitlements。
 - `Forgis.xcodeproj/xcshareddata/xcschemes/ForgisMac.xcscheme`：shared scheme，使 Xcode 和 `xcodebuild -scheme ForgisMac` 能直接找到 Mac app target。
-- `Apps/ForgisMac/Sources/ForgisMacApp.swift`：SwiftUI `@main` 入口和 `WindowGroup`；启动时先检查 `--forgis-chat-smoke`，命中时执行 bounded Chat smoke 后退出。
-- `Apps/ForgisMac/Sources/ForgisRootView.swift`：三栏主界面组合，左栏 navigation，中栏 AI Chat / migration / report / settings，右栏 section-aware inspector。
-- `Apps/ForgisMac/Sources/ForgisDesign.swift`：淡橙色主题 token、字体 token 和轻量 card modifier。
+- `Apps/ForgisMac/Sources/ForgisMacApp.swift`：SwiftUI `@main` 入口和 `WindowGroup`，默认窗口 1100×760；启动时先检查 `--forgis-chat-smoke`，命中时执行 bounded Chat smoke 后退出。
+- `Apps/ForgisMac/Sources/ForgisRootView.swift`：三栏主界面组合，左栏 navigation，中栏 AI Chat / migration / report / settings，右栏 section-aware inspector；content/detail 共享动态 system canvas。
+- `Apps/ForgisMac/Sources/ForgisDesign.swift`：system semantic color、system canvas、serif/system/monospaced 字体、Material card、Liquid Glass/bordered fallback、40pt composer metrics 和 page header。
 - `Apps/ForgisMac/Sources/ForgisModels.swift`：UI mock data、section、migration unit、report、run mode、validation/status/risk 枚举。
-- `Apps/ForgisMac/Sources/ForgisComponents.swift`：`StatusPill`、`SafetyStrip`、`ValidationBadge`、`PathLabel`、`InfoRow` 等小组件。
+- `Apps/ForgisMac/Sources/ForgisComponents.swift`：`StatusPill`、单行 `SafetyStrip`、`PathLabel`、`InfoRow` 等小组件。
 - `Apps/ForgisMac/Sources/ForgisChatModels.swift`：Mac AI Chat 的 message/config/view model。发送前从 Keychain 或配置 env 名解析 API key，也支持显式关闭鉴权。
 - `Apps/ForgisMac/Sources/ForgisChatStorage.swift`：Mac AI Chat 的 UserDefaults 偏好和 Keychain generic-password secret store。UserDefaults 只存 provider/model/API base/env 名/auth/timeout，不存 API key。
 - `Apps/ForgisMac/Sources/ForgisChatService.swift`：Swift 非 streaming OpenAI-compatible Chat Completions client，负责 endpoint 拼接、request/response shape、HTTP error 脱敏。
 - `Apps/ForgisMac/Sources/ForgisChatSmoke.swift`：Mac AI Chat 的本地 smoke runner，仅由 `--forgis-chat-smoke` 触发；默认访问 localhost mock endpoint，无 raw API key 参数，不写 source/target。
-- `Apps/ForgisMac/Sources/ForgisChatViews.swift`：AI Chat header、message bubble、composer 和 chat inspector。
-- `Apps/ForgisMac/Sources/ForgisViews.swift`：sidebar、migration unit list/detail、section-aware inspector、report panel 和 settings 页面。
+- `Apps/ForgisMac/Sources/ForgisChatViews.swift`：仅显示 model 的 AI Chat header、user/system Material message、无卡片 assistant message、无 counters 的单排 40pt composer 和精简 chat inspector。
+- `Apps/ForgisMac/Sources/ForgisViews.swift`：Glass selection sidebar、无 Current Run 卡的一行 run mode、单主状态 migration list/detail、合并后的 section-aware Material inspector、report panel 和 settings 页面。
+- `docs/FORGIS_MAC_DESIGN_LANGUAGE.md`：ForgisMac 当前视觉层级、字体、表面、组件、兼容 fallback 与安全边界契约。
 - `agent/forgis_config.py`：解析 `FORGIS_CONFIG.yml`、支持字段、默认值、路径安全、真实运行 gate、`ResolvedConfig.env()` 输出。
 - `agent/forge.py`：旧控制器入口，校验 source/target 目录并输出运行摘要；保留既有参数形式。
 - `agent/cli.py`：v7.1 本地 CLI 入口，支持 `help`、`doctor`、`smoke`、`init`、`status`、`run --config ... --unit ...`、`resume`，并继续兼容旧式 `run --source ... --target ... --target-repo ... [--config ...] [--dry-run]`。

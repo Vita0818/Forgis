@@ -3,8 +3,6 @@ import SwiftUI
 
 struct AIChatWorkspaceView: View {
     @ObservedObject var model: ForgisChatViewModel
-    let safety: [SafetyItem]
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         GeometryReader { proxy in
@@ -21,70 +19,21 @@ struct AIChatWorkspaceView: View {
                     .padding(.bottom, 18)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(ForgisTheme.background(scheme))
+            .background {
+                ForgisSystemCanvas()
+            }
         }
     }
 
     private func header(layout: ForgisChatLayout) -> some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .top, spacing: 16) {
-                titleBlock
-                Spacer(minLength: 12)
-                providerCard(layout: layout)
-            }
-
-            VStack(alignment: .leading, spacing: 12) {
-                titleBlock
-                providerCard(layout: layout)
-            }
-        }
+        ForgisPageHeader(
+            title: "AI Chat",
+            subtitle: model.configuration.model
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, layout.horizontalPadding)
         .padding(.top, 18)
         .padding(.bottom, 12)
-    }
-
-    private var titleBlock: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("AI Chat")
-                .font(ForgisType.sectionTitle(20))
-                .foregroundStyle(ForgisTheme.textPrimary(scheme))
-            Text("\(model.configuration.model) · \(model.configuration.hostLabel)")
-                .font(ForgisType.caption(12, weight: .medium))
-                .foregroundStyle(ForgisTheme.textSecondary(scheme))
-                .lineLimit(1)
-                .truncationMode(.middle)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func providerCard(layout: ForgisChatLayout) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "cpu")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(ForgisTheme.accentDeep)
-                .frame(width: 18)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(model.configuration.provider)
-                    .font(ForgisType.body(12, weight: .semibold))
-                    .foregroundStyle(ForgisTheme.textPrimary(scheme))
-                    .lineLimit(1)
-                if !layout.isCompact {
-                    Text(model.configuration.apiKeyEnvName)
-                        .font(ForgisType.mono(11))
-                        .foregroundStyle(ForgisTheme.textSecondary(scheme))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-            }
-            StatusPill(
-                text: model.apiKeyStatus,
-                tone: chatSecretTone(model.secretStatus)
-            )
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .frame(minWidth: layout.isCompact ? 0 : 230, alignment: .leading)
-        .forgisCard()
     }
 
     @ViewBuilder private func messages(layout: ForgisChatLayout) -> some View {
@@ -93,7 +42,7 @@ struct AIChatWorkspaceView: View {
         } else {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(spacing: 12) {
+                    LazyVStack(spacing: 16) {
                         ForEach(model.messages) { message in
                             ChatMessageBubble(
                                 message: message,
@@ -120,25 +69,13 @@ struct AIChatWorkspaceView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 12) {
+        VStack {
             Spacer()
             Image(systemName: "sparkles")
-                .font(.system(size: 30, weight: .semibold))
+                .font(.system(size: 28, weight: .semibold))
                 .foregroundStyle(ForgisTheme.accentDeep)
-                .frame(width: 74, height: 74)
-                .background(ForgisTheme.accentSoft(scheme), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(ForgisTheme.accentStroke.opacity(0.45), lineWidth: 1)
-                }
-            Text("Forgis")
-                .font(ForgisType.appTitle(24))
-                .foregroundStyle(ForgisTheme.textPrimary(scheme))
-            Text("No messages yet.")
-                .font(ForgisType.body(13))
-                .foregroundStyle(ForgisTheme.textSecondary(scheme))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 20)
+                .frame(width: 64, height: 64)
+                .accessibilityLabel("Start a conversation")
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -146,11 +83,21 @@ struct AIChatWorkspaceView: View {
 
     @ViewBuilder private func errorStrip(layout: ForgisChatLayout) -> some View {
         if let errorText = model.errorText {
-            Text(errorText)
-                .font(ForgisType.caption(12))
-                .foregroundStyle(ForgisTheme.danger)
-                .lineLimit(2)
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(ForgisTheme.danger)
+                Text(errorText)
+                    .font(ForgisType.caption(12))
+                    .foregroundStyle(ForgisTheme.danger)
+                    .lineLimit(2)
+            }
+                .padding(10)
                 .frame(maxWidth: layout.contentMaxWidth, alignment: .leading)
+                .forgisCard(cornerRadius: 10)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(ForgisTheme.danger.opacity(0.36), lineWidth: 1)
+                }
                 .padding(.horizontal, layout.horizontalPadding)
         }
     }
@@ -166,12 +113,8 @@ struct ChatMessageBubble: View {
         message.role == .user
     }
 
-    private var roleLabel: String {
-        switch message.role {
-        case .system: return "System"
-        case .user: return "You"
-        case .assistant: return "Forgis"
-        }
+    private var hasSurface: Bool {
+        message.role != .assistant
     }
 
     private var displayText: String {
@@ -185,19 +128,26 @@ struct ChatMessageBubble: View {
         HStack(spacing: 0) {
             if isUser { Spacer(minLength: gutter) }
             VStack(alignment: .leading, spacing: 6) {
-                Text(roleLabel.uppercased())
-                    .font(ForgisType.caption(10, weight: .semibold))
-                    .foregroundStyle(isUser ? ForgisTheme.accentDeep : ForgisTheme.textTertiary(scheme))
-                    .lineLimit(1)
+                if message.role == .system {
+                    Text("System")
+                        .font(ForgisType.caption(10, weight: .semibold))
+                        .foregroundStyle(ForgisTheme.textTertiary(scheme))
+                        .tracking(0.4)
+                        .lineLimit(1)
+                }
                 Text(displayText)
-                    .font(ForgisType.body(13))
+                    .font(ForgisType.chat())
                     .foregroundStyle(ForgisTheme.textPrimary(scheme))
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(bubbleBackground)
+            .padding(.horizontal, hasSurface ? 14 : 0)
+            .padding(.vertical, hasSurface ? 10 : 8)
+            .background {
+                if hasSurface {
+                    bubbleBackground
+                }
+            }
             .frame(maxWidth: maxWidth, alignment: .leading)
             if !isUser { Spacer(minLength: gutter) }
         }
@@ -206,11 +156,11 @@ struct ChatMessageBubble: View {
     private var bubbleBackground: some View {
         let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
         return shape
-            .fill(isUser ? ForgisTheme.accentSoft(scheme) : ForgisTheme.surfaceElevated(scheme))
+            .fill(.regularMaterial)
             .overlay {
                 shape.stroke(
                     isUser
-                        ? ForgisTheme.accentStroke.opacity(scheme == .dark ? 0.50 : 0.38)
+                        ? ForgisTheme.accentStroke.opacity(0.72)
                         : ForgisTheme.separator(scheme),
                     lineWidth: 1
                 )
@@ -224,61 +174,60 @@ struct ChatComposerView: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 10) {
-            TextField("Message Forgis...", text: $model.input, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(ForgisType.body(14))
-                .foregroundStyle(ForgisTheme.textPrimary(scheme))
-                .lineLimit(1...6)
-                .focused($focused)
-                .disabled(model.isSending)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background {
-                    Capsule(style: .continuous)
-                        .fill(ForgisTheme.surfaceElevated(scheme))
-                }
-                .overlay {
-                    Capsule(style: .continuous)
-                        .stroke(ForgisTheme.separator(scheme), lineWidth: 1)
-                }
-                .onSubmit {
-                    model.send()
-                }
-
+        HStack(alignment: .bottom, spacing: ForgisComposerMetrics.rowSpacing) {
             Button {
                 model.clear()
             } label: {
-                Image(systemName: "xmark.circle")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(model.messages.isEmpty || model.isSending ? ForgisTheme.textTertiary(scheme) : ForgisTheme.textSecondary(scheme))
-                    .frame(width: 36, height: 36)
+                Label("Clear chat", systemImage: "trash")
+                    .forgisComposerIconLabel()
             }
-            .buttonStyle(.plain)
+            .forgisCompactIconButton()
             .disabled(model.messages.isEmpty || model.isSending)
             .help("Clear chat")
+
+            inputControl
 
             Button {
                 model.send()
             } label: {
-                ZStack {
-                    Circle()
-                        .fill(model.canSend ? ForgisTheme.accent : ForgisTheme.surfaceMuted(scheme))
-                    if model.isSending {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(model.canSend ? .white : ForgisTheme.textTertiary(scheme))
+                Label("Send", systemImage: "arrow.up")
+                    .forgisComposerIconLabel()
+                    .opacity(model.isSending ? 0 : 1)
+                    .overlay {
+                        if model.isSending {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
                     }
-                }
-                .frame(width: 40, height: 40)
             }
-            .buttonStyle(.plain)
+            .forgisCompactIconButton(prominent: true)
             .disabled(!model.canSend)
             .help("Send")
         }
+    }
+
+    private var inputControl: some View {
+        TextField("Message Forgis...", text: $model.input, axis: .vertical)
+            .textFieldStyle(.plain)
+            .font(ForgisType.chat())
+            .foregroundStyle(ForgisTheme.textPrimary(scheme))
+            .lineLimit(1...6)
+            .focused($focused)
+            .disabled(model.isSending)
+            .padding(.horizontal, ForgisComposerMetrics.inputHorizontalPadding)
+            .padding(.vertical, ForgisComposerMetrics.inputVerticalPadding)
+            .frame(
+                minHeight: ForgisComposerMetrics.controlHeight,
+                alignment: .center
+            )
+            .forgisLiquidGlass(
+                cornerRadius: ForgisComposerMetrics.inputCornerRadius,
+                interactive: true
+            )
+            .onSubmit {
+                guard model.canSend else { return }
+                model.send()
+            }
     }
 }
 
@@ -287,34 +236,11 @@ struct ChatInspectorView: View {
     let safety: [SafetyItem]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            SectionCard(title: "Chat") {
-                InfoRow(title: "Status", value: model.statusText)
-                InfoRow(title: "Messages", value: "\(model.messages.count)")
-            }
-
-            SectionCard(title: "Provider") {
-                InfoRow(title: "Provider", value: model.configuration.provider)
+        SectionCard(title: "Connection") {
                 InfoRow(title: "Model", value: model.configuration.model, monospaced: true)
                 InfoRow(title: "Endpoint", value: model.configuration.apiBase, monospaced: true)
-                InfoRow(title: "Auth", value: model.configuration.requiresAuthentication ? "required" : "disabled")
-                InfoRow(title: "API key env", value: model.configuration.apiKeyEnvName, monospaced: true)
-                HStack(spacing: 10) {
-                    Text("API key")
-                        .font(ForgisType.caption(11, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    StatusPill(
-                        text: model.apiKeyStatus,
-                        tone: chatSecretTone(model.secretStatus)
-                    )
-                    Spacer(minLength: 0)
-                }
-                InfoRow(title: "Secret source", value: model.secretStatus.detail, monospaced: model.secretStatus == .keychainSet)
-            }
-
-            SectionCard(title: "Safety") {
+                InfoRow(title: "Auth", value: model.apiKeyStatus)
                 SafetyStrip(items: safety)
-            }
         }
     }
 }
@@ -322,27 +248,27 @@ struct ChatInspectorView: View {
 private struct ForgisChatLayout {
     let width: CGFloat
 
-    var isCompact: Bool {
-        width < 700
-    }
-
     var horizontalPadding: CGFloat {
-        if width < 500 { return 14 }
-        if width < 760 { return 20 }
-        return 24
+        if width < 460 { return 10 }
+        if width < 620 { return 14 }
+        if width < 820 { return 20 }
+        return 30
     }
 
     var contentMaxWidth: CGFloat {
-        900
+        940
     }
 
     var messageGutter: CGFloat {
-        width < 560 ? 14 : 42
+        if width < 460 { return 0 }
+        if width < 620 { return 8 }
+        if width < 820 { return 24 }
+        return 48
     }
 
     var messageMaxWidth: CGFloat {
         let available = width - (horizontalPadding * 2) - (messageGutter * 2)
-        return min(620, max(250, available))
+        return min(640, max(240, available))
     }
 }
 #endif

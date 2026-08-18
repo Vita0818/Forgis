@@ -1,5 +1,15 @@
 # 构建与测试说明
 
+## 外部依赖与禁止兜底验证（Vitemis 强制规则）
+
+本项目继承 `/Users/vita/Vitemis/docs/DEPENDENCY_POLICY.md`。涉及外部能力的变更必须验证：
+
+- exact 外部依赖可用时只调用其官方 API/扩展点，不调用第一方重复实现。
+- 依赖缺失、版本不兼容或构建/签名/许可证/平台/安全条件不成立时，产生明确、可诊断失败并停止该能力。
+- 失败路径不会切换到 legacy、另一 provider/backend、adapter/shim、cache、mock、简化实现或不完整路径。
+- 测试 double 只存在于测试 target，不进入 production selection 或 runtime fallback。
+- Review 检查新增 wrapper/adapter/facade 是否仅为官方 API 必需的最薄接线；发现核心能力复制、第二实现或静默降级即判定失败。
+
 最近自查日期：2026-07-03
 
 ## 环境要求
@@ -198,6 +208,7 @@ bash -n agent/create_pr.sh
 - Dry run：`dry_run=true` 时不调用模型、不写目标仓库、不 push/PR。
 - OpenAI-compatible model config：`agent_backend` alias、`api_base` / `base_url`、`model`、`request_timeout_seconds`、`model_env`、错误脱敏和 DeepSeek shim。
 - Mac AI Chat：缺少 Keychain/env key 且 auth required 时不发请求并显示 blocker；Keychain/env key 可解析时只调用非 streaming Chat Completions；Settings Test 复用同一条有界请求路径且不追加聊天消息；auth disabled 时允许本地无鉴权 endpoint；`--forgis-chat-smoke` 可对 localhost mock endpoint 返回 `FORGIS_SMOKE_OK`；provider/HTTP 错误脱敏且有界；不写 source/target、report、FORGIS_CONFIG、UserDefaults secret 或 fixture。
+- ForgisMac 视觉：AI Chat / Migration / Reports / Settings 主导航可切换；system canvas 与 Material 层级连续；sidebar 只有品牌、导航、一行 run mode 和 Settings，不出现副标或 Current Run 卡；Chat 不出现重复 provider 卡或消息/安全/鉴权 counters，assistant 无卡片、user/system/error 有边界，composer 为单排 40pt 控件；Migration 列表每项只保留一个主状态，risk/validation 在详情中使用普通信息行；安全健康态只显示一行文字，Inspector 每节合并为 1–2 张卡；长 path/model/endpoint/schema 在中栏和 Inspector 中单行截断；macOS 26 Glass 与 macOS 13–15 fallback 均可编译。运行态视觉检查不得发送真实 Chat 请求或执行 migration。
 - Local v7.1 flow：`init` 只写显式 output，`status` 不泄露 secret，`run --unit` 不自动 all-units，dry-run 不调用 API/不写 target，`resume` 默认不跳过 blocked/failed unit。
 - Validation commands：新配置使用 argv mapping 并复用 allowlist；旧 shell string 只兼容 warning；新增测试覆盖 shell bypass 不被 argv 接受。
 - Tool sandbox：读 source/target、写 `target_subdir`、拒绝 source 写入、拒绝 target root 写入、拒绝 symlink 和 secret-like 路径。
