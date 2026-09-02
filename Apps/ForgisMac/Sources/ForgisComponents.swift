@@ -154,12 +154,16 @@ struct SectionCard<Content: View>: View {
     }
 }
 
-func statusTone(_ status: UnitStatus) -> PillTone {
+func runtimeStatusTone(_ status: ForgisRuntimeStatus) -> PillTone {
     switch status {
-    case .pending: return .neutral
+    case .unconfigured: return .neutral
+    case .ready: return .accent
+    case .starting: return .info
     case .running: return .info
     case .completed: return .success
     case .failed: return .danger
+    case .stopping: return .warning
+    case .skipped: return .neutral
     }
 }
 

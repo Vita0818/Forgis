@@ -31,7 +31,7 @@
 
 如果文档与源码、工程配置、测试或脚本冲突，必须以当前源码和配置为准，并在最终报告中明确指出冲突位置和采用源码为准的原因。
 
-> 已知冲突：`RELEASE_NOTES.md` 冻结在 v5.0（`forgis.run_report.v5.0`），但源码已到 v7.2，`CURRENT_STATE.md`/`ARCHITECTURE.md`/`DO_NOT_BREAK.md` 记录 run report schema 实为 `v6.0`（含 visual 字段）。以源码为准。
+> 已知冲突：`RELEASE_NOTES.md`冻结在v5.0、legacy Python renderer/fixtures为`forgis.run_report.v6.0`；当前Swift/Intatis内核写`forgis.run_report.v7.0`。以当前production源码为准。
 
 ## 工作目录检查
 
@@ -51,7 +51,7 @@ git status --short
 
 ## 修改边界
 
-本仓库是 Python CLI/Agent 本地代码迁移助手（含受控文件工具运行时）+ v7.2 `ForgisMac` SwiftUI 壳。主体代码在 `agent/`，行为大量由 `tests/test_forgis_config.py`（~6000 行）覆盖。
+本仓库是以Intatis公开`IntatisCodexRuntime` v1为唯一production Agent内核的本地代码迁移助手，外加v7.3 `ForgisMac` SwiftUI壳。`forgis-runtime` Swift executable直接拥有Codex App Server session/turn/events/approval生命周期；Python `agent/`只保留配置、migration plan、guardrail、validation、report/PR控制面。`agent.cli run`以`os.execve`替换进程进入Swift内核，旧`tool_loop`在无显式测试client注入时不可用，不得成为fallback。ForgisMac最低平台为macOS 26，并在build product中按Intatis官方布局嵌入validated exact runtime root；Intatis源码仓库全程只读。
 
 未来常规任务可以按用户要求修改业务源码；但在只要求项目自查或文档更新的任务中，只允许修改：
 
@@ -87,23 +87,23 @@ git status --short
 
 修改前至少确认：
 
-- 入口：`.github/workflows/migrate.yml`（GH Actions，输入仅 `target_repo`）、`agent/cli.py`（v7.1 本地 CLI：`help`/`doctor`/`smoke`/`init`/`status`/`run --unit`/`resume`）、`Apps/ForgisMac/Sources/ForgisMacApp.swift`（v7.2 Mac `@main`，mock/fixture）。
+- 入口：`.github/workflows/migrate.yml`（xcode-27，固定Intatis commit并直接运行`forgis-runtime`）、`agent/cli.py`（配置/control-plane；`run`只做execve handoff）、`Apps/ForgisRuntimeCLI/Sources/ForgisRuntimeCLI.swift`（唯一Agent kernel CLI）、`Apps/ForgisMac/Sources/ForgisMacApp.swift`（v7.3 Mac `@main`）。
+- Intatis内核边界：`Package.swift`的`ForgisRuntimeCLI`直接链接`IntatisCore` / `IntatisProtocol` / `IntatisProviders` / `IntatisCodexRuntime`；它构造`ResponsesRuntimeRoute`、`CodexRuntimeConfiguration`和`CodexAppServerSession`。不得修改/复制Intatis源码，不得重写App Server协议，不得添加Python/Chat/MCP/另一provider fallback。
 - 配置解析：`agent/forgis_config.py`（`ResolvedConfig`/`VisualValidationConfig`/`StagedTranslationConfig`，支持字段、默认值、路径校验、真实运行 gate）。
-- 默认 tool loop：`agent/forge.py` → `agent/resolve_config.py` → `agent/tool_loop.py`（`ToolLoopResult`）→ `agent/file_tools.py`（`FileToolSandbox`）→ `agent/guardrails.py` + `agent/validate_target_output.py` → `agent/run_report.py` + `agent/migration_plan_store.py`。
-- 模型客户端：`agent/openai_compatible_client.py`（非流式 Chat Completions）；`agent/deepseek_agent.py`（DeepSeek shim，默认 model `deepseek-v4-pro`）。
-- 工具沙箱：`agent/file_tools.py`（list/tree/read/file_exists/search/git_status/git_diff/mkdir/write/append/delete/edit/apply_patch/run_command/run_build/run_tests，虚拟路径，拒绝对绝对路径/`..`/`.git`/secret-like/symlink/source 写入/target-root 写入/workflow 写入）。
+- production Agent链：config/control-plane → `forgis-runtime` → `CodexAppServerSession` → exact `codex app-server --stdio`；`target_subdir`是唯一workspace-write根，source与target其余部分在写沙箱外。旧`agent/tool_loop.py`、`deepseek_agent.py`、`file_tools.py`只保留legacy测试与历史解码，不得从production入口调用。
+- Mac产品界面直接持有`CodexAppServerSession`并投影原生message/tool/approval/usage事件；旧独立Chat Completions UI/client/smoke与`MockForgisData`已删除。UI不得添加另一provider、HTTP client或runtime fallback。
 - 安全校验：`agent/guardrails.py`（snapshot-readonly/check-readonly/check-secret-leaks）、`agent/validate_target_output.py`、`agent/model_env.py`（env 名映射，不存真实 secret）。
 - 真实运行 gate：`dry_run=false` + `run_agent=true` + `confirm_real_run=true` 三者同时满足。
-- v6.0 视觉模式闭环：`docs/QWEN_VISUAL_MODE.md`、`skills/qwen_visual_mode.md`、`agent/visual_evidence.py`、`agent/qwen_vision.py`、`agent/file_tools.py` 的 `list_visual_references`/三个 inspect/compare 工具、`agent/runtime_controller.py` 的视觉状态/gate、`agent/run_report.py`/`agent/pr_body.py` 的视觉摘要。当前已支持 reference-guided migration、受控视觉工具、mock-first Qwen provider、显式 env 下真实 Qwen HTTP transport、report/PR 字段和防假验收 gate；仍不含自动截图、artifact 上传、多 provider 或任意 shell。
+- v6.0视觉模式源码/fixtures仍保留legacy回归；production Codex v1尚无Forgis Qwen official dynamic-tool接线，因此显式required视觉任务fail closed，不得调用旧Python视觉工具。
 - 迁移单元与计划：`agent/migration_units.py`（`MigrationUnit`/`MigrationPlan`）、`agent/migration_state.py`、`agent/plan_audit.py`、`agent/staged_translation.py`、`agent/source_inventory.py`（`SourceUnit`）。
-- 报告 schema：`forgis.run_report.v6.0`（含 `visual_validation` block）、`forgis.migration_plan.v5.0`（写 v5.0，读 v4.8/v3.9/v3.8/v3.7）。
-- 测试基准：`tests/test_forgis_config.py`（~6000 行，134 tests）+ `tests/test_openai_compatible_client.py` + `tests/test_v7_*.py`。修改前先读相关测试。
+- 报告 schema：CLI新内核写`forgis.run_report.v7.0`与`forgis.codex_runtime_result.v1`；Mac UI也写同一v7 report，并将UI projection与报告保存在Forgis派生的owner-only Application Support runtime root。migration plan仍写`forgis.migration_plan.v5.0`并兼容旧读版本。
+- 测试基准：172 tests，含`tests/test_codex_runtime_cutover.py`的exact version/derivation/offline session smoke；所有runtime smoke必须`network_requests=0`，不得调用真实provider。
 
 ## 文档索引
 
 - `docs/PROJECT_MAP.md`：目录地图、关键文件、入口、配置、测试、资源和生成物说明。
 - `docs/ARCHITECTURE.md`：总体架构、模块边界、数据流、状态流、安全机制和风险。
-- `docs/CURRENT_STATE.md`：当前真实状态（v7.2/v7.1/v6.0）、已有能力、未完成项、风险、工作区状态。
+- `docs/CURRENT_STATE.md`：当前Swift/Intatis内核、legacy兼容面、未完成项、风险和工作区状态。
 - `docs/TESTING.md`：环境、依赖、构建、测试、lint/format、手动验证矩阵。
 - `docs/DO_NOT_BREAK.md`：不可破坏的格式、路径、协议、安全边界和回归要求。
 - `docs/NEXT_TARGET.md`：临时下一目标记录；目标完成或不再有效后删除。

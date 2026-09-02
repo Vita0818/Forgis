@@ -522,29 +522,29 @@ class ForgisConfigTests(unittest.TestCase):
             "OPENROUTER_API_KEY",
             "GEMINI_API_KEY",
             "GOOGLE_API_KEY",
-            "QWEN_API_KEY",
-            "QWEN_API_BASE",
-            "QWEN_VISION_MODEL",
         ):
             self.assertIn(secret_name, workflow)
+        self.assertIn("runs-on: xcode-27", workflow)
+        self.assertIn("Run Intatis Codex kernel", workflow)
+        self.assertNotIn("python forgis/agent/tool_loop.py", workflow)
 
     def test_workflow_gates_snapshot_dependent_steps_after_prerequisites(self) -> None:
         workflow = (REPO_ROOT / ".github/workflows/migrate.yml").read_text(encoding="utf-8")
 
-        validate_block = self.workflow_step_block(workflow, "Validate DeepSeek target changes")
+        validate_block = self.workflow_step_block(workflow, "Validate Codex target changes")
         self.assertNotIn("always()", validate_block)
         self.assertIn("steps.snapshot_target_output.outcome == 'success'", validate_block)
-        self.assertIn("steps.tool_loop.outcome == 'success'", validate_block)
+        self.assertIn("steps.codex_runtime.outcome == 'success'", validate_block)
 
         readonly_block = self.workflow_step_block(workflow, "Verify read-only target inputs")
         self.assertNotIn("always()", readonly_block)
         self.assertIn("steps.snapshot_readonly.outcome == 'success'", readonly_block)
-        self.assertIn("steps.tool_loop.outcome == 'success'", readonly_block)
+        self.assertIn("steps.codex_runtime.outcome == 'success'", readonly_block)
 
         target_scope_block = self.workflow_step_block(workflow, "Verify target writable scope")
         self.assertNotIn("always()", target_scope_block)
         self.assertIn("steps.run_controller.outcome == 'success'", target_scope_block)
-        self.assertIn("steps.tool_loop.outcome == 'success'", target_scope_block)
+        self.assertIn("steps.codex_runtime.outcome == 'success'", target_scope_block)
 
         log_block = self.workflow_step_block(workflow, "Append long-term Forgis log")
         self.assertNotIn("always()", log_block)
@@ -605,7 +605,7 @@ class ForgisConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as dirname:
             target = Path(dirname)
             self.write_config(target, extra="agent_backend: aider\n")
-            with self.assertRaisesRegex(ValueError, "deepseek"):
+            with self.assertRaisesRegex(ValueError, "codex-app-server"):
                 resolve_config(target_root=target, target_repo="owner/target-repo")
 
     def test_forgis_config_is_required_and_target_repo_is_workflow_only(self) -> None:
@@ -630,7 +630,7 @@ class ForgisConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Unsupported"):
                 resolve_config(target_root=target, target_repo="owner/target-repo")
 
-    def test_default_model_uses_deepseek_api_model_id(self) -> None:
+    def test_default_model_uses_codex_runtime_model_id(self) -> None:
         with tempfile.TemporaryDirectory() as dirname:
             target = Path(dirname)
             target.mkdir(parents=True, exist_ok=True)
@@ -646,7 +646,9 @@ class ForgisConfigTests(unittest.TestCase):
             (target / "FORGIS_TASK.md").write_text("# Task\n", encoding="utf-8")
 
             resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
-            self.assertEqual(resolved.model, "deepseek-v4-pro")
+            self.assertEqual(resolved.model, "forgis-migration-model")
+            self.assertEqual(resolved.agent_backend, "codex-app-server")
+            self.assertEqual(resolved.api_format, "responses")
 
     def test_strict_mode_can_be_enabled_from_config(self) -> None:
         with tempfile.TemporaryDirectory() as dirname:
@@ -656,13 +658,13 @@ class ForgisConfigTests(unittest.TestCase):
             self.assertTrue(resolved.strict_mode)
             self.assertEqual(resolved.env()["STRICT_MODE"], "true")
 
-    def test_execution_mode_defaults_to_tool_loop_and_staged_defaults_parse(self) -> None:
+    def test_execution_mode_defaults_to_codex_and_staged_metadata_parses(self) -> None:
         with tempfile.TemporaryDirectory() as dirname:
             target = Path(dirname)
             self.write_config(target)
             resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
-            self.assertEqual(resolved.execution_mode, "tool_loop")
-            self.assertEqual(resolved.env()["EXECUTION_MODE"], "tool_loop")
+            self.assertEqual(resolved.execution_mode, "codex")
+            self.assertEqual(resolved.env()["EXECUTION_MODE"], "codex")
 
             self.write_config(
                 target,
@@ -3213,13 +3215,13 @@ class ForgisConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "confirm_real_run"):
                 resolve_config(target_root=target, target_repo="owner/target-repo")
 
-    def test_missing_model_secret_fails_before_deepseek_call(self) -> None:
+    def test_python_production_loop_is_retired_before_model_secret_resolution(self) -> None:
         with tempfile.TemporaryDirectory() as dirname:
             root = Path(dirname)
             source, target = self.make_source_target(root)
             self.write_config(target, extra="dry_run: false\nrun_agent: true\nconfirm_real_run: true\n")
             resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
-            with self.assertRaisesRegex(ValueError, "Missing required model secret"):
+            with self.assertRaisesRegex(RuntimeError, "Python AgentLoop production path is retired"):
                 run_tool_loop(config=resolved, source_root=source, target_root=target, environ={})
 
     def test_model_env_does_not_leak_secret_values(self) -> None:

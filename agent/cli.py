@@ -66,6 +66,21 @@ def resolve_local_runtime_root(config_path: str | None = None) -> Path:
     return Path.cwd().resolve()
 
 
+def require_runtime_executable(env_name: str) -> Path:
+    raw_value = os.environ.get(env_name, "").strip()
+    if not raw_value:
+        raise ValueError(
+            f"{env_name} must name the absolute executable used by the Intatis Codex runtime cutover."
+        )
+    path = Path(raw_value).expanduser()
+    if not path.is_absolute():
+        raise ValueError(f"{env_name} must be an absolute path.")
+    resolved = path.resolve()
+    if path.is_symlink() or not resolved.is_file() or not os.access(resolved, os.X_OK):
+        raise ValueError(f"{env_name} does not identify a safe executable file: {resolved}")
+    return resolved
+
+
 def local_config_value(data: dict[str, Any], field: str) -> str:
     value = data.get(field)
     return str(value).strip() if value is not None else ""
@@ -94,7 +109,7 @@ def local_paths_from_args(args: argparse.Namespace) -> tuple[Path, Path, str, st
         raise ValueError(
             "Missing local run parameter(s): "
             + ", ".join(missing)
-            + ". Provide CLI flags or generate a v7.1 local config with `python -m agent.cli init`."
+            + ". Provide CLI flags or generate a local config with `python -m agent.cli init`."
         )
 
     return Path(source_text).expanduser().resolve(), Path(target_text).expanduser().resolve(), target_repo, config_path
@@ -136,12 +151,12 @@ def render_local_config(
     api_key_env: str,
 ) -> str:
     source_repo = local_repo_slug(source)
-    runtime_env = "DEEPSEEK_API_KEY" if agent_backend == "deepseek" and api_key_env == "DEEPSEEK_API_KEY" else "FORGIS_MODEL_API_KEY"
+    runtime_env = "FORGIS_MODEL_API_KEY"
     return "\n".join(
         [
-            "# Forgis v7.1 local migration config.",
+            "# Forgis Intatis Codex runtime local migration config.",
             "# Secrets are supplied only through environment variable names below.",
-            "# v7.1 does not provide streaming, a local server, council, GUI, or automatic screenshots.",
+            "# The production Agent kernel is Intatis Codex App Server; no legacy runtime fallback exists.",
             f"local_source_path: {yaml_string(source.as_posix())}",
             f"local_target_path: {yaml_string(target.as_posix())}",
             f"local_target_repo: {yaml_string(target_repo)}",
@@ -156,12 +171,13 @@ def render_local_config(
             f"agent_backend: {yaml_string(agent_backend)}",
             f"model: {yaml_string(model)}",
             f"api_base: {yaml_string(api_base)}",
-            "api_format: openai-compatible",
+            "api_format: responses",
+            "request_adapter: openai-compatible",
             "request_timeout_seconds: 120",
             "model_env:",
             f"  {runtime_env}: {yaml_string(api_key_env)}",
             "",
-            "execution_mode: tool_loop",
+            "execution_mode: codex",
             "dry_run: true",
             "run_agent: false",
             "confirm_real_run: false",
@@ -252,9 +268,47 @@ def inspect_migration_plan(
     target: Path,
     runtime_root: Path,
 ) -> dict[str, Any]:
+    from migration_scheduler import select_next_unit
+
+    plan, source_label, load_status, load_error, plan_path = load_or_generate_control_plane_plan(
+        config=config,
+        source=source,
+        target=target,
+        runtime_root=runtime_root,
+    )
+
+    counts = {"completed": 0, "blocked": 0, "pending": 0, "deferred": 0, "active": 0, "total": 0}
+    active_unit = None
+    next_unit = None
+    units: list[dict[str, Any]] = []
+    if plan is not None:
+        counts = plan.counts()
+        active_unit = plan.active_unit.as_summary() if plan.active_unit is not None else None
+        selected_next = select_next_unit(plan)
+        next_unit = selected_next.as_summary() if selected_next is not None else None
+        units = [unit.as_summary() for unit in plan.units[: config.max_migration_units]]
+
+    return {
+        "plan_source": source_label,
+        "plan_path": plan_path,
+        "plan_load_status": load_status,
+        "plan_load_error": load_error,
+        "counts": counts,
+        "active_unit": active_unit,
+        "next_unit": next_unit,
+        "units": units,
+    }
+
+
+def load_or_generate_control_plane_plan(
+    *,
+    config: Any,
+    source: Path,
+    target: Path,
+    runtime_root: Path,
+) -> tuple[Any, str, str, str, str]:
     from migration_plan_store import load_migration_plan, migration_plan_file_path
-    from migration_scheduler import collect_scheduler_inventory, create_units_from_inventory, select_next_unit
-    from tool_loop import read_task_text_for_migration_scheduler
+    from migration_scheduler import collect_scheduler_inventory, create_units_from_inventory
 
     plan = None
     source_label = "disabled"
@@ -287,7 +341,10 @@ def inspect_migration_plan(
             load_error = str(exc)
 
     if plan is None and config.migration_scheduler_enabled:
-        task_text = read_task_text_for_migration_scheduler(target, config)
+        task_path = (target / config.task_prompt_path).resolve()
+        if not task_path.is_file() or not task_path.is_relative_to(target.resolve()):
+            raise ValueError("Migration task prompt is unavailable for plan generation.")
+        task_text = task_path.read_text(encoding="utf-8", errors="replace")[:1_000_000]
         inventory: list[Any] = []
         if config.migration_unit_strategy == "inventory":
             inventory = collect_scheduler_inventory(
@@ -297,28 +354,7 @@ def inspect_migration_plan(
             )
         plan = create_units_from_inventory(inventory, config, task_text)
         source_label = "generated"
-
-    counts = {"completed": 0, "blocked": 0, "pending": 0, "deferred": 0, "active": 0, "total": 0}
-    active_unit = None
-    next_unit = None
-    units: list[dict[str, Any]] = []
-    if plan is not None:
-        counts = plan.counts()
-        active_unit = plan.active_unit.as_summary() if plan.active_unit is not None else None
-        selected_next = select_next_unit(plan)
-        next_unit = selected_next.as_summary() if selected_next is not None else None
-        units = [unit.as_summary() for unit in plan.units[: config.max_migration_units]]
-
-    return {
-        "plan_source": source_label,
-        "plan_path": plan_path,
-        "plan_load_status": load_status,
-        "plan_load_error": load_error,
-        "counts": counts,
-        "active_unit": active_unit,
-        "next_unit": next_unit,
-        "units": units,
-    }
+    return plan, source_label, load_status, load_error, plan_path
 
 
 def validate_requested_unit(
@@ -330,29 +366,44 @@ def validate_requested_unit(
     report_output_dir: str | Path | None,
     unit_id: str,
 ) -> None:
-    from deepseek_agent import build_skill_selection
-    from tool_loop import prepare_migration_plan
+    from migration_state import request_active_unit_switch
+    from migration_plan_store import write_migration_plan
 
-    skill_selection = build_skill_selection(config, target_root=target)
-    preparation = prepare_migration_plan(
+    plan, _source_label, load_status, _load_error, _plan_path = load_or_generate_control_plane_plan(
         config=config,
-        source_root=source,
-        target_root=target,
-        skill_selection=skill_selection,
-        report_output_dir=report_output_dir,
-        report_allowed_root=runtime_root,
+        source=source,
+        target=target,
+        runtime_root=runtime_root,
     )
-    plan = preparation.plan
     if plan is None or not plan.units:
         raise ValueError("run --unit requires migration_scheduler_enabled=true and at least one migration unit.")
     unit_ids = {unit.unit_id for unit in plan.units}
     if unit_id not in unit_ids:
         raise ValueError(f"migration unit not found: {unit_id}")
+    switch = request_active_unit_switch(
+        plan,
+        unit_id,
+        config,
+        config.migration_plan_switch_reason,
+        resume_loaded=load_status == "loaded",
+        max_events=config.migration_plan_event_log_max_events,
+    )
     active = plan.active_unit
     if active is None or active.unit_id != unit_id:
-        switch = preparation.active_unit_switch or {}
-        message = switch.get("message") or "requested unit was not selected as active"
+        message = switch.message or "requested unit was not selected as active"
         raise ValueError(f"requested migration unit is not runnable as active: {message}")
+    write = write_migration_plan(
+        plan,
+        config.migration_plan_output_dir,
+        filename=config.migration_plan_filename,
+        allowed_root=runtime_root,
+        source_root=source,
+        target_root=target,
+        required=True,
+        max_events=config.migration_plan_event_log_max_events,
+    )
+    if write.status != "written":
+        raise RuntimeError("The selected migration unit could not be persisted before Codex handoff.")
 
 
 def command_init(args: argparse.Namespace) -> int:
@@ -367,7 +418,7 @@ def command_init(args: argparse.Namespace) -> int:
     target_repo = safe_single_line(args.target_repo, "target_repo")
     agent_backend = safe_single_line(args.agent_backend, "agent_backend").casefold()
     if agent_backend not in SUPPORTED_AGENT_BACKENDS:
-        raise ValueError("agent_backend must be deepseek or openai-compatible.")
+        raise ValueError("agent_backend must be codex-app-server.")
     api_key_env = validate_env_name(args.api_key_env, "api_key_env")
     target_subdir = resolve_target_subdir(target, args.target_subdir)[1]
     output = ensure_safe_init_output(Path(args.output), source=source, target=target)
@@ -398,7 +449,7 @@ def command_init(args: argparse.Namespace) -> int:
                 "notes": [
                     "dry_run=true and run_agent=false by default",
                     "set API key values only through the configured env var",
-                    "v7.1 does not support streaming/server/council/GUI/automatic screenshots",
+                    "production Agent execution uses the Intatis Codex App Server kernel with no legacy fallback",
                 ],
             },
             indent=2,
@@ -512,7 +563,6 @@ def command_resume(args: argparse.Namespace) -> int:
 def command_run(args: argparse.Namespace) -> int:
     from forge import build_summary, ensure_directory
     from forgis_config import resolve_config
-    from tool_loop import STAGED_TRANSLATION_MODE, run_tool_loop, safe_log, write_status
 
     source, target, target_repo, config_path = local_paths_from_args(args)
     ensure_directory(source, "Source repository")
@@ -541,31 +591,56 @@ def command_run(args: argparse.Namespace) -> int:
             report_output_dir=report_output_dir,
             unit_id=unit_id,
         )
-    result = run_tool_loop(
-        config=config,
-        source_root=source,
-        target_root=target,
-        environ=dict(os.environ),
-        report_output_dir=report_output_dir,
-        report_allowed_root=report_allowed_root,
-        run_metadata={"target_repo": target_repo, "mode": "local_cli", "unit": unit_id},
+    runtime_executable = require_runtime_executable("FORGIS_RUNTIME_EXECUTABLE")
+    codex_runtime = require_runtime_executable("FORGIS_CODEX_RUNTIME")
+    runtime_root = (report_allowed_root / ".forgis-runtime").resolve()
+    report_output = (runtime_root / report_output_dir).resolve()
+    status_output = Path(args.status_output).expanduser().resolve() if args.status_output else runtime_root / "codex_status.env"
+    operation_output = (
+        Path(args.operation_log_output).expanduser().resolve()
+        if args.operation_log_output
+        else runtime_root / "codex_tool_operations.json"
     )
-    write_status(args.status_output, result)
-    write_json(args.operation_log_output, result.operation_log)
-    write_json(args.tool_loop_summary_output, result.as_dict())
-    setattr(args, "result_status", result.status)
-    if getattr(args, "print_result", True):
-        print(json.dumps(result.as_dict(), indent=2, ensure_ascii=False, sort_keys=True))
+    runtime_summary_output = (
+        Path(args.runtime_summary_output).expanduser().resolve()
+        if args.runtime_summary_output
+        else runtime_root / "codex_runtime_summary.json"
+    )
 
-    if result.status == "low-impact":
-        raise RuntimeError(result.final_summary)
-    if result.status == "max-iterations" and (
-        config.execution_mode != STAGED_TRANSLATION_MODE or config.strict_mode
-    ):
-        raise RuntimeError(result.final_summary)
-    if result.status == "max-iterations":
-        safe_log("WARNING: staged_translation reached max_iterations; continuing with partial progress.")
-    return 0
+    command = [
+        str(runtime_executable),
+        "run",
+        "--source", str(source),
+        "--target", str(target),
+        "--target-subdir", config.target_subdir,
+        "--task-prompt", config.task_prompt_path,
+        "--target-repo", target_repo,
+        "--api-base", config.api_base,
+        "--model", config.model,
+        "--model-env-json", json.dumps(dict(config.model_env), ensure_ascii=False, sort_keys=True),
+        "--runtime-root", str(runtime_root),
+        "--output-root", str(report_allowed_root),
+        "--codex-runtime", str(codex_runtime),
+        "--dry-run", "true" if config.dry_run else "false",
+        "--run-agent", "true" if config.run_agent else "false",
+        "--confirm-real-run", "true" if config.confirm_real_run else "false",
+        "--request-adapter", config.request_adapter,
+        "--status-output", str(status_output),
+        "--summary-output", str(runtime_summary_output),
+        "--operation-log-output", str(operation_output),
+        "--report-output-dir", str(report_output),
+        "--visual-validation-enabled", config.visual_validation.enabled,
+    ]
+    if unit_id:
+        command.extend(["--unit", unit_id])
+    if not sys.stdin.isatty():
+        command.append("--non-interactive")
+
+    # Replace this Python control-plane process with the single authoritative
+    # Swift/Intatis kernel. There is deliberately no return path or legacy
+    # runtime fallback after execve succeeds.
+    os.execve(str(runtime_executable), command, dict(os.environ))
+    raise AssertionError("os.execve returned unexpectedly")
 
 
 def command_doctor(args: argparse.Namespace) -> int:
@@ -581,7 +656,12 @@ def command_doctor(args: argparse.Namespace) -> int:
     except Exception as exc:
         checks.append(("pyyaml", False, exc.__class__.__name__))
 
-    for module_name in ("openai_compatible_client", "forgis_config", "deepseek_agent", "tool_loop"):
+    for module_name in (
+        "forgis_config",
+        "guardrails",
+        "migration_plan_store",
+        "migration_scheduler",
+    ):
         try:
             __import__(module_name)
             checks.append((f"import:{module_name}", True, "ok"))
@@ -636,15 +716,15 @@ target_base_branch: main
 target_subdir: target-output
 task_prompt_path: FORGIS_TASK.md
 
-agent_backend: openai-compatible
+agent_backend: codex-app-server
 model: local-smoke-model
 api_base: https://example.invalid/v1
-api_format: openai-compatible
+api_format: responses
 request_timeout_seconds: 5
 model_env:
   FORGIS_MODEL_API_KEY: FORGIS_MODEL_API_KEY
 
-execution_mode: tool_loop
+execution_mode: codex
 dry_run: true
 run_agent: true
 confirm_real_run: false
@@ -656,7 +736,7 @@ migration_plan_persistence_enabled: false
     )
 
     previous_workspace = os.environ.get("GITHUB_WORKSPACE")
-    os.environ["GITHUB_WORKSPACE"] = str(runtime)
+    os.environ["GITHUB_WORKSPACE"] = str(workdir)
     try:
         run_args = argparse.Namespace(
             source=str(source),
@@ -667,7 +747,7 @@ migration_plan_persistence_enabled: false
             summary_output=str(workdir / "summary.md"),
             status_output="",
             operation_log_output=str(workdir / "tool_operations.json"),
-            tool_loop_summary_output=str(workdir / "tool_loop_summary.json"),
+            runtime_summary_output=str(workdir / "codex_runtime_summary.json"),
             report_output_dir="reports",
             print_result=False,
             unit="",
@@ -693,15 +773,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command")
 
-    init = subparsers.add_parser("init", help="Create a v7.1 local migration config without calling an API")
+    init = subparsers.add_parser("init", help="Create a local Codex runtime config without calling an API")
     init.add_argument("--source", required=True, help="Path to the local source repository")
     init.add_argument("--target", required=True, help="Path to the local target repository")
     init.add_argument("--target-repo", required=True, help="Target repository label, for example local/my-migration")
     init.add_argument("--output", required=True, help="Explicit output path for FORGIS_CONFIG.local.yml")
     init.add_argument("--target-subdir", default="target-output", help="Writable target subdirectory")
-    init.add_argument("--agent-backend", default="openai-compatible", help="deepseek or openai-compatible")
-    init.add_argument("--model", default="local-migration-model", help="OpenAI-compatible model id")
-    init.add_argument("--api-base", default="https://api.deepseek.com", help="OpenAI-compatible API base URL")
+    init.add_argument("--agent-backend", default="codex-app-server", help="Fixed production kernel: codex-app-server")
+    init.add_argument("--model", default="forgis-migration-model", help="Native Responses model id")
+    init.add_argument("--api-base", default="https://example.invalid/v1", help="Native Responses API base URL")
     init.add_argument("--api-key-env", default="FORGIS_MODEL_API_KEY", help="Environment variable name that will hold the API key")
     init.set_defaults(func=command_init)
 
@@ -709,7 +789,7 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--config", required=True, help="Path to FORGIS_CONFIG.local.yml")
     status.set_defaults(func=command_status)
 
-    run = subparsers.add_parser("run", help="Run a gated local migration unit or legacy local tool loop")
+    run = subparsers.add_parser("run", help="Replace this process with the gated Intatis Codex runtime")
     run.add_argument("--source", default="", help="Path to the checked-out source repository; optional when config has local_source_path")
     run.add_argument("--target", default="", help="Path to the checked-out target repository; optional when config has local_target_path")
     run.add_argument("--target-repo", default="", help="Target repository label; optional when config has local_target_repo")
@@ -719,7 +799,13 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--summary-output", default="", help="Optional controller summary markdown output path")
     run.add_argument("--status-output", default="", help="Optional env-style status output path")
     run.add_argument("--operation-log-output", default="", help="Optional JSON operation log output path")
-    run.add_argument("--tool-loop-summary-output", default="", help="Optional JSON tool loop summary output path")
+    run.add_argument(
+        "--runtime-summary-output",
+        "--tool-loop-summary-output",
+        dest="runtime_summary_output",
+        default="",
+        help="Optional Codex runtime JSON summary output path",
+    )
     run.add_argument("--report-output-dir", default="", help="Optional Forgis runtime report output directory")
     run.set_defaults(func=command_run)
 

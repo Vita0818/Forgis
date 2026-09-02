@@ -142,7 +142,7 @@ class V71LocalInitStatusTests(unittest.TestCase):
             self.assertEqual(Path(payload["source_path"]).resolve(), source.resolve())
             self.assertEqual(Path(payload["target_path"]).resolve(), target.resolve())
             self.assertEqual(payload["target_subdir"], "target-output")
-            self.assertEqual(payload["agent_backend"], "openai-compatible")
+            self.assertEqual(payload["agent_backend"], "codex-app-server")
             self.assertTrue(payload["api_base_configured"])
             self.assertEqual(payload["api_key_env"][0]["secret_env"], "FORGIS_MODEL_API_KEY")
             self.assertEqual(payload["api_key_env"][0]["status"], "set")

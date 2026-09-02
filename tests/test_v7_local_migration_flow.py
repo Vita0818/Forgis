@@ -106,14 +106,16 @@ class V71LocalMigrationFlowTests(unittest.TestCase):
                 ],
                 env=env,
             )
-            self.assertIn('"status": "skipped-dry-run"', result.stdout)
+            stdout_payload = json.loads(result.stdout[result.stdout.index("{"):])
+            self.assertEqual(stdout_payload["status"], "skipped-dry_run")
+            self.assertEqual(stdout_payload["kernel"], "intatis-codex-app-server")
             self.assertTrue(summary.is_file())
             self.assertLess(summary.stat().st_size, 20_000)
             self.assertNotIn(SECRET_SENTINEL, result.stdout + summary.read_text(encoding="utf-8"))
             self.assertEqual(original_target, (target / "target-output" / "Greeting.kt").read_text(encoding="utf-8"))
             payload = json.loads(tool_summary.read_text(encoding="utf-8"))
-            self.assertEqual(payload["active_unit_id"], unit_id)
-            self.assertEqual(payload["migration_plan_active_unit_status"], "active")
+            self.assertEqual(payload["unit_id"], unit_id)
+            self.assertEqual(payload["kernel"], "intatis-codex-app-server")
             self.assertFalse(payload["executed"])
 
     def test_resume_reports_active_unit_and_does_not_call_shell(self) -> None:
@@ -124,7 +126,7 @@ class V71LocalMigrationFlowTests(unittest.TestCase):
             self.run_cmd([sys.executable, "-m", "agent.cli", "run", "--config", str(config), "--unit", str(unit_id)])
 
             result = self.run_cmd([sys.executable, "-m", "agent.cli", "resume", "--config", str(config)])
-            payload = json.loads(result.stdout)
+            payload = json.loads(result.stdout[result.stdout.index("{"):])
             self.assertEqual(payload["status"], "active-unit-ready")
             self.assertEqual(payload["selected_unit"]["unit_id"], unit_id)
             self.assertIn("--unit", payload["next_run_command"])
@@ -200,7 +202,9 @@ class V71LocalMigrationFlowTests(unittest.TestCase):
             result = self.run_cmd(
                 [sys.executable, "-m", "agent.cli", "run", "--config", str(config), "--unit", str(unit_id)]
             )
-            self.assertIn("dry_run=true; model was not called", result.stdout)
+            payload = json.loads(result.stdout[result.stdout.index("{"):])
+            self.assertEqual(payload["status"], "skipped-dry_run")
+            self.assertEqual(payload["kernel"], "intatis-codex-app-server")
 
 
 if __name__ == "__main__":

@@ -130,9 +130,9 @@ else
     ACTIONS_RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
   fi
   RUN_REPORT_JSON_PATH="${RUN_REPORT_JSON_PATH:-}"
-  if [[ -z "$RUN_REPORT_JSON_PATH" && -n "${GITHUB_WORKSPACE:-}" && -f "$GITHUB_WORKSPACE/forgis-runtime/deepseek_status.env" ]]; then
+  if [[ -z "$RUN_REPORT_JSON_PATH" && -n "${GITHUB_WORKSPACE:-}" && -f "$GITHUB_WORKSPACE/forgis-runtime/codex_status.env" ]]; then
     # shellcheck disable=SC1090
-    source "$GITHUB_WORKSPACE/forgis-runtime/deepseek_status.env"
+    source "$GITHUB_WORKSPACE/forgis-runtime/codex_status.env"
     RUN_REPORT_JSON_PATH="${report_json_path:-}"
   fi
   if [[ -z "$RUN_REPORT_JSON_PATH" && -n "${GITHUB_WORKSPACE:-}" ]]; then

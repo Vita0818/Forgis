@@ -10,19 +10,25 @@
 - 测试 double 只存在于测试 target，不进入 production selection 或 runtime fallback。
 - Review 检查新增 wrapper/adapter/facade 是否仅为官方 API 必需的最薄接线；发现核心能力复制、第二实现或静默降级即判定失败。
 
-最近自查日期：2026-07-03
+最近自查日期：2026-09-02
 
 ## 环境要求
 
 - Python 3.11：GitHub Actions workflow 使用 `actions/setup-python@v5` 且 `python-version: "3.11"`。
+- 全量内核切换：Xcode 27 / Swift 6.4、macOS 26、只读同级checkout `../Intatis`，以及exact runtime kit `../Intatis/.intatis/runtime-kit/0.66/CodexRuntime/{architecture}`。workflow使用官方`xcode-27` runner并固定Intatis commit。
 - Python 依赖：`requirements.txt` 当前只有 `PyYAML>=6.0.2`。
 - Shell：`agent/build_target.sh` 和 `agent/create_pr.sh` 使用 bash。
 - Git/GitHub CLI：真实 PR 创建路径依赖 `git` 和 `gh`，在 `agent/create_pr.sh` 中使用。
 - GitHub Actions secrets：真实运行依赖 `FORGIS_TARGET_TOKEN`、`FORGIS_SOURCE_TOKEN` 和模型 secret 环境变量。不要在文档或配置中写入真实值。
-- v7.x 模型 client 测试只使用 mock HTTP，不真实调用任何 API。Python OpenAI-compatible API key 只能通过 `model_env` 指向环境变量名；Mac UI API key 只能通过 Keychain 或显式 env name fallback 解析，UserDefaults 只保存非 secret provider 偏好。异常、日志、报告和 fixture 不得包含真实 secret 值、Authorization header、raw provider response 或完整模型输出。v7.1 local CLI `init/status/run --unit/resume` 测试也不得真实调用 API。
+- 所有runtime/UI测试默认离线，不真实调用任何provider。Python legacy client测试只使用mock HTTP。CLI credential只能通过`model_env`指向环境变量名；Mac UI Responses credential只能通过Forgis identity派生的Keychain或显式env fallback解析，UserDefaults只保存非secret workspace/route/gate偏好。异常、projection、operation log、报告和fixture不得包含secret、Authorization header、raw provider response或完整模型输出。
 - v6.0 视觉闭环测试不需要真实 Qwen API key。`visual_validation` 配置不得包含真实 token、API key、截图文件路径、evidence root 或本地敏感路径；`reference_screenshot_dirs` / `actual_screenshot_dirs` 只能是目标仓库相对目录。`agent/qwen_vision.py` 的 provider transport 在测试中必须 mock。真实 Qwen 调用只允许在运行时显式提供 `QWEN_API_KEY`，可选 `QWEN_API_BASE` 和 `QWEN_VISION_MODEL`，这些值不得写入报告。
 
 ## 依赖安装方式
+
+Forgis不复制或修改Intatis源码。SwiftPM与Xcode都通过本地path `../Intatis`解析公开
+Core/Protocol/Providers/CodexRuntime products；根`Package.resolved`与
+`Forgis.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`分别固定两个构建入口解析到的
+远程传递依赖。本地Intatis path本身不会进入锁文件，构建与验证不得写入Intatis checkout。
 
 GitHub Actions 中的安装方式：
 
@@ -62,13 +68,33 @@ v6.0 Phase 3-4 新增 Python 模块后，应至少运行：
 python3 -m py_compile agent/*.py
 ```
 
-## 单元测试命令
-
-当前 CI 运行：
+Swift production kernel构建使用仓库外scratch目录：
 
 ```bash
-python -m unittest tests/test_forgis_config.py tests/test_openai_compatible_client.py tests/test_v7_cli_config.py tests/test_v7_local_cli.py tests/test_v7_local_smoke.py tests/test_v7_local_init_status.py tests/test_v7_local_migration_flow.py tests/test_v7_validation_commands.py
+swift build --product forgis-runtime --scratch-path /tmp/forgis-intatis-swift-build
 ```
+
+随后只允许以下零网络验证：
+
+```bash
+export FORGIS_RUNTIME_EXECUTABLE=/tmp/forgis-intatis-swift-build/debug/forgis-runtime
+export FORGIS_CODEX_RUNTIME=/Users/vita/Vitemis/Intatis/.intatis/runtime-kit/0.66/CodexRuntime/arm64/codex
+
+"$FORGIS_RUNTIME_EXECUTABLE" doctor --codex-runtime "$FORGIS_CODEX_RUNTIME"
+"$FORGIS_RUNTIME_EXECUTABLE" smoke --codex-runtime "$FORGIS_CODEX_RUNTIME"
+```
+
+smoke只执行App Server initialize/thread-start/shutdown，不发送turn，输出必须含`network_requests: 0`。
+
+## 单元测试命令
+
+当前Python控制面/legacy fixture suite在先构建Swift host并设置上述两个非secret executable path后运行：
+
+```bash
+python -m unittest
+```
+
+当前基线为172 tests；其中`test_codex_runtime_cutover.py`真实运行exact doctor与offline session smoke，但不发送turn或provider请求。
 
 `RELEASE_NOTES.md` 的 release checklist 写的是：
 
@@ -158,13 +184,37 @@ python -m agent.cli run \
 
 ## UI 测试命令
 
-v7.3 Mac UI shell 可用 Xcode project 或 SwiftPM 构建：
+Mac Intatis Migration UI可用Xcode project或SwiftPM构建：
 
 ```bash
 xcodebuild -list -project Forgis.xcodeproj
 xcodebuild -project Forgis.xcodeproj -scheme ForgisMac -configuration Debug build
-swift build --scratch-path /tmp/forgis-v7-3-swift-build
+swift build --product ForgisMac \
+  --scratch-path /tmp/forgis-ui-swift-build \
+  --disable-automatic-resolution
 ```
+
+用独立DerivedData验证主工程、runtime root静态校验和bundle接线：
+
+```bash
+xcodebuild -project Forgis.xcodeproj -scheme ForgisMac \
+  -configuration Debug \
+  -derivedDataPath /tmp/forgis-intatis-derived-data \
+  CODE_SIGNING_ALLOWED=NO build
+```
+
+成功图应显示ForgisMac直接依赖`IntatisCore` / `IntatisProtocol` / `IntatisProviders` /
+`IntatisCodexRuntime` products；不应出现Forgis自建App Server wrapper或HTTP Chat target。构建不得启动
+turn、读取credential或修改Intatis源码。
+
+构建后运行Mac bundle离线smoke：
+
+```bash
+/tmp/forgis-intatis-derived-data/Build/Products/Debug/ForgisMac.app/Contents/MacOS/ForgisMac \
+  --forgis-codex-runtime-smoke
+```
+
+预期：`FORGIS_CODEX_RUNTIME_SMOKE_OK ... network_requests=0`。
 
 建议本地构建把 DerivedData 放在 `/tmp`，避免污染默认 DerivedData：
 
@@ -172,19 +222,15 @@ swift build --scratch-path /tmp/forgis-v7-3-swift-build
 xcodebuild -project Forgis.xcodeproj -scheme ForgisMac -configuration Debug -derivedDataPath /tmp/forgis-v7-3-derived-data build
 ```
 
-编译后的 app 也提供一个只面向本地 mock provider 的 Chat smoke 入口，用于验证 Swift client 的真实 HTTP 路径：
+不存在`--forgis-chat-smoke`或任何HTTP provider smoke。UI/runtime验证必须确认：
 
-```bash
-/tmp/forgis-v7-3-derived-data/Build/Products/Debug/ForgisMac.app/Contents/MacOS/ForgisMac \
-  --forgis-chat-smoke \
-  --api-base http://127.0.0.1:8765/v1 \
-  --model forgis-smoke-model \
-  --timeout 5
-```
-
-该 smoke 默认无鉴权；若显式加 `--auth`，只能通过 `--api-key-env <ENV_NAME>` 指定环境变量名，不得传入 raw key。测试时应搭配本地 OpenAI-compatible mock server 返回 `FORGIS_SMOKE_OK`，不得调用真实 provider。
-
-该 UI 当前展示 AI Chat 与 static/mock migration 数据。AI Chat 只有在用户发送消息、Settings 手动测试 provider 且 Keychain/env key 可解析，或 auth 被显式关闭时才调用非 streaming Chat Completions；测试/构建不得设置真实 key 或真实调用 provider。不执行真实迁移、不写 source/target、不显示 secret。v6.0 视觉工具测试仍默认不调用真实 Qwen；运行时只有显式 `QWEN_API_KEY` 才能调用 provider。仍不自动截图、不上传 artifacts。
+- 普通App启动停在Migration未配置态，不自动启动session或发送turn；
+- Settings真实展示source/target/task/write root、native Responses route、Keychain/env状态与三重gate；
+- Reports只展示实际持久化的`forgis.run_report.v7.0`，没有mock report；
+- dry run不启动Intatis、不解析credential、不创建`target_subdir`，只写Application Support下的skipped report；
+- real run只有`dry_run=false`、`run_agent=true`、`confirm_real_run=true`同时成立后才能Start；
+- event stream能投影assistant/tool/approval/usage，Stop调用official interrupt，follow-up复用同一session；
+- Chat Completions URL明确失败，且失败不会选择旧client、Python loop、mock或另一backend。
 
 ## 静态检查 / lint / format
 
@@ -206,9 +252,10 @@ bash -n agent/create_pr.sh
 - Qwen adapter：missing key、mock inspect、mock compare、mock failure、invalid response、安全 blocker、非法路径拒绝、单元测试无真实网络。
 - Visual tools/report/gate：schema、`list_visual_references`、sandbox dispatch、reference dirs 可读不可写、disabled/provider blocker、reference-only guidance limitation、reference+actual compare completed、auto 模式 required 判定、`NO_REFERENCE_SCREENSHOTS_FOUND`、`VISUAL_REPORT_INCOMPLETE`、run report / PR body 脱敏摘要。
 - Dry run：`dry_run=true` 时不调用模型、不写目标仓库、不 push/PR。
-- OpenAI-compatible model config：`agent_backend` alias、`api_base` / `base_url`、`model`、`request_timeout_seconds`、`model_env`、错误脱敏和 DeepSeek shim。
-- Mac AI Chat：缺少 Keychain/env key 且 auth required 时不发请求并显示 blocker；Keychain/env key 可解析时只调用非 streaming Chat Completions；Settings Test 复用同一条有界请求路径且不追加聊天消息；auth disabled 时允许本地无鉴权 endpoint；`--forgis-chat-smoke` 可对 localhost mock endpoint 返回 `FORGIS_SMOKE_OK`；provider/HTTP 错误脱敏且有界；不写 source/target、report、FORGIS_CONFIG、UserDefaults secret 或 fixture。
-- ForgisMac 视觉：AI Chat / Migration / Reports / Settings 主导航可切换；system canvas 与 Material 层级连续；sidebar 只有品牌、导航、一行 run mode 和 Settings，不出现副标或 Current Run 卡；Chat 不出现重复 provider 卡或消息/安全/鉴权 counters，assistant 无卡片、user/system/error 有边界，composer 为单排 40pt 控件；Migration 列表每项只保留一个主状态，risk/validation 在详情中使用普通信息行；安全健康态只显示一行文字，Inspector 每节合并为 1–2 张卡；长 path/model/endpoint/schema 在中栏和 Inspector 中单行截断；macOS 26 Glass 与 macOS 13–15 fallback 均可编译。运行态视觉检查不得发送真实 Chat 请求或执行 migration。
+- Codex model config：固定`agent_backend=codex-app-server`/`api_format=responses`、request adapter、`api_base` / `base_url`、model、单一`model_env`引用；历史backend值只验证归一化，不得触发旧runtime。
+- Mac Intatis UI：缺少Keychain/env credential且auth required时不启动turn并显示blocker；auth disabled时允许用户显式配置的无鉴权Responses endpoint；credential、provider/runtime错误、projection和report都必须有界脱敏；不得写source、target root、task、UserDefaults secret或fixture。
+- ForgisMac视觉：Migration/Reports/Settings主导航可切换；system canvas与Material层级连续；sidebar只有品牌、导航、run mode/runtime status与Settings；assistant final无卡片、commentary为次级文字、user/system/error有边界；session前显示Start/Validate，session后为Stop/input/Send单排composer；approval card、runtime/tool/usage inspector和真实report详情不溢出；不存在AI Chat入口、重复provider卡、counters、mock unit/report或未接线按钮。视觉检查不得设置真实credential、发送turn或执行migration。
+- Codex kernel cutover：Swift CLI与Mac bundle都直接构造`CodexAppServerSession`；doctor验证exact version/derivation，offline smoke验证真实process/session且零network；workflow无Python tool-loop调用；Python real loop无test client时明确拒绝；dry-run不读credential、不启动runtime、不写target。
 - Local v7.1 flow：`init` 只写显式 output，`status` 不泄露 secret，`run --unit` 不自动 all-units，dry-run 不调用 API/不写 target，`resume` 默认不跳过 blocked/failed unit。
 - Validation commands：新配置使用 argv mapping 并复用 allowlist；旧 shell string 只兼容 warning；新增测试覆盖 shell bypass 不被 argv 接受。
 - Tool sandbox：读 source/target、写 `target_subdir`、拒绝 source 写入、拒绝 target root 写入、拒绝 symlink 和 secret-like 路径。
@@ -234,12 +281,28 @@ bash -n agent/create_pr.sh
 
 ## 本轮是否实际运行命令
 
-上一轮 v6.0 reference guidance 调整曾运行：
+2026-09-01全量内核切换实际运行：
 
-- `python3 -m unittest tests/test_forgis_config.py`：134 个测试通过。
-- `python3 -m unittest`：134 个测试通过。
+- `swift build --product forgis-runtime --scratch-path /tmp/forgis-runtime-cutover-build`：通过。
+- `forgis-runtime doctor --codex-runtime <exact .4 binary>`：通过，version/derivation匹配。
+- `forgis-runtime smoke --codex-runtime <exact .4 binary>`：通过，`network_requests=0`。
+- ForgisMac Debug Xcode build（仓库外DerivedData）：通过；官方validator确认embedded arm64 root。
+- ForgisMac `--forgis-codex-runtime-smoke`：通过，`network_requests=0`。
+- embedded/source Codex binary SHA-256一致：`9d5d81ef622f5bf7bc288837f2cd825fdd686dfe770109a0e9218cd087c90c74`。
 - `python3 -m py_compile agent/*.py`：通过。
-- `git diff --check`：通过。
-- `git status --short`：列出本轮修改文件，结果以最终报告为准。
+- `python3 -m unittest`：172 tests通过；测试环境只传executable路径，不传真实credential。
+- `bash -n agent/build_target.sh` / `bash -n agent/create_pr.sh`：通过。
+- 两个workflow YAML解析、Xcode project plist语法与`git diff --check`：通过。
+- 未发送真实turn，未调用OpenAI/Qwen/第三方provider API。
 
-本轮未修改 shell 脚本，因此未运行 `bash -n agent/build_target.sh` / `bash -n agent/create_pr.sh`。
+2026-09-02 Mac UI全量切换实际运行：
+
+- `swift build --product ForgisMac --scratch-path /tmp/forgis-ui-cutover-swift-build --disable-automatic-resolution`：通过。
+- Xcode Debug bundle build（`/tmp/forgis-ui-cutover-derived-data`、`CODE_SIGNING_ALLOWED=NO`）：通过；官方validator确认embedded arm64 runtime root。
+- bundle `--forgis-codex-runtime-smoke`：通过，`version=0.145.0-intatis.4 network_requests=0`。
+- `forgis-runtime doctor`与offline smoke：通过；host API v1、version/derivation匹配，`network_requests=0`。
+- `python3 -m unittest`：172 tests通过；只使用test client/mock HTTP和offline runtime smoke。
+- `python3 -m py_compile agent/*.py`、两份shell语法、workflow YAML：通过。
+- 运行态只读视觉核对Migration、Settings、Reports与Inspector：通过；没有AI Chat、mock数据或provider Test入口。
+- `plutil -lint Forgis.xcodeproj/project.pbxproj`与范围内`git diff --check`：通过。
+- 未设置credential、未发送turn、未调用任何provider API、未修改Intatis源仓库。

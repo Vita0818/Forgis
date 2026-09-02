@@ -13,6 +13,18 @@
 
 本文列出不可破坏的工程禁区、数据格式、协议、路径和回归要求。修改前必须确认不违反下列任一条目。
 
+## IntatisCodexRuntime 唯一production内核边界
+
+- Intatis是Forgis的只读同级上游checkout；只能通过`../Intatis`公开SwiftPM product接入，禁止修改、vendor或patch其源码。
+- 唯一production Agent入口是`forgis-runtime` → `CodexAppServerSession` → exact `codex app-server`。本地Python `run`只能`execve` handoff；workflow不得调用`agent/tool_loop.py`。
+- workflow固定Intatis commit与`xcode-27` runner，并只在runner临时目录运行Intatis官方runtime builder/validator。不得接受system/PATH Codex、不同version/derivation或另一backend。
+- Mac App只能按`Contents/Resources/CodexRuntime/{architecture}`官方布局嵌入完整validated root；不得只复制裸binary、丢弃manifest/hash/SBOM/notices，或在shipping bundle中使用override/env/PATH。
+- `target_subdir`必须是Codex唯一workspace-write根。source、target root、config和task不得进入写根；post-run guardrails继续强制复核。
+- 旧Python AgentLoop/FileToolSandbox/DeepSeek transport只可由测试显式注入client，不得从production入口触达，不得成为失败fallback。
+- 依赖缺失、API major不匹配、runtime缺失、版本/derivation错误、provider不支持native Responses tool shape或visual能力无official接线时必须明确停止。
+- Mac UI必须直接使用`IntatisCodexRuntime` v1 session/event/approval/interrupt/usage API；不得恢复独立Chat Completions client、`URLSession`模型调用、`--forgis-chat-smoke`或mock migration数据。
+- 所有runtime/turn测试默认必须离线；doctor与session smoke不得发送turn，必须报告`network_requests=0`。
+
 ## 工程禁区
 
 - 不执行破坏性 Git 操作（`reset --hard`/`clean -fd`/`checkout .`/强推到目标分支）。
@@ -23,7 +35,8 @@
 - 不绕过 target_subdir 写入边界、read-only config/task、source-repo 只读、secret 扫描、report bounding。
 - 不把 Forgis 扩展成任意 shell 执行器。
 - 不把平台迁移智能硬编码进 Forgis 核心。
-- 不把 Mac AI Chat 扩展成带文件工具的代码 Agent；它只能做无工具、非 streaming Chat Completions，不得写 source/target/config/report。
+- 不在Mac UI内实现Agent loop、App Server协议、provider transport或文件工具；UI只能把workspace/route/gate交给Intatis，并投影官方事件。依赖失败必须停止，不得切回legacy/Python/Chat/MCP/另一provider。
+- 不修改Intatis源仓库；runtime payload只可由官方builder产出到临时目录，或由validated kit复制到App build product，不得写入Forgis源码树。
 - 不把 Qwen 扩展成代码 Agent（不读源码/改文件/运行命令/接收 secret）。
 - 不把 reference-only 视觉指导当完整真实渲染验收。
 - 无显式 `QWEN_API_KEY` 不得发起 Qwen 真实 HTTP。
@@ -35,19 +48,20 @@
 - **`ResolvedConfig.env()`**：输出 env 变量名。
 - **`visual_validation`**：仅允许字段，禁 secret/key/base/model/path/evidence-root。
 - **`FORGIS_VISUAL_*`**：9 个 env/output surface 名。
-- **`FORGIS_RUN_REPORT.json`**：schema `forgis.run_report.v6.0`（始终含 `visual_validation` block）。注：`RELEASE_NOTES.md` 旧记 v5.0，以源码 v6.0 为准。
+- **`FORGIS_RUN_REPORT.json`**：新内核写`forgis.run_report.v7.0`并保留`visual_validation` block；legacy renderer v6只供旧fixture/tests。
+- **Codex runtime result**：`forgis.codex_runtime_result.v1`。
 - **`FORGIS_MIGRATION_PLAN.json`**：写 `v5.0`，读 `v4.8`/`v3.9`/`v3.8`/`v3.7`。
 - **PR body**：30000 chars 标准，3000 chars 短。
 
 ## 协议禁区
 
-- 非流式 OpenAI 兼容 Chat Completions。
-- Mac AI Chat 也必须保持非流式 Chat Completions；不得引入 SSE streaming 或 Responses API。
+- production迁移内核只允许Intatis/Codex原生Responses wire；不得翻译Chat Completions、添加proxy或provider fallback。
+- Mac产品界面不得出现独立Chat Completions产品面；Migration composer只能向当前Intatis session发送turn。
 - `api_base`/`base_url` 别名（不可同时用）。
-- `deepseek_agent.py` 的 tool schema 名必须与 `file_tools.py invoke()` 匹配。
+- legacy tests中的`deepseek_agent.py` tool schema仍须与`file_tools.py invoke()`匹配，但该surface不得重新进入production。
 - `model_env` 仅 env 名。
-- Mac AI Chat API key 只能来自 macOS Keychain generic-password item 或 runtime env fallback；UserDefaults 只能保存非 secret provider/model/API base/env 名/auth/timeout 偏好。不得把 API key 写入源码、日志、report、fixture、FORGIS_CONFIG 或 UserDefaults。
-- `--forgis-chat-smoke` 只能复用 Mac AI Chat 的非 streaming client；默认应访问 localhost mock endpoint，不得接受 raw API key CLI 参数，不得读写 source/target/config/report。
+- Mac Responses credential只能来自Forgis identity派生的macOS Keychain generic-password item或显式env fallback；UserDefaults只能保存非secret workspace/route/gate偏好。不得把credential写入argv、task、projection、operation log、report、fixture、FORGIS_CONFIG或UserDefaults。
+- Mac离线smoke只允许`--forgis-codex-runtime-smoke`，且只能start/thread-start/shutdown，必须`network_requests=0`。不得重新添加HTTP/provider smoke入口。
 - `success_checks` = `path_exists` XOR `command`。
 - `build_command`/`test_command` = YAML 数组（非 shell 字符串）。
 - `validation_commands` argv mapping 推荐；legacy 字符串经 `bash -lc`（有 warning）。
@@ -82,5 +96,6 @@
 - `python3 -m py_compile agent/*.py`
 - `python3 -m unittest`（或窄测试）
 - `bash -n agent/create_pr.sh` / `bash -n agent/build_target.sh`
+- `swift build --product ForgisMac`与Xcode bundle build；Mac UI/runtime改动还必须运行bundle `--forgis-codex-runtime-smoke`
 - `git diff --check`
 - 文档任务未运行构建/测试时须声明。

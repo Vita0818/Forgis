@@ -4,7 +4,8 @@ import SwiftUI
 @main
 struct ForgisMacApp: App {
     init() {
-        ForgisChatSmokeRunner.runIfRequested()
+        ForgisCodexRuntimeBootstrap.configureProcess()
+        ForgisCodexRuntimeSmokeRunner.runIfRequested()
     }
 
     var body: some Scene {
@@ -19,6 +20,7 @@ struct ForgisMacApp: App {
 @main
 struct ForgisMacApp {
     static func main() {
+        ForgisCodexRuntimeBootstrap.configureProcess()
         print("ForgisMac requires SwiftUI on macOS.")
     }
 }

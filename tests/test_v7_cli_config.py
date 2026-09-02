@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import subprocess
 import sys
 import tempfile
@@ -60,19 +61,19 @@ class V7ConfigTests(unittest.TestCase):
             )
         return result
 
-    def test_deepseek_backend_defaults_remain_compatible(self) -> None:
+    def test_default_config_uses_single_codex_kernel(self) -> None:
         with tempfile.TemporaryDirectory() as dirname:
             target = Path(dirname)
             write_minimal_config(target)
             resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
-            self.assertEqual(resolved.agent_backend, "deepseek")
-            self.assertEqual(resolved.model, "deepseek-v4-pro")
-            self.assertEqual(resolved.api_base, "https://api.deepseek.com")
-            self.assertEqual(resolved.api_format, "openai-compatible")
+            self.assertEqual(resolved.agent_backend, "codex-app-server")
+            self.assertEqual(resolved.model, "forgis-migration-model")
+            self.assertEqual(resolved.api_base, "https://example.invalid/v1")
+            self.assertEqual(resolved.api_format, "responses")
             self.assertEqual(resolved.request_timeout_seconds, 120)
             self.assertEqual(resolved.env()["REQUEST_TIMEOUT_SECONDS"], "120")
 
-    def test_openai_compatible_backend_base_url_alias_and_timeout(self) -> None:
+    def test_legacy_backend_name_normalizes_to_codex_with_base_url_alias(self) -> None:
         with tempfile.TemporaryDirectory() as dirname:
             target = Path(dirname)
             write_minimal_config(
@@ -87,7 +88,8 @@ class V7ConfigTests(unittest.TestCase):
                 ),
             )
             resolved = resolve_config(target_root=target, target_repo="owner/target-repo")
-            self.assertEqual(resolved.agent_backend, "openai-compatible")
+            self.assertEqual(resolved.agent_backend, "codex-app-server")
+            self.assertEqual(resolved.api_format, "responses")
             self.assertEqual(resolved.api_base, "https://openrouter.ai/api/v1")
             self.assertEqual(resolved.model, "openai/gpt-4o-mini")
             self.assertEqual(resolved.request_timeout_seconds, 33)
@@ -204,8 +206,10 @@ class V7ConfigTests(unittest.TestCase):
                 ],
                 env=env,
             )
-            self.assertIn('"executed": false', result.stdout)
-            self.assertIn('"status": "skipped-dry-run"', result.stdout)
+            payload = json.loads(result.stdout)
+            self.assertFalse(payload["executed"])
+            self.assertEqual(payload["status"], "skipped-dry_run")
+            self.assertEqual(payload["kernel"], "intatis-codex-app-server")
             self.assertEqual(list((target / "target-output").iterdir()), [])
 
 

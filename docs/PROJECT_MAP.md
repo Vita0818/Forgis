@@ -1,6 +1,6 @@
 # 项目地图
 
-最近自查日期：2026-07-26
+最近自查日期：2026-09-02
 
 ## 顶层目录树
 
@@ -15,18 +15,20 @@
 │   ├── visual_evidence.py
 │   └── qwen_vision.py
 ├── Apps/
+│   ├── ForgisRuntimeCLI/
+│   │   └── Sources/ForgisRuntimeCLI.swift
 │   └── ForgisMac/
 │       └── Sources/
 │           ├── ForgisMacApp.swift
+│           ├── ForgisCodexRuntimeBootstrap.swift
+│           ├── ForgisCodexRuntimeSmoke.swift
 │           ├── ForgisRootView.swift
 │           ├── ForgisDesign.swift
 │           ├── ForgisModels.swift
 │           ├── ForgisComponents.swift
-│           ├── ForgisChatModels.swift
-│           ├── ForgisChatStorage.swift
-│           ├── ForgisChatService.swift
-│           ├── ForgisChatSmoke.swift
-│           ├── ForgisChatViews.swift
+│           ├── ForgisRuntimeSession.swift
+│           ├── ForgisRuntimeStorage.swift
+│           ├── ForgisRuntimeViews.swift
 │           └── ForgisViews.swift
 ├── Forgis.xcodeproj/
 │   ├── project.pbxproj
@@ -59,6 +61,7 @@
 ├── README.zh-CN.md
 ├── RELEASE_NOTES.md
 ├── Package.swift
+├── Package.resolved
 ├── requirements.txt
 └── AGENTS.md
 ```
@@ -67,10 +70,11 @@
 
 ## 关键目录职责
 
-- `agent/`：Forgis 核心 Python 和 shell 运行时。包括配置解析、OpenAI-compatible client、DeepSeek compatibility shim、本地 CLI、受控文件工具、tool loop、staged translation、guardrails、报告、PR body 和 GitHub Actions 辅助脚本。
-- `Apps/ForgisMac/Sources/`：v7.3 Mac SwiftUI shell。当前展示 AI Chat、静态/mock migration run、migration units、report、validation、settings 和 safety boundary；视觉层使用 system semantic colors、system canvas、Material content surfaces、functional Liquid Glass/fallback、SF Symbols 与 serif/system/monospaced 字体分层。AI Chat 可通过 Keychain key、env fallback 或无鉴权本地模式调用非 streaming OpenAI-compatible Chat Completions；Settings 提供手动 provider test；`--forgis-chat-smoke` 提供本地 mock endpoint smoke。仍不执行迁移、不写 source/target、不显示 secret。
-- `Forgis.xcodeproj/`：v7.2+ Xcode project materialization。推荐用 `open Forgis.xcodeproj` 打开；命令行构建为 `xcodebuild -project Forgis.xcodeproj -scheme ForgisMac -configuration Debug build`。
-- `.github/workflows/`：CI 与主运行工作流。`migrate.yml` 是真实 Forgis 运行链路，`validate-forgis.yml` 是本仓库脚本验证链路。
+- `agent/`：Forgis Python/shell产品控制面。包括配置解析、local init/status/resume、migration plan、guardrails、validation、报告、PR body和workflow辅助；`run`只做`execve` handoff。旧DeepSeek/tool-loop/file-tool实现仅保留测试与历史解码，无production入口。
+- `Apps/ForgisRuntimeCLI/Sources/`：唯一production Agent kernel CLI。直接使用Intatis v1启动/resume session、运行turn、处理events/approval/usage、输出runtime result与run report；没有Python AgentLoop或协议fallback。
+- `Apps/ForgisMac/Sources/`：Mac SwiftUI产品界面，直接持有Intatis v1 session并投影message/tool/approval/usage/turn；build product嵌入exact Codex runtime root并提供零网络App Server session smoke。旧独立Chat HTTP client和mock数据已删除。
+- `Forgis.xcodeproj/`：主target最低macOS 26，通过本地package reference `../Intatis`直接链接Core/Protocol/Providers/CodexRuntime四个公开product，并以build phase验证/嵌入exact runtime root。推荐命令行构建使用仓库外DerivedData。
+- `.github/workflows/`：两条workflow都运行在`xcode-27`，checkout固定Intatis commit并构建Swift host；主迁移workflow只调用`forgis-runtime`，验证workflow运行exact offline smoke与Python控制面测试。
 - `skills/`：仓库本地可注入的短技能文档。`agent/skill_loader.py` 只允许从仓库本地 `skills/*.md` 读取安全 slug。
 - `prompts/`：Agent 系统提示词。`agent/deepseek_agent.py` 优先读取 `prompts/system_agent_v3.md`，失败时回落到内置 legacy prompt。
 - `tests/`：unittest 测试套件和报告 fixture。历史核心行为集中在 `tests/test_forgis_config.py`；v7.0 新增 client/CLI/config 窄测试文件。
@@ -82,28 +86,30 @@
 
 ## 关键文件清单
 
-- `Package.swift`：v7.2 SwiftPM manifest，包含 `ForgisMac` macOS executable target，不引入第三方依赖。
-- `Forgis.xcodeproj/project.pbxproj`：Xcode project，包含 macOS app target `ForgisMac`，bundle id `com.Vita0818.ForgisMac`，deployment target macOS 13.0，generated Info.plist，无 entitlements。
+- `Package.swift`：最低macOS 26；导出`ForgisMac`与`forgis-runtime`，后者直接依赖Intatis公开Core/Protocol/Providers/CodexRuntime v1 products。
+- `Package.resolved`：SwiftPM根解析锁；固定Intatis manifest所声明远程依赖的实际revision/version。本地Intatis path本身不进入锁文件。
+- `Forgis.xcodeproj/project.pbxproj`：Xcode project，包含 macOS app target `ForgisMac`，bundle id `com.Vita0818.ForgisMac`，deployment target macOS 26.0，generated Info.plist，无 entitlements，并直接链接同一两个Intatis product。
+- `Forgis.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`：Xcode工程自己的SwiftPM解析锁，与根SwiftPM锁分别由对应构建入口维护。
 - `Forgis.xcodeproj/xcshareddata/xcschemes/ForgisMac.xcscheme`：shared scheme，使 Xcode 和 `xcodebuild -scheme ForgisMac` 能直接找到 Mac app target。
-- `Apps/ForgisMac/Sources/ForgisMacApp.swift`：SwiftUI `@main` 入口和 `WindowGroup`，默认窗口 1100×760；启动时先检查 `--forgis-chat-smoke`，命中时执行 bounded Chat smoke 后退出。
-- `Apps/ForgisMac/Sources/ForgisRootView.swift`：三栏主界面组合，左栏 navigation，中栏 AI Chat / migration / report / settings，右栏 section-aware inspector；content/detail 共享动态 system canvas。
+- `Apps/ForgisMac/Sources/ForgisMacApp.swift`：SwiftUI `@main` 入口和 `WindowGroup`，默认窗口1100×760；启动时先安装共享runtime host identity，再检查只启动/关闭session且零网络的`--forgis-codex-runtime-smoke`。普通App启动不自动启动runtime或发送turn。
+- `Apps/ForgisRuntimeCLI/Sources/ForgisRuntimeCLI.swift`：production内核入口；以`target_subdir`为workspace-write根，读取task/source只读上下文，构造route/session，处理turn/events/approval并写v7 report。
+- `Apps/ForgisMac/Sources/ForgisCodexRuntimeBootstrap.swift`：进程级v1 API-major与`Forgis` identity安装。
+- `Apps/ForgisMac/Sources/ForgisCodexRuntimeSmoke.swift`：从App bundle启动exact runtime的零turn/零provider离线smoke。
+- `Apps/ForgisMac/Sources/ForgisRootView.swift`：三栏主界面组合，左栏Migration/Reports/Settings，中央为真实runtime thread或报告/设置，右栏为section-aware inspector；content/detail共享动态system canvas。
 - `Apps/ForgisMac/Sources/ForgisDesign.swift`：system semantic color、system canvas、serif/system/monospaced 字体、Material card、Liquid Glass/bordered fallback、40pt composer metrics 和 page header。
-- `Apps/ForgisMac/Sources/ForgisModels.swift`：UI mock data、section、migration unit、report、run mode、validation/status/risk 枚举。
+- `Apps/ForgisMac/Sources/ForgisModels.swift`：真实workspace/provider/run gate、runtime message/activity/usage、v7 report与UI projection数据模型；不包含mock运行数据。
 - `Apps/ForgisMac/Sources/ForgisComponents.swift`：`StatusPill`、单行 `SafetyStrip`、`PathLabel`、`InfoRow` 等小组件。
-- `Apps/ForgisMac/Sources/ForgisChatModels.swift`：Mac AI Chat 的 message/config/view model。发送前从 Keychain 或配置 env 名解析 API key，也支持显式关闭鉴权。
-- `Apps/ForgisMac/Sources/ForgisChatStorage.swift`：Mac AI Chat 的 UserDefaults 偏好和 Keychain generic-password secret store。UserDefaults 只存 provider/model/API base/env 名/auth/timeout，不存 API key。
-- `Apps/ForgisMac/Sources/ForgisChatService.swift`：Swift 非 streaming OpenAI-compatible Chat Completions client，负责 endpoint 拼接、request/response shape、HTTP error 脱敏。
-- `Apps/ForgisMac/Sources/ForgisChatSmoke.swift`：Mac AI Chat 的本地 smoke runner，仅由 `--forgis-chat-smoke` 触发；默认访问 localhost mock endpoint，无 raw API key 参数，不写 source/target。
-- `Apps/ForgisMac/Sources/ForgisChatViews.swift`：仅显示 model 的 AI Chat header、user/system Material message、无卡片 assistant message、无 counters 的单排 40pt composer 和精简 chat inspector。
-- `Apps/ForgisMac/Sources/ForgisViews.swift`：Glass selection sidebar、无 Current Run 卡的一行 run mode、单主状态 migration list/detail、合并后的 section-aware Material inspector、report panel 和 settings 页面。
+- `Apps/ForgisMac/Sources/ForgisRuntimeSession.swift`：Mac UI唯一runtime owner。验证workspace/task/route与三重gate，直接构造Intatis session，消费events、处理approval/interrupt/usage并驱动连续turn；拒绝Chat Completions URL且无fallback。
+- `Apps/ForgisMac/Sources/ForgisRuntimeStorage.swift`：Forgis identity派生的UserDefaults key、Keychain credential与owner-only Application Support runtime/report/projection存储。secret不进入projection/report/defaults。
+- `Apps/ForgisMac/Sources/ForgisRuntimeViews.swift`：真实Migration thread、原生assistant streaming、approval card、Stop/follow-up composer和运行状态呈现。
+- `Apps/ForgisMac/Sources/ForgisViews.swift`：Migration/Reports/Settings导航、真实v7 report列表与详情、workspace/route/gate/credential设置和section-aware inspector。
 - `docs/FORGIS_MAC_DESIGN_LANGUAGE.md`：ForgisMac 当前视觉层级、字体、表面、组件、兼容 fallback 与安全边界契约。
 - `agent/forgis_config.py`：解析 `FORGIS_CONFIG.yml`、支持字段、默认值、路径安全、真实运行 gate、`ResolvedConfig.env()` 输出。
 - `agent/forge.py`：旧控制器入口，校验 source/target 目录并输出运行摘要；保留既有参数形式。
-- `agent/cli.py`：v7.1 本地 CLI 入口，支持 `help`、`doctor`、`smoke`、`init`、`status`、`run --config ... --unit ...`、`resume`，并继续兼容旧式 `run --source ... --target ... --target-repo ... [--config ...] [--dry-run]`。
+- `agent/cli.py`：本地control-plane入口；`init/status/resume`保留，`run`解析/持久化unit后用`os.execve`替换为`forgis-runtime`，无返回fallback。
 - `agent/resolve_config.py`：GitHub Actions 中解析目标仓库配置并写入 `$GITHUB_ENV` / `$GITHUB_OUTPUT`。
-- `agent/openai_compatible_client.py`：v7.0 非 streaming OpenAI-compatible Chat Completions client，负责 URL 拼接、request schema、timeout、脱敏错误和 response/tool_call shape 校验。
-- `agent/deepseek_agent.py`：系统提示词、工具 schema、DeepSeek public API compatibility shim。底层 HTTP 通过 `OpenAICompatibleClient`；v6.0 视觉工具包括 `list_visual_references`、`inspect_visual_reference`、`inspect_visual_actual`、`compare_visual_screenshots`。
-- `agent/tool_loop.py`：默认 tool loop 主流程，处理 dry-run/run-agent gate、工具调用、runtime state、repair loop、report 和 migration plan。
+- `agent/openai_compatible_client.py` / `agent/deepseek_agent.py` / `agent/file_tools.py`：legacy测试与历史实现；不在production迁移入口调用。
+- `agent/tool_loop.py`：legacy测试loop；无显式`client_factory`的real run立即拒绝，不能成为新内核fallback。
 - `agent/staged_translation.py`：`execution_mode=staged_translation` 的控制器，按 overview、per_file、stabilization 和微阶段 gate 推进。
 - `agent/file_tools.py`：虚拟路径沙箱和工具实现。读 `source/`、`target/`、`target_subdir/`，写入仅限 `target_subdir`；`visual_validation.reference_screenshot_dirs` / `actual_screenshot_dirs` 是目标仓库只读截图输入目录，即使位于 `target_subdir` 内也不得被写工具修改。
 - `agent/command_runner.py`：保守命令 allowlist。基础命令和 build/test profile 都在这里限制。
@@ -113,7 +119,7 @@
 - `agent/model_env.py`：`model_env` JSON 解析、环境变量映射与缺失 secret 检查，避免打印真实值。
 - `agent/visual_evidence.py`：v6.0 Phase 3 视觉证据目录/状态 helper，负责 runtime 目录结构、状态枚举、阻塞原因、图片路径校验和可序列化摘要。不调用 Qwen，不读源码，不写业务文件。
 - `agent/qwen_vision.py`：v6.0 Qwen provider adapter。缺少 API key 时安全 blocker；显式 `QWEN_API_KEY` 下可用标准库 HTTP transport；测试通过 mock `_post_qwen_vision_payload` 或 HTTP 层，返回有界脱敏 `QwenVisionResult`。
-- `agent/run_report.py`：`FORGIS_RUN_REPORT.md/json` 渲染与安全写入，schema 为 `forgis.run_report.v6.0`，始终包含 `visual_validation` 块。
+- `Apps/ForgisRuntimeCLI/Sources/ForgisRuntimeCLI.swift`写`forgis.run_report.v7.0`；`agent/run_report.py`的v6 renderer只供legacy fixtures/tests。两者都保留`visual_validation` block。
 - `agent/migration_units.py`、`agent/migration_scheduler.py`、`agent/migration_state.py`、`agent/migration_plan_store.py`、`agent/plan_audit.py`：迁移单元、计划持久化、状态转换、resume 与 audit summary。
 - `agent/repair_loop.py`、`agent/repair_report.py`、`agent/runtime_controller.py`：修复循环状态机、报告渲染与运行时观测状态。
 - `agent/source_inventory.py`：源仓库扫描、过滤生成物/二进制/secret-like 文件、按优先级排序。
@@ -131,7 +137,7 @@
 - 手动 GitHub Actions 入口：`.github/workflows/migrate.yml`，输入只有 `target_repo`。
 - 配置解析入口：`python forgis/agent/resolve_config.py --target ... --target-repo ...`。
 - 控制器入口：`python forgis/agent/forge.py --source ... --target ... --target-repo ...`。
-- 默认模型循环入口：`python forgis/agent/tool_loop.py --source ... --target ... --target-repo ...`。
+- 唯一模型循环入口：`forgis-runtime run ...`（Swift/Intatis）；直接执行`python agent/tool_loop.py`的real run被拒绝。
 - 目标输出验证入口：`python forgis/agent/validate_target_output.py snapshot|validate ...`。
 - guardrail 入口：`python forgis/agent/guardrails.py snapshot-readonly|check-readonly|check-target-scope|check-source-clean|check-dry-run-clean|check-secret-leaks ...`。
 - 本地测试入口：`python3 -m unittest tests/test_forgis_config.py tests/test_openai_compatible_client.py tests/test_v7_cli_config.py tests/test_v7_local_cli.py tests/test_v7_local_smoke.py`。
@@ -142,7 +148,7 @@
 - `.gitignore`：忽略 Python 缓存、虚拟环境、`.env`、日志、`reports/`、`forgis-runtime/`、`tmp/`、证书和 secrets 目录。
 - 目标仓库运行配置默认是目标仓库根目录的 `FORGIS_CONFIG.yml`；本地 CLI 可用 `--config` 指向仓库外配置文件。v7.1 local config 可额外包含 `local_source_path`、`local_target_path`、`local_target_repo`，供 `status`、`run --unit`、`resume` 不依赖 GitHub Actions 输入。`agent/forgis_config.py` 拒绝未知字段和 secret-like config path。
 - 目标仓库任务文件默认 `FORGIS_TASK.md`，可由 `task_prompt_path` 指定，但必须位于目标仓库根内且非空。
-- v7.0+ 模型配置支持 `agent_backend: deepseek`、`agent_backend: openai-compatible`、`api_base` / `base_url`、`api_format: openai-compatible`、`model`、`request_timeout_seconds` 和 `model_env`。API key 只能通过 env 映射注入，不应写入配置。
+- production模型配置固定`agent_backend: codex-app-server`、`api_format: responses`，并支持`request_adapter: openai-compatible|openrouter|openai`、`api_base` / `base_url`、`model`和单一`model_env` credential引用。历史backend/api-format名称仅窄解码，不选择旧runtime。
 - v7.1 `validation_commands` 推荐形态是 `- argv: ["python3", "--version"]` 或其它 allowlist 内 argv 数组。旧字符串仍可解析并由 `build_target.sh` 兼容运行，但会 warning。
 - v6.0 `visual_validation` 配置块包含 `enabled`、`provider`、`mode`、`reference_screenshot_dirs`、`actual_screenshot_dirs`、`max_visual_iterations`、`require_reference_first`、`require_actual_for_full_validation`、`upload_visual_artifact`。默认 `mode=reference_guidance`，`reference_screenshot_dirs` / `actual_screenshot_dirs` 默认为空以保持兼容。
 - v6.0 已接通 reference-guided migration、`list_visual_references`、视觉工具 schema、`FileToolSandbox` 分发、runtime visual state/gate、run report / PR body 视觉字段和显式 env 下的 Qwen HTTP transport。仍不自动截图、不上传 visual artifact、不支持多 provider。
@@ -166,7 +172,7 @@
 - `prompts/system_agent_v3.md`：运行时系统提示词。
 - `docs/DS_GUIDE_Swift_Kotlin.md`：SwiftUI 到 Kotlin/Compose 迁移风险文档。
 - `docs/QWEN_VISUAL_MODE.md`：Qwen Visual Evidence Mode 的长期维护说明。当前 v6.0 已接入 reference guidance、受控视觉工具、报告字段、gate 和真实 provider transport；自动截图采集、artifact 上传和多 provider 仍未实现。
-- `examples/FORGIS_CONFIG.local.openai-compatible.yml`：真实本地 OpenAI-compatible 模板，只通过 env 注入 API key。
+- `examples/FORGIS_CONFIG.local.openai-compatible.yml`：文件名为历史兼容，内容已是native Responses/Codex模板，只通过env引用credential。
 - `examples/FORGIS_CONFIG.local.smoke.yml`：无 API key dry-run smoke 模板。
 - `examples/local_migration_fixture/`：v7.1 最小本地迁移 fixture，包含 toy SwiftUI-style source、toy target task 和小型 target-output 文件，不包含 secret 或外部依赖。
 

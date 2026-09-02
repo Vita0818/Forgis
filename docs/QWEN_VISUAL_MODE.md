@@ -2,6 +2,21 @@
 
 最近自查日期：2026-05-29
 
+## 2026-09-01 Codex内核切换后的production状态
+
+本文件其余部分记录v6 legacy视觉合同与fixtures。production迁移入口已切到Intatis
+`IntatisCodexRuntime` v1，不再调用Python `deepseek_agent` / `FileToolSandbox`视觉工具。共享v1尚未公开
+Forgis Qwen exact dynamic-tool host，因此：
+
+- `visual_validation.enabled=true`在Swift runtime发turn前明确fail closed；
+- `enabled=auto`不会假称Qwen已调用，v7 report固定记录`called=false`、
+  `guidance_completed=false`、`full_rendered_validation=false`及limitation；
+- 不会因为新内核缺少Qwen接线而回退旧Python AgentLoop、Qwen tool schema或另一视觉provider；
+- 本轮所有offline runtime smoke都不读取`QWEN_API_KEY`，不发Qwen/OpenAI/第三方provider请求。
+
+恢复该产品能力必须经Intatis公开v1 `CodexRuntimeDynamicTools`直接注册exact Qwen业务工具，并继续满足本文
+路径、secret、reference-first与防假验收合同；不得用shell/Python subprocess adapter补齐。
+
 ## 模式定位
 
 Qwen Visual Evidence Mode 是 Forgis v6.0 的可选视觉证据能力。用户确认的首选实战形态是 reference-guided migration：源 App 的参考截图由用户预先放到目标仓库，并通过 `visual_validation.reference_screenshot_dirs` 声明目录；Forgis 让 Qwen 读取这些 reference screenshots，提取视觉结构、页面层级、颜色、字体、间距、圆角、组件关系和产品气质，再把视觉反馈提供给 DeepSeek / 主 Agent 用于迁移或修正目标端代码。

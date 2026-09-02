@@ -1123,6 +1123,12 @@ def run_tool_loop(
             run_metadata=run_metadata,
         )
 
+    if client_factory is None:
+        raise RuntimeError(
+            "The Python AgentLoop production path is retired. "
+            "Run the ForgisRuntimeCLI/Intatis Codex kernel instead; no legacy fallback is available."
+        )
+
     if config.execution_mode == STAGED_TRANSLATION_MODE:
         from staged_translation import run_staged_translation_loop
 

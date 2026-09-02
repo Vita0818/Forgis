@@ -2,21 +2,8 @@
 import SwiftUI
 
 struct ForgisRootView: View {
-    @State private var section: ForgisSection? = .aiChat
-    @State private var selectedUnitID: MigrationUnit.ID? = MockForgisData.units.first?.id
-    @State private var runMode: RunMode = MockForgisData.run.mode
-    @StateObject private var chatModel = ForgisChatViewModel(
-        configuration: ForgisChatConfiguration.from(run: MockForgisData.run)
-    )
-
-    private let run = MockForgisData.run
-    private let units = MockForgisData.units
-    private let report = MockForgisData.report
-
-    private var selectedUnit: MigrationUnit? {
-        guard let selectedUnitID else { return nil }
-        return units.first { $0.id == selectedUnitID }
-    }
+    @State private var section: ForgisSection? = .migration
+    @StateObject private var runtimeModel = ForgisRuntimeViewModel()
 
     private var activeSection: ForgisSection {
         section ?? .migration
@@ -24,47 +11,41 @@ struct ForgisRootView: View {
 
     var body: some View {
         NavigationSplitView {
-            SidebarView(selection: $section, mode: runMode)
+            SidebarView(
+                selection: $section,
+                mode: runtimeModel.runMode,
+                status: runtimeModel.status)
                 .navigationSplitViewColumnWidth(min: 200, ideal: 236, max: 270)
         } content: {
             ZStack {
-                ForgisSystemCanvas()
-                    .ignoresSafeArea()
+                ForgisSystemCanvas().ignoresSafeArea()
                 content
             }
-            .navigationSplitViewColumnWidth(min: 360, ideal: 580)
+            .navigationSplitViewColumnWidth(min: 420, ideal: 650)
         } detail: {
             ZStack {
-                ForgisSystemCanvas()
-                    .ignoresSafeArea()
+                ForgisSystemCanvas().ignoresSafeArea()
                 InspectorView(
                     activeSection: activeSection,
-                    unit: selectedUnit,
-                    report: report,
-                    safety: MockForgisData.safety,
-                    chatModel: chatModel
-                )
+                    model: runtimeModel)
             }
-            .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 360)
+            .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 390)
         }
         .tint(.accentColor)
-        .frame(minWidth: 900, minHeight: 600)
+        .frame(minWidth: 940, minHeight: 640)
+        .onDisappear {
+            Task { await runtimeModel.shutdown() }
+        }
     }
 
     @ViewBuilder private var content: some View {
         switch activeSection {
-        case .aiChat:
-            AIChatWorkspaceView(model: chatModel)
         case .migration:
-            MigrationWorkspaceView(
-                units: units,
-                selectedUnitID: $selectedUnitID,
-                selectedUnit: selectedUnit
-            )
+            MigrationWorkspaceView(model: runtimeModel)
         case .reports:
-            ReportPanelView(report: report)
+            ReportPanelView(model: runtimeModel)
         case .settings:
-            SettingsView(run: run, mode: runMode, chatModel: chatModel)
+            SettingsView(model: runtimeModel)
         }
     }
 }

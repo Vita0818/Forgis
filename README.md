@@ -1,6 +1,6 @@
 # Forgis
 
-Forgis is a local code migration assistant with a controlled file-tool runtime. The default backend remains DeepSeek, and v7.1 adds a full local MVP for init/status/run-one-unit/resume/report without depending on GitHub Actions.
+Forgis is a local code migration assistant whose only production Agent kernel is Intatis's public `IntatisCodexRuntime` v1 host over exact `codex-cli 0.145.0-intatis.4`. Python remains the configuration, plan, guardrail, validation, report, and PR control plane; it is no longer the model/tool-loop runtime.
 
 Documentation:
 
@@ -10,8 +10,8 @@ Documentation:
 It only does three things:
 
 - reads `FORGIS_CONFIG.yml` and the configured task file from the target repository
-- calls the configured OpenAI-compatible text model when the run switches allow it
-- gives the model controlled file interaction tools
+- starts the exact Codex App Server through Intatis when the three real-run switches allow it
+- gives Codex `target_subdir` as its only workspace-write root while source and target inputs remain read-only
 
 Forgis does not contain project migration intelligence. The target repository task file owns the work instructions.
 
@@ -24,7 +24,13 @@ open Forgis.xcodeproj
 xcodebuild -project Forgis.xcodeproj -scheme ForgisMac -configuration Debug build
 ```
 
-`Package.swift` is still kept as a lightweight SwiftPM build entry. The Mac UI is currently a static/mock shell: it does not call an API, does not execute a real migration, does not write source or target files, and does not display secret values.
+`Package.swift` is still kept as a lightweight SwiftPM build entry. The Mac product now opens directly into a real Migration workspace. Settings selects source, target, task, the strict `target_subdir` write root, and a native Responses route; Migration projects Intatis assistant/tool/approval/usage events and supports Stop and follow-up turns; Reports reads the app's persisted `forgis.run_report.v7.0` files. The former static/mock data and standalone Chat Completions UI/client/smoke have been removed.
+
+ForgisMac requires macOS 26 and a sibling read-only Intatis checkout at `../Intatis`. Its build validates and embeds the active-architecture Codex runtime root in the official App resource layout; `--forgis-codex-runtime-smoke` starts and shuts down a real session without sending a turn or making a provider request. Normal app launch does not start the runtime. A dry run does not resolve credentials, create `target_subdir`, or send a request; a real run still requires all three execution gates.
+
+The Mac UI uses explicit local workspace/route settings and an optional unit ID; it does not reinterpret YAML or mutate the Python migration-plan scheduler. CLI and GitHub Actions remain the `FORGIS_CONFIG.yml` / persisted-plan control plane, while both surfaces use the same Intatis kernel and security boundary.
+
+The SwiftPM product `forgis-runtime` is the only production migration Agent entry. `python -m agent.cli run` performs configuration/plan preparation and then replaces itself with this executable via `execve`; the retired Python AgentLoop has no production fallback path.
 
 ## Workflow Input
 
@@ -38,7 +44,15 @@ Every other setting comes from `FORGIS_CONFIG.yml` at the target repository root
 
 ## Local CLI
 
-v7.1 local CLI uses the same config resolver, tool loop, migration plan persistence, report writer, and sandbox as the workflow:
+Build and select the exact runtime host before local `run`; these variables contain executable paths, never credentials:
+
+```bash
+swift build --product forgis-runtime
+export FORGIS_RUNTIME_EXECUTABLE="$PWD/.build/debug/forgis-runtime"
+export FORGIS_CODEX_RUNTIME="../Intatis/.intatis/runtime-kit/0.66/CodexRuntime/arm64/codex"
+```
+
+The local Python CLI is the control plane and hands `run` to the same Swift/Intatis kernel used by the workflow:
 
 ```bash
 python3 -m venv /tmp/forgis-v7-local-venv
@@ -88,7 +102,7 @@ python -m agent.cli resume --config /path/to/FORGIS_CONFIG.local.yml
 
 `resume` reads the persisted migration plan, reports active/pending/failed counts, does not skip failed/blocked units unless `--skip-failed` is explicit, and prints the next `run --unit` command to use.
 
-Run a real local OpenAI-compatible text model only after exporting the secret env yourself and changing the run gate in config:
+Run a real local native Responses route only after exporting the credential env yourself and changing the run gate in config:
 
 ```bash
 export FORGIS_MODEL_API_KEY="..."
@@ -100,9 +114,9 @@ python -m agent.cli run \
 
 `doctor` only checks the local runtime and prints API env names as set/unset; it does not call an API. `smoke` creates a temporary source/target/config under the requested workdir and runs dry-run, so it does not require an API key. When invoking from outside this repository root, set `PYTHONPATH=/path/to/Forgis` before `python -m agent.cli`.
 
-The CLI does not add new write permissions or shell execution powers. `source` stays read-only, target writes still go through `target_subdir`, reports are bounded and redacted, and real model calls still require `dry_run=false`, `run_agent=true`, and `confirm_real_run=true`.
+The CLI does not add write permissions beyond Codex's native sandbox. `source` stays read-only, `target_subdir` is the only workspace-write root, reports are bounded and redacted, and real turns still require `dry_run=false`, `run_agent=true`, and `confirm_real_run=true`.
 
-v7.1 intentionally does not add streaming, Responses API, a local server/gateway, council, multi-agent orchestration, automatic screenshots, Keychain storage, or global `~/.config` defaults. v7.2 adds only the static/mock Mac UI shell described above.
+The migration kernel now requires a native Responses route; Chat Completions endpoints fail explicitly and never trigger a legacy fallback.
 
 A tiny no-dependency fixture lives at `examples/local_migration_fixture/` for smoke tests and demos.
 
@@ -113,7 +127,7 @@ A tiny no-dependency fixture lives at `examples/local_migration_fixture/` for sm
 Keep three kinds of information separate:
 
 - **GitHub Actions input / CLI, not config:** `target_repo`.
-- **`FORGIS_CONFIG.yml`:** repository refs, output branch/subdir, task file path, OpenAI-compatible model connection fields, run switches, skills, reports, repair-loop settings, migration-plan settings, and non-secret visual-validation switches.
+- **`FORGIS_CONFIG.yml`:** repository refs, output branch/subdir, task file path, native Responses route/model/adapter fields, run switches, reports, migration-plan settings, and non-secret visual-validation switches.
 - **`FORGIS_TASK.md`:** product and migration instructions, such as Android / Kotlin / Jetpack Compose, target stack, UI style, information architecture, migration scope, privacy rules, and "write only inside `target_subdir`" business constraints.
 
 Do not put these fields or values in `FORGIS_CONFIG.yml`:
@@ -122,9 +136,9 @@ Do not put these fields or values in `FORGIS_CONFIG.yml`:
 - `target_stack`; describe Android / Kotlin / Jetpack Compose in `FORGIS_TASK.md`.
 - `source_branch`; use `source_ref`.
 - `target_repo_url`, `source_repo_url`, `target_path`, or `source_path`.
-- `agent_backend: aider`; Forgis currently supports `agent_backend: deepseek` and `agent_backend: openai-compatible`.
+- `agent_backend: aider`; production accepts only `codex-app-server`. Historical `deepseek` / `openai-compatible` values are decode-only and normalize to the same Codex kernel.
 - `build_command: []` or `test_command: []`; omit the field when no command is configured.
-- `model: deepseek/deepseek-v4-pro`; use DeepSeek's accepted model id `deepseek-v4-pro` or `deepseek-v4-flash`.
+- A Chat Completions URL or model that cannot serve the native Codex Responses tool shape; such routes fail closed.
 - Qwen API keys, tokens, evidence roots, screenshot file paths, or secret local paths in `FORGIS_CONFIG.yml`. v6.0 accepts only the non-secret `visual_validation` control block documented below; reference/actual screenshot directories must be target-repo-relative read-only inputs. Qwen credentials/base/model may be supplied only through explicit runtime environment variables and are never written to reports.
 
 Minimum runnable config:
@@ -137,15 +151,16 @@ target_base_branch: main
 target_subdir: Kikaria-Android
 task_prompt_path: FORGIS_TASK.md
 
-agent_backend: deepseek
-model: deepseek-v4-pro
-api_base: https://api.deepseek.com
-api_format: openai-compatible
+agent_backend: codex-app-server
+model: forgis-migration-model
+api_base: https://responses.example.com/v1
+api_format: responses
+request_adapter: openai-compatible
 request_timeout_seconds: 120
 model_env:
-  DEEPSEEK_API_KEY: DEEPSEEK_API_KEY
+  FORGIS_MODEL_API_KEY: FORGIS_MODEL_API_KEY
 
-execution_mode: tool_loop
+execution_mode: codex
 dry_run: false
 run_agent: true
 confirm_real_run: true
@@ -164,15 +179,16 @@ target_base_branch: main
 target_subdir: Kikaria-Android
 task_prompt_path: FORGIS_TASK.md
 
-agent_backend: deepseek
-model: deepseek-v4-pro
-api_base: https://api.deepseek.com
-api_format: openai-compatible
+agent_backend: codex-app-server
+model: forgis-migration-model
+api_base: https://responses.example.com/v1
+api_format: responses
+request_adapter: openai-compatible
 request_timeout_seconds: 120
 model_env:
-  DEEPSEEK_API_KEY: DEEPSEEK_API_KEY
+  FORGIS_MODEL_API_KEY: FORGIS_MODEL_API_KEY
 
-execution_mode: tool_loop
+execution_mode: codex
 dry_run: false
 run_agent: true
 confirm_real_run: true
@@ -306,42 +322,24 @@ For the first Android migration run, omit `build_command` and `test_command`. Th
 
 ### Model API and Secrets
 
-The v7.0 phase 1 model transport is non-streaming OpenAI-compatible Chat Completions. DeepSeek remains the default compatibility path:
+Production migration uses only the native Responses route owned by Intatis/Codex:
 
 ```yaml
-agent_backend: deepseek
-model: deepseek-v4-pro
-api_base: https://api.deepseek.com
-```
-
-or:
-
-```yaml
-model: deepseek-v4-flash
-```
-
-Other OpenAI-compatible text providers can use the explicit backend alias and either `api_base` or `base_url`:
-
-```yaml
-agent_backend: openai-compatible
-model: deepseek-chat
-api_base: https://api.deepseek.com/v1
-api_format: openai-compatible
+agent_backend: codex-app-server
+model: forgis-migration-model
+api_base: https://responses.example.com/v1
+api_format: responses
+request_adapter: openai-compatible
 request_timeout_seconds: 120
 model_env:
   api_key: FORGIS_MODEL_API_KEY
 ```
 
-Real model calls always need a secret mapping:
+`request_adapter` identifies the exact reviewed Responses request shape; it does not translate Chat Completions. Historical `deepseek` and `openai-compatible` backend names are decode-only aliases that normalize to the same Intatis/Codex kernel. A Chat Completions URL fails before runtime startup.
 
-```yaml
-model_env:
-  DEEPSEEK_API_KEY: DEEPSEEK_API_KEY
-```
+Legacy configuration/fixture documentation may still contain the literal compatibility values `model: deepseek-v4-pro`, `model: deepseek-v4-flash`, and `DEEPSEEK_API_KEY: DEEPSEEK_API_KEY`. They describe accepted historical decoding only; none selects a Python, DeepSeek, Chat Completions, or Mac UI runtime.
 
-Never put the actual API key value in `FORGIS_CONFIG.yml`. Missing env errors print only the env var name, not the value. Model API keys, Authorization headers, raw provider responses, and full model outputs must not be written to logs, reports, PR bodies, or fixtures.
-
-v7.0 phase 1 does not implement streaming SSE, the Responses API, image/multimodal model calls, a local server/gateway, council mode, multi-agent orchestration, automatic screenshots, GUI, Keychain storage, `~/.config` defaults, or provider-specific private protocols.
+Never put the actual credential value in `FORGIS_CONFIG.yml`. CLI/GitHub resolve the single `model_env` reference at the real-run boundary. ForgisMac may instead use its product-scoped Keychain item, falling back to the configured env name. Missing-credential errors print only the reference name. Credentials, Authorization headers, raw provider responses, and full model outputs must not be written to argv, task text, projections, operation logs, reports, PR bodies, or fixtures.
 
 ### Qwen Visual Evidence Mode (v6.0 reference guidance)
 
@@ -786,24 +784,24 @@ If GitHub still rejects the body as too long, Forgis automatically retries once 
 
 ## Task File
 
-The task file is the source of execution instructions for the configured model. Forgis does not rewrite it into a larger strategy prompt and does not preload source repository contents.
-
-The model must read the task file through the file tools, then inspect the source and target repositories as needed through those same tools.
+The task file is the source of execution instructions. The Swift host passes its bounded text plus the exact read-only source path and writable `target_subdir` contract into the Codex turn; Codex then uses its native tools.
 
 Do not put API keys, tokens, certificates, signing material, or private information in the task file or config file.
 
 ## Model API
 
-Forgis uses non-streaming OpenAI-compatible Chat Completions. `agent_backend: deepseek` remains the default and `agent_backend: openai-compatible` is the generic alias. `model_env` maps runtime environment variable names to GitHub Actions environment variable names that are populated from secrets.
+Production migration uses only the native Responses route owned by Intatis/Codex. `agent_backend` normalizes to `codex-app-server`; `api_format` normalizes to `responses`; `request_adapter` selects the exact reviewed route shape. Chat Completions is not translated or used as fallback. `model_env` maps a single runtime credential reference to an environment variable populated by the host.
 
 ```yaml
 model_env:
-  DEEPSEEK_API_KEY: DEEPSEEK_API_KEY
+  FORGIS_MODEL_API_KEY: FORGIS_MODEL_API_KEY
 ```
 
 Forgis prints only environment variable names and presence status. It never prints secret values, puts them in prompts, writes them to logs, or stores them in artifacts.
 
-## File Tools
+## Legacy Python File Tools
+
+The following schemas remain only for legacy fixtures/tests. They are not exposed by any production migration entry; Codex native tools and sandbox own production file/command behavior.
 
 Read tools:
 

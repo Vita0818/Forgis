@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import subprocess
 import sys
 import tempfile
@@ -37,13 +38,15 @@ class V7LocalSmokeTests(unittest.TestCase):
                 [sys.executable, "-m", "agent.cli", "smoke", "--workdir", str(workdir)],
                 env=env,
             )
-            self.assertIn("Smoke mode: dry-run; no API calls were made.", result.stdout)
-            self.assertIn("Smoke status: skipped-dry-run", result.stdout)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "skipped-dry_run")
+            self.assertEqual(payload["kernel"], "intatis-codex-app-server")
+            self.assertFalse(payload["executed"])
             self.assertNotIn(SECRET_SENTINEL, result.stdout)
             self.assertTrue((workdir / "summary.md").is_file())
             self.assertTrue((workdir / "FORGIS_CONFIG.local.smoke.yml").is_file())
             self.assertEqual(list((workdir / "target" / "target-output").iterdir()), [])
-            self.assertTrue((workdir / "runtime" / "reports").is_dir())
+            self.assertTrue((workdir / ".forgis-runtime" / "reports").is_dir())
 
 
 if __name__ == "__main__":

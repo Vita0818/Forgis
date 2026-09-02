@@ -11,13 +11,54 @@
 - 现有 fallback、adapter 或重复实现不构成先例，后续不得扩展。安全 fail-closed 与明确要求的旧数据解码/迁移不是功能兜底，但必须保持最窄范围，不能演化成备用产品实现。
 - 只有用户针对 exact 依赖、exact 范围和退出条件作出的新明文决定才能例外。
 
-最近自查日期：2026-07-03
+最近自查日期：2026-09-02
 
 ## 总体架构
 
-Forgis 是一个 Python CLI/Agent 工具，外加 v7.3 Mac SwiftUI 壳。Python 核心不内置具体平台迁移智能，而是读取目标仓库或 v7.1 local config 的配置与任务文件，在满足真实运行开关时调用非 streaming OpenAI-compatible Chat Completions，并把受控文件工具交给模型使用。`agent_backend: deepseek` 仍是默认兼容路径，`agent_backend: openai-compatible` 是通用 alias。v7.1 新增本地 init/status/run-one-unit/resume/report 最小闭环；v7.2 新增 `Forgis.xcodeproj` 和静态/mock Mac UI shell；v7.3 在 Mac UI 中新增 AI Chat 页面、可编辑 provider 设置、Keychain/env secret 解析、手动 provider test、Swift 非 streaming Chat Completions client 和 localhost mock smoke runner，但仍不新增真实迁移执行、server、streaming、多 Agent 或 shell runner。v6.0 已为 Qwen Visual Evidence Mode 接入 reference-guided migration、受控视觉工具、报告字段、runtime gate 和显式 env 下的安全 provider transport；Qwen 仍只是视觉理解 provider，不是核心迁移智能，也不是第二个代码 Agent。
+### 当前production Agent架构（2026-09-01全量切换）
 
-核心运行方式：
+Forgis的唯一production迁移内核是Intatis公开`IntatisCodexRuntime` v1与固定派生
+`codex-cli 0.145.0-intatis.4`。Swift `forgis-runtime`直接拥有App Server process、session、thread、turn、
+events、approval与shutdown；Codex拥有agent loop、context、native tools、sandbox和auto-review。Forgis不
+实现JSON-RPC、Responses translator、第二tool loop或runtime fallback。
+
+```text
+FORGIS_CONFIG / task / selected unit
+  -> Python control plane（解析、plan、guardrails；不调用模型）
+  -> execve forgis-runtime
+  -> IntatisCodexRuntime v1
+  -> exact codex app-server --stdio
+  -> native Responses route（仅真实用户运行时）
+  -> target_subdir native workspace-write
+  -> Forgis v7 report + validation/guardrail/PR control plane
+```
+
+本地CLI和GitHub Actions都进入同一Swift executable。workflow固定Intatis commit并在`xcode-27` runner临时
+目录中调用Intatis官方build/validator生成exact arm64 runtime；Mac App build phase则从只读runtime kit校验
+并复制active-architecture root到build product的官方资源路径。测试只运行doctor与start/thread-start/
+shutdown offline smoke，不发送turn，`network_requests=0`。
+
+权限边界通过官方workspace表达：`target_subdir`是唯一workspace-write根；source repo、target root、config
+与task位于写根外。模型只收到路径和task文本，所有代码/命令能力来自Codex native tools。旧Python
+`FileToolSandbox`和command allowlist不再是production模型工具面，但post-run guardrails仍独立验证source
+clean、target scope、read-only inputs和secret leaks。
+
+显式`visual_validation.enabled=true`当前因Intatis v1没有Forgis Qwen official dynamic-tool接线而fail
+closed；禁止退回旧Python视觉工具。Mac产品UI与CLI都直接使用同一Intatis v1内核；旧独立Chat
+Completions UI/client/smoke已删除，不能承担fallback。
+
+### 历史架构记录（非production）
+
+以下段落记录v7.1–v7.3早期Python Agent与最小Intatis接线状态，仅用于理解legacy tests，不覆盖上节当前production架构。
+
+Forgis 曾是一个 Python CLI/Agent 工具，外加 v7.3 Mac SwiftUI 壳。Python 核心读取目标仓库配置与任务文件并调用非streaming Chat Completions；这些模型/tool-loop行为现已退出production。
+
+2026-09-01新增的Intatis边界仅存在于ForgisMac：SwiftPM和Xcode主target以本地path
+`../Intatis`直接链接公开`IntatisCore` / `IntatisCodexRuntime` v1，并将最低平台同步为macOS 26。
+`ForgisCodexRuntimeBootstrap`只在进程入口校验v1 host contract并安装`Forgis` product identity。
+该早期阶段尚未创建session/route/runtime bundle；现已由上节全量切换取代。Intatis checkout始终只读。
+
+以下旧Python运行方式仅作历史/测试结构说明，不是当前production调用链：
 
 1. GitHub Actions 或本地 `python -m agent.cli run` 接收 `target_repo`；v7.1 local config 可保存 `local_source_path`、`local_target_path`、`local_target_repo`，让 `status`、`run --unit`、`resume` 不依赖 GitHub Actions。
 2. checkout Forgis 仓库、目标仓库和只读 source 仓库。
@@ -31,8 +72,9 @@ Forgis 是一个 Python CLI/Agent 工具，外加 v7.3 Mac SwiftUI 壳。Python 
 
 - 配置层：`agent/forgis_config.py` 是所有运行配置的单一解析源。它定义支持字段、默认值、路径约束、`ResolvedConfig` 和 GitHub Actions env/output。
 - 工作流入口层：`.github/workflows/migrate.yml` 编排 checkout、config resolve、guardrails、tool loop、validation、log、PR、artifact。`.github/workflows/validate-forgis.yml` 只验证本仓库脚本。`agent/cli.py` 提供本地 `help`、`doctor`、`smoke`、`init`、`status`、`run --unit`、`resume`，不新增权限。
-- Agent 调用层：`agent/openai_compatible_client.py` 提供非 streaming Chat Completions HTTP transport；`agent/deepseek_agent.py` 提供系统提示词、tool schema 和 DeepSeek-compatible public API shim。
-- Mac Chat 层：`Apps/ForgisMac/Sources/ForgisChatModels.swift`、`ForgisChatStorage.swift`、`ForgisChatService.swift`、`ForgisChatSmoke.swift`、`ForgisChatViews.swift` 提供 UI-side message state、UserDefaults 非 secret 偏好、Keychain/env secret 解析、非 streaming OpenAI-compatible HTTP client、bounded local smoke runner 和 chat composer/message surface。该层不拥有文件工具，不接 Python tool loop，不写 source/target。
+- Legacy Agent调用层：`agent/openai_compatible_client.py`与`agent/deepseek_agent.py`只服务历史fixture和显式测试client注入，不在CLI或Mac production入口。
+- Mac runtime UI层：`ForgisRuntimeSession.swift`直接构造`ResponsesRuntimeRoute`、`CodexRuntimeConfiguration`与`CodexAppServerSession`，消费官方event stream并提供approval、interrupt、usage和连续turn；`ForgisRuntimeViews.swift`只做presentation；`ForgisRuntimeStorage.swift`只做host identity派生的配置、credential引用、projection和report生命周期。该层不实现App Server协议、tool loop、provider HTTP或fallback。
+- 共享Codex宿主编译边界：`Apps/ForgisMac/Sources/ForgisCodexRuntimeBootstrap.swift`只负责API-major fail-closed与进程级host identity安装；session/provider/UI projection由上述Mac runtime UI层通过公开v1 API完成，不得塞回bootstrap或重写transport。
 - 工具沙箱层：`agent/file_tools.py` 实现所有模型可调用工具，并强制虚拟路径、symlink、防 secret-like 路径、写入范围和 workflow 文件保护。
 - 命令执行层：`agent/command_runner.py`、`agent/build_runner.py`、`agent/build_feedback.py` 限制命令 allowlist、执行 build/test、生成脱敏摘要。v7.1 `validation_commands` 的 argv mapping 也复用这个 allowlist；旧 shell string 仅兼容 warning。
 - 控制器层：`agent/tool_loop.py` 处理默认循环、运行时状态、repair loop、migration plan、report 写入。`agent/staged_translation.py` 处理分阶段控制模式。
@@ -54,16 +96,16 @@ Forgis 是一个 Python CLI/Agent 工具，外加 v7.3 Mac SwiftUI 壳。Python 
 - `RuntimeController`：位于 `agent/runtime_controller.py`，记录读写、diff、命令、build/test、repair、skills、migration plan 等观测状态。
 - `MigrationUnit` / `MigrationPlan`：位于 `agent/migration_units.py`，支持 unit 类型、状态、优先级、路径、失败摘要、changed paths 和合法状态转换。
 - `SourceUnit`：位于 `agent/source_inventory.py`，表示 staged translation 或 scheduler 中的源文件单元。
-- `ForgisChatConfiguration` / `ForgisChatMessage`：位于 `Apps/ForgisMac/Sources/ForgisChatModels.swift`，承载 Mac AI Chat 的 provider/model/API base/env name/auth requirement/timeout 和 UI message state。API key 不进入配置对象，运行时优先从 Keychain 读取，缺失时按 env name 从 `ProcessInfo.processInfo.environment` 回退读取。
-- `ForgisChatPreferencesStore` / `ForgisKeychainSecretStore`：位于 `Apps/ForgisMac/Sources/ForgisChatStorage.swift`，负责非 secret UserDefaults 偏好和 macOS Keychain generic-password 存取。Keychain 只存 API key 值；UserDefaults 只存引用和普通 provider 配置。
-- `ForgisOpenAICompatibleChatClient`：位于 `Apps/ForgisMac/Sources/ForgisChatService.swift`，承载 Mac AI Chat 的非 streaming Chat Completions request/response、endpoint 拼接和有界脱敏错误。
-- `ForgisChatSmokeRunner`：位于 `Apps/ForgisMac/Sources/ForgisChatSmoke.swift`，仅在 `--forgis-chat-smoke` 启动参数存在时执行一次本地 Chat Completions smoke，默认无鉴权访问 localhost mock endpoint；需要鉴权时只接受 env 名，不接受 raw key 参数。
+- `ForgisWorkspaceConfiguration` / `ForgisProviderConfiguration`：Mac UI的显式source/target/task/write-root、native Responses route/model/adapter和credential env引用；不保存credential值。
+- `ForgisRuntimeViewModel`：Mac UI唯一session owner，投影`CodexRuntimeEvent`到有界message/activity/approval/usage状态，并维护三重real-run gate。
+- `ForgisRuntimePreferencesStore` / `ForgisRuntimeCredentialStore`：前者通过Intatis host identity派生的UserDefaults key只保存非secret配置；后者通过派生Keychain service保存bearer credential。
+- `ForgisRuntimeFileStore`：在Forgis Application Support下创建0700 runtime root，保存有界UI projection、operation log和`forgis.run_report.v7.0`，不写source或target。
 - `RunReportWriteResult` / report JSON：`agent/run_report.py` 输出 `forgis.run_report.v6.0`，包含常驻 `visual_validation` 块。
 - Migration plan JSON：`agent/migration_plan_store.py` 输出 `forgis.migration_plan.v5.0`，并兼容读取 v4.8、v3.9、v3.8、v3.7。
 
 ## 关键业务链路
 
-### 默认 tool loop
+### Legacy默认tool loop（测试注入专用）
 
 1. `resolve_config()` 固定读取目标仓库根目录 `FORGIS_CONFIG.yml`。
 2. `run_tool_loop()` 先加载 skills 和 migration plan。
@@ -74,13 +116,13 @@ Forgis 是一个 Python CLI/Agent 工具，外加 v7.3 Mac SwiftUI 壳。Python 
 7. final summary 前可能被 repair loop gate 阻止，要求先 diff 或 build/test。
 8. 完成或达到 max iterations 后，生成 repair report、run report、migration plan、status env、operation log。
 
-### staged translation
+### Legacy staged translation（测试/历史plan metadata）
 
 `execution_mode=staged_translation` 时，`tool_loop.py` 转入 `agent/staged_translation.py`。该模式先扫描 source inventory，然后按 `overview`、`per_file`、`stabilization` 推进。per-file 阶段可强制 `feed`、`write`、`readonly_compare`、`revise` 微阶段。控制器会阻止过早 final summary，并限制 overview、feed、compare 等阶段只能写 staged progress artifacts 或 compare reports。
 
 ### GitHub Actions 真实运行
 
-`.github/workflows/migrate.yml` 中真实 push/PR 只在 `dry_run=false`、`run_agent=true`、`confirm_real_run=true` 且 guardrails、validation、secret leak 检查成功时发生。`agent/create_pr.sh` 不 force push。如果 `origin/$TARGET_BRANCH` 已存在，会使用 `${TARGET_BRANCH}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}` 作为实际 push/PR head。
+`.github/workflows/migrate.yml`先构建exact Intatis runtime与Swift host，再直接运行`forgis-runtime`。真实push/PR仍只在`dry_run=false`、`run_agent=true`、`confirm_real_run=true`且guardrails、validation、secret leak检查成功时发生。`agent/create_pr.sh`不force push；远程目标分支已存在时仍使用fallback head。
 
 ### Qwen Visual Evidence Mode 链路
 
@@ -92,23 +134,27 @@ v6.0 建立契约、配置解析、证据目录/状态 helper、mock-first provi
 - 本地迁移流：`agent.cli init` 写显式 output config；`status` 解析 config 并加载或生成有界 migration unit summary；`run --unit` 通过 existing migration plan switch 选择一个 active unit，再进入 dry-run 或 gated real tool loop；`resume` 只读取 persisted migration state 并输出下一步，不调用模型或 shell。
 - 视觉配置/证据流：`visual_validation` -> `VisualValidationConfig` -> `FORGIS_VISUAL_*` env/output；`list_visual_references` 从 `reference_screenshot_dirs` 返回合法图片虚拟路径；visual inspect/compare tool call -> `FileToolSandbox` 虚拟路径校验 -> runtime `visual-evidence/<run_id>/<target_repo_slug>/reference|actual|qwen` 目录创建 -> `qwen_vision` mockable adapter -> `RuntimeController` 视觉状态（含 `guidance_completed` / `full_rendered_validation`）-> `FORGIS_RUN_REPORT.md/json` 和 PR body 视觉摘要。
 - 任务流：目标仓库 task file -> `deepseek_agent.initial_messages()` 中提示模型先读取 `task`。
-- 模型请求流：`tool_loop.py` / `staged_translation.py` -> `DeepSeekClient.chat()` compatibility facade -> `OpenAICompatibleClient.chat()` -> normalized Chat Completions endpoint。非 streaming，仅发送 `model`、`messages`、可选 `tools`、可选 `tool_choice`。
-- Mac Chat 请求流：`AIChatWorkspaceView` -> `ForgisChatViewModel.send()` 或 Settings `testConnection()` -> Keychain key lookup -> configured env fallback -> optional no-auth local mode -> `ForgisOpenAICompatibleChatClient.complete()` -> normalized non-streaming Chat Completions endpoint。`--forgis-chat-smoke` 复用同一个 client 调用 localhost mock endpoint。该请求没有工具、没有 target write、没有 report 写入。
-- 文件访问流：模型 tool call -> `FileToolSandbox` -> source/target/target_subdir 虚拟路径解析 -> 文件读写或 git/command 工具。
+- production模型请求流：CLI或Mac UI -> `CodexAppServerSession.runTurn()` -> exact App Server native Responses wire。旧`DeepSeekClient`/`OpenAICompatibleClient`只供legacy tests，不在任何产品入口。
+- Mac UI请求流：Settings显式workspace/route/gate -> Keychain credential或配置env fallback -> `ForgisRuntimeViewModel` -> `CodexAppServerSession.events/start/runTurn/resolveApproval/interruptCurrentTurn`。UI不构造HTTP request、不翻译Responses、不调用Chat Completions；dry run在credential解析和workspace创建前结束。
+- production文件访问流：Codex native tool -> native sandbox，以`target_subdir`为workspace-write；Forgis post-run guardrail独立复核。旧`FileToolSandbox`流仅为legacy测试。
 - 状态流：工具结果 -> `RuntimeController.observe_tool_result()`、`RepairLoopController.observe_tool_result()`、migration plan runtime fields -> report/status outputs。
 - 报告流：runtime state + operation log -> `repair_report`、`run_report`、`FORGIS_MIGRATION_PLAN.json`、GitHub Step Summary、target `FORGIS_LOG.md`。
 
 ## 网络、本地存储、后台任务
 
-- 网络：默认 Python 模型链路在 `OpenAICompatibleClient.chat()` 中调用 OpenAI-compatible Chat Completions API。Mac AI Chat 可在用户发送消息、手动测试 provider、或运行 `--forgis-chat-smoke` 且 Keychain/env key 可解析或 auth 被显式关闭时调用同类非 streaming Chat Completions endpoint。仓库 checkout、push、PR 由 GitHub Actions 和 `gh`/`git` 完成。`agent/qwen_vision.py` 只有在显式提供 `QWEN_API_KEY` 时才调用 Qwen HTTP transport；单元测试通过 mock 替换底层函数或 HTTP 层，不真实联网。
-- 本地存储：目标仓库输出只允许写入 `target_subdir`。运行报告和 migration plan 写入 Forgis runtime workspace 下的安全输出目录，不能写到 source/target checkout、Desktop、Downloads、Documents 或 secret-like 路径。Mac AI Chat 非 secret provider 偏好写入 UserDefaults，API key 写入 macOS Keychain generic-password item；不写源码、报告、fixture 或日志。`python -m agent.cli smoke` 只在用户指定或系统临时 workdir 下创建 source/target/config/runtime。
+- 网络：只有用户完成Mac UI三重real-run gate并按下Start/Send，或CLI/GitHub进入同一真实gate后，Intatis child App Server才可能调用配置的native Responses route。Settings保存、provider配置、App启动、构建、doctor和offline smoke不发送网络请求。仓库checkout/push/PR由GitHub Actions和`gh`/`git`完成；Qwen仍只有显式`QWEN_API_KEY`与官方能力可用时才允许调用，当前Mac/production Codex v1没有该接线。
+- 本地存储：目标仓库输出只允许写入`target_subdir`。Mac runtime、UI projection、operation log和v7报告位于Forgis identity派生的owner-only Application Support root；非secret workspace/route偏好写UserDefaults，bearer credential写Keychain或只从显式env读取。secret不写源码、报告、projection、fixture或日志。
 - 后台任务：没有常驻 daemon。所有任务由 CLI 或 GitHub Actions step 驱动。
 
 ## UI 与业务逻辑分层
 
-v7.3 Mac UI shell 推荐入口是 `Forgis.xcodeproj`，target/scheme 为 `ForgisMac`；`Package.swift` 仍保留为轻量 SwiftPM build entry。当前 UI 展示 AI Chat、静态/mock migration run、migration units、report、validation、settings 和 safety boundary。视觉架构由 `ForgisDesign.swift` 集中提供：`ForgisSystemCanvas` 负责动态 window surface，结构化数据使用 Material + system separator，功能性导航/composer/button 在 macOS 26 使用原生 Liquid Glass 并在 macOS 13–15 回退为 Material/bordered controls；页面标题、正文和技术字段分别使用 serif、system 与 monospaced。普通 assistant 消息直接落在 conversation canvas，user/system/error 才使用有边界表面。完整视觉契约见 `docs/FORGIS_MAC_DESIGN_LANGUAGE.md`。
+Mac UI推荐入口是`Forgis.xcodeproj`，target/scheme为`ForgisMac`；`Package.swift`保留轻量SwiftPM build entry。当前UI只保留Migration、Reports和Settings：Migration是Intatis原生event thread，Reports读取真实v7产物，Settings配置真实workspace/route/gate/credential。视觉架构由`ForgisDesign.swift`集中提供：system window canvas、Material结构面、Liquid Glass功能控制、SF Symbols以及serif/system/monospaced层级。assistant final直接落在canvas，user/system/error使用有界表面，commentary使用次级文字。完整视觉契约见`docs/FORGIS_MAC_DESIGN_LANGUAGE.md`。
 
-AI Chat 可以配置 provider/model/API base/auth，并调用非 streaming OpenAI-compatible Chat Completions；Settings 可保存配置并测试 provider；`--forgis-chat-smoke` 可用本地 mock endpoint 验证编译产物的 HTTP 路径。视觉层没有文件工具、没有 CLI/run state 接线、不执行真实迁移、不写 source/target、不显示 secret。真实迁移运行逻辑仍由 Python CLI / GitHub Actions 驱动，受 dry-run/real-run gate、`target_subdir`、command allowlist 和 secret redaction 约束。
+由于Intatis公开package的最低平台为macOS 26，ForgisMac的SwiftPM、Xcode deployment target和生成
+Info.plist最低系统均为26.0；旧13–15视觉fallback源码没有在本次最小依赖接线中删除或重写，但不再属于
+当前shipping deployment范围。
+
+Settings只保存非secret workspace与native Responses route；没有“测试provider”HTTP旁路。Migration在三重gate后直接启动Intatis，显示流式消息、tool item、approval和usage；Stop调用官方interrupt，后续输入复用同一session。dry run明确不启动runtime、不读credential、不创建write root。GUI不解析YAML scheduler；CLI/GitHub继续拥有`FORGIS_CONFIG.yml`和migration-plan控制面。
 
 ## 平台相关与共享代码边界
 
@@ -117,7 +163,7 @@ Forgis 核心保持平台无关。SwiftUI、Compose、HarmonyOS 相关内容位�
 ## 安全、鉴权、权限和文件访问
 
 - `model_env` 只映射环境变量名，`model_env.py` 校验缺失但不打印真实 secret。OpenAI-compatible client 的异常、repr、日志和 report 字段不得包含 API key、Authorization header、raw provider response 或完整模型输出。
-- Mac AI Chat 只显示 Keychain/env/no-auth 状态和 env name；`Authorization` header 只在 request 内构造，provider error body 必须脱敏和截断，不写日志或报告。UserDefaults 不得保存 API key，Keychain 值不得写入源码、测试、报告或 fixture。Smoke runner 不接受 raw API key 参数，只能按 env 名读取。
+- Mac UI只显示Keychain/env/no-auth状态和env name；credential仅交给`ResponsesRuntimeRoute`，不得写argv、task、UserDefaults、projection、report、operation log、源码、测试或fixture。错误和runtime event在投影前必须按active credential脱敏并截断。
 - 外部 `--config` 是只读运行输入；路径不得包含 secret-like 段，不得位于 source repo 内，模型只能通过虚拟路径 `config` 读取它，写工具不能修改它。
 - `visual_validation` 不允许 API key、token、API base、model name、截图文件路径或证据根目录字段；只允许 target-repo-relative `reference_screenshot_dirs` / `actual_screenshot_dirs` 作为只读目录输入，未知字段直接失败。
 - `guardrails.py check-secret-leaks` 会扫描 `target_subdir` 是否写入配置映射中的 secret 值。
@@ -125,7 +171,7 @@ Forgis 核心保持平台无关。SwiftUI、Compose、HarmonyOS 相关内容位�
 - `run_command` 只允许保守基础命令，且 cwd 必须在 `target_subdir` 内。
 - `run_build` / `run_tests` 只运行配置数组命令，profile 目前只允许安全 Python `py_compile` / `unittest` 类命令。
 - `validation_commands` 新配置应使用 argv mapping，并由 `agent/build_target.sh` 通过 `command_runner.py` allowlist 执行。旧字符串仍以 `bash -lc` 兼容运行并打印 warning，不应出现在新示例或本地 full migration 配置中。
-- v7.x 不新增 streaming、Responses API、local server/gateway、council、多 Agent、自动截图、`~/.config` 默认配置或 provider-specific private protocol。v7.3 Mac AI Chat 是 GUI 内的非 streaming chat endpoint，不是新的 agent backend 或 shell runner。
+- CLI与Mac UI都已启动Codex session/turn能力；没有真实provider调用测试、没有协议translator或fallback。Chat Completions URL由Mac/CLI本地配置验证明确拒绝。
 
 ## 当前架构风险或不确定点
 

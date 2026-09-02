@@ -11,11 +11,14 @@ DEFAULT_CONFIG_PATH = "FORGIS_CONFIG.yml"
 DEFAULT_SOURCE_REF = "main"
 DEFAULT_TASK_PROMPT_PATH = "FORGIS_TASK.md"
 DEFAULT_TARGET_SUBDIR = "target-output"
-DEFAULT_AGENT_BACKEND = "deepseek"
-SUPPORTED_AGENT_BACKENDS = frozenset({"deepseek", "openai-compatible"})
-DEFAULT_MODEL = "deepseek-v4-pro"
-DEFAULT_API_BASE = "https://api.deepseek.com"
-DEFAULT_API_FORMAT = "openai-compatible"
+DEFAULT_AGENT_BACKEND = "codex-app-server"
+SUPPORTED_AGENT_BACKENDS = frozenset({"codex-app-server"})
+LEGACY_AGENT_BACKEND_VALUES = frozenset({"deepseek", "openai-compatible"})
+DEFAULT_MODEL = "forgis-migration-model"
+DEFAULT_API_BASE = "https://example.invalid/v1"
+DEFAULT_API_FORMAT = "responses"
+DEFAULT_REQUEST_ADAPTER = "openai-compatible"
+SUPPORTED_REQUEST_ADAPTERS = frozenset({"openai-compatible", "openrouter", "openai"})
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 120
 MAX_REQUEST_TIMEOUT_SECONDS = 600
 DEFAULT_TARGET_BASE_BRANCH = "main"
@@ -83,7 +86,7 @@ DEFAULT_MIGRATION_PLAN_ALLOW_MANUAL_BLOCK = True
 DEFAULT_MIGRATION_PLAN_ALLOW_MANUAL_DEFER = True
 DEFAULT_MIGRATION_PLAN_ALLOW_MANUAL_ACTIVATE = True
 DEFAULT_MIGRATION_PLAN_STATUS_UPDATE_REQUIRES_RESUME = True
-DEFAULT_EXECUTION_MODE = "tool_loop"
+DEFAULT_EXECUTION_MODE = "codex"
 STAGED_TRANSLATION_MODE = "staged_translation"
 DEFAULT_STAGED_MIN_TOTAL_ITERATIONS = 120
 DEFAULT_STAGED_MIN_PROCESSED_UNITS = 3
@@ -137,6 +140,7 @@ CONFIG_FIELDS = {
     "api_base",
     "base_url",
     "api_format",
+    "request_adapter",
     "request_timeout_seconds",
     "target_branch",
     "target_base_branch",
@@ -305,6 +309,7 @@ class ResolvedConfig:
     model: str
     api_base: str
     api_format: str
+    request_adapter: str
     request_timeout_seconds: int
     target_branch: str
     target_base_branch: str
@@ -390,6 +395,7 @@ class ResolvedConfig:
             "MODEL": self.model,
             "API_BASE": self.api_base,
             "API_FORMAT": self.api_format,
+            "REQUEST_ADAPTER": self.request_adapter,
             "REQUEST_TIMEOUT_SECONDS": str(self.request_timeout_seconds),
             "TARGET_BRANCH": self.target_branch,
             "TARGET_BASE_BRANCH": self.target_base_branch,
@@ -1124,10 +1130,11 @@ def select_execution_mode(config: dict[str, Any]) -> str:
         "default": DEFAULT_EXECUTION_MODE,
         "tool_loop": DEFAULT_EXECUTION_MODE,
         "legacy": DEFAULT_EXECUTION_MODE,
+        "codex": DEFAULT_EXECUTION_MODE,
         STAGED_TRANSLATION_MODE: STAGED_TRANSLATION_MODE,
     }
     if mode not in aliases:
-        raise ValueError("execution_mode must be either tool_loop or staged_translation.")
+        raise ValueError("execution_mode must be codex or staged_translation metadata.")
     return aliases[mode]
 
 
@@ -1443,7 +1450,7 @@ def load_config_file(target_root: Path, config_path: str | None = DEFAULT_CONFIG
         raise ValueError(
             "Unsupported FORGIS_CONFIG.yml field(s): "
             + ", ".join(unsupported)
-            + ". Forgis only accepts generic DeepSeek/file-tool settings."
+            + ". Forgis only accepts the documented Codex runtime control fields."
         )
 
     return config, config_relative
@@ -1515,6 +1522,7 @@ def resolve_config(
         "model": select_value("model", config, DEFAULT_MODEL),
         "api_base": select_api_base(config),
         "api_format": select_value("api_format", config, DEFAULT_API_FORMAT),
+        "request_adapter": select_value("request_adapter", config, DEFAULT_REQUEST_ADAPTER),
         "target_branch": select_value("target_branch", config),
         "target_base_branch": select_value(
             "target_base_branch",
@@ -1532,13 +1540,26 @@ def resolve_config(
             + ". Provide them in FORGIS_CONFIG.yml; target_repo is supplied by the workflow input."
         )
 
-    agent_backend = (values["agent_backend"] or DEFAULT_AGENT_BACKEND).casefold()
+    configured_agent_backend = (values["agent_backend"] or DEFAULT_AGENT_BACKEND).casefold()
+    if configured_agent_backend in LEGACY_AGENT_BACKEND_VALUES:
+        # Narrow legacy-config decoding only. These names no longer select a
+        # runtime; every production run is normalized to the single Codex
+        # App Server kernel.
+        agent_backend = DEFAULT_AGENT_BACKEND
+    else:
+        agent_backend = configured_agent_backend
     if agent_backend not in SUPPORTED_AGENT_BACKENDS:
-        raise ValueError("Only agent_backend: deepseek or openai-compatible is currently supported.")
+        raise ValueError("Only agent_backend: codex-app-server is supported; legacy Python backends are retired.")
 
-    api_format = (values["api_format"] or DEFAULT_API_FORMAT).casefold()
+    configured_api_format = (values["api_format"] or DEFAULT_API_FORMAT).casefold()
+    api_format = "responses" if configured_api_format == "openai-compatible" else configured_api_format
     if api_format != DEFAULT_API_FORMAT:
-        raise ValueError("Only api_format: openai-compatible is currently supported.")
+        raise ValueError("Only api_format: responses is supported by the Codex runtime.")
+    request_adapter = (values["request_adapter"] or DEFAULT_REQUEST_ADAPTER).casefold()
+    if request_adapter not in SUPPORTED_REQUEST_ADAPTERS:
+        raise ValueError(
+            "request_adapter must be openai-compatible, openrouter, or openai."
+        )
 
     target_subdir = values["target_subdir"] or DEFAULT_TARGET_SUBDIR
     _, target_subdir_relative = resolve_target_subdir(target_root, target_subdir)
@@ -1876,6 +1897,7 @@ def resolve_config(
         model=values["model"] or DEFAULT_MODEL,
         api_base=values["api_base"] or DEFAULT_API_BASE,
         api_format=api_format,
+        request_adapter=request_adapter,
         request_timeout_seconds=request_timeout_seconds,
         target_branch=values["target_branch"] or "",
         target_base_branch=values["target_base_branch"] or DEFAULT_TARGET_BASE_BRANCH,
@@ -1989,6 +2011,7 @@ def markdown_summary(resolved: ResolvedConfig) -> str:
             f"| Target base branch | `{resolved.target_base_branch}` |",
             f"| Target branch | `{resolved.target_branch}` |",
             f"| Agent backend | `{resolved.agent_backend}` |",
+            f"| Request adapter | `{resolved.request_adapter}` |",
             f"| Execution mode | `{resolved.execution_mode}` |",
             f"| visual_validation.enabled | `{resolved.visual_validation.enabled}` |",
             f"| visual_validation.provider | `{resolved.visual_validation.provider}` |",

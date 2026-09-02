@@ -1,16 +1,16 @@
 # Forgis
 
-Forgis 是一个带受控文件工具运行时的本地代码迁移助手。默认 backend 仍是 DeepSeek，v7.1 已加入本地 init/status/单 unit run/resume/report 最小闭环，不依赖 GitHub Actions。
+Forgis 是一个本地代码迁移助手；唯一production Agent内核是Intatis公开`IntatisCodexRuntime` v1与exact `codex-cli 0.145.0-intatis.4`。Python只保留配置、plan、guardrail、validation、report和PR控制面，不再拥有模型/tool loop。
 
-它不是内置迁移智能的迁移器，而是一个很薄的工具壳：从目标仓库读取配置和任务提示词，在显式允许时调用配置的 OpenAI-compatible 文本模型，并把受控文件工具交给模型使用。迁移策略、平台差异和具体项目规则，都应该写在任务提示词或参考文档里。
+它不是内置迁移智能的迁移器，而是一个很薄的产品壳：从目标仓库读取配置和任务提示词，在显式允许时把native Responses route、workspace和任务交给Intatis/Codex。迁移策略、平台差异和具体项目规则，都应该写在任务提示词或参考文档里。
 
 ## Forgis 是什么
 
 Forgis 本体只做三件事：
 
 1. 从目标仓库读取 `FORGIS_CONFIG.yml` 和配置里的任务提示词文件。
-2. 在 `dry_run=false`、`run_agent=true`、`confirm_real_run=true` 同时成立时，调用非 streaming OpenAI-compatible Chat Completions。
-3. 给模型提供受控文件工具，让它自己读取、分析并写入目标文件。
+2. 在 `dry_run=false`、`run_agent=true`、`confirm_real_run=true` 同时成立时，通过Intatis启动exact Codex App Server。
+3. 把`target_subdir`作为唯一workspace-write根交给Codex native tools；source、target root、config和task保持只读。
 
 这种设计让 Forgis 保持通用。它负责边界、工具和日志，不负责把某个平台或某个项目的迁移经验写死到系统逻辑里。
 
@@ -23,7 +23,13 @@ open Forgis.xcodeproj
 xcodebuild -project Forgis.xcodeproj -scheme ForgisMac -configuration Debug build
 ```
 
-`Package.swift` 仍保留作为轻量 SwiftPM 构建入口。Mac UI 目前是 static/mock shell：不调用 API，不执行真实迁移，不写 source/target 文件，不显示 secret 值。
+`Package.swift`仍保留作为轻量SwiftPM构建入口。Mac产品现在默认进入真实Migration工作台：Settings选择source、target、task、严格`target_subdir`写根和native Responses route；Migration投影Intatis assistant/tool/approval/usage事件并支持Stop与连续turn；Reports读取App实际持久化的`forgis.run_report.v7.0`。旧static/mock数据和独立Chat Completions UI/client/smoke已删除。
+
+ForgisMac最低要求macOS 26，并要求仓库同级存在只读Intatis checkout（`../Intatis`）。构建会验证并按官方资源布局嵌入active-architecture runtime root；`--forgis-codex-runtime-smoke`可在不发送turn、无provider请求的情况下启动并关闭真实session。普通App启动不自动启动runtime；dry run不解析credential、不创建`target_subdir`、不发送请求；real run仍必须通过三重gate。
+
+Mac UI使用显式本地workspace/route设置和可选unit ID，不重新解释YAML，也不改写Python migration-plan scheduler。CLI与GitHub Actions继续拥有`FORGIS_CONFIG.yml`和persisted plan控制面；两种产品表面共享同一Intatis内核与安全边界。
+
+SwiftPM product `forgis-runtime`是唯一production迁移Agent入口。`python -m agent.cli run`只做配置/plan准备，随后通过`execve`替换进程进入Swift内核；旧Python AgentLoop没有production fallback。
 
 ## Forgis 不是什么
 
@@ -43,7 +49,15 @@ target_repo: owner/target-repo
 
 ## 本地 CLI
 
-v7.1 本地 CLI 复用 workflow 使用的 config resolver、tool loop、migration plan 持久化、report writer 和文件沙箱：
+本地`run`前先构建并指定exact runtime host；这两个变量只包含executable路径，不含credential：
+
+```bash
+swift build --product forgis-runtime
+export FORGIS_RUNTIME_EXECUTABLE="$PWD/.build/debug/forgis-runtime"
+export FORGIS_CODEX_RUNTIME="../Intatis/.intatis/runtime-kit/0.66/CodexRuntime/arm64/codex"
+```
+
+Python CLI只保留control plane，`run`会交给与workflow相同的Swift/Intatis内核：
 
 ```bash
 python3 -m venv /tmp/forgis-v7-local-venv
@@ -93,7 +107,7 @@ python -m agent.cli resume --config /path/to/FORGIS_CONFIG.local.yml
 
 `resume` 读取现有 migration plan，报告 active/pending/failed 数量；默认不会跳过 failed/blocked unit，除非显式传 `--skip-failed`；输出下一步应使用的 `run --unit` 命令。
 
-真实 OpenAI-compatible 本地运行只在你自己导出 secret env 并修改 config gate 后执行：
+真实native Responses本地运行只在你自己导出credential env并修改config gate后执行：
 
 ```bash
 export FORGIS_MODEL_API_KEY="..."
@@ -107,7 +121,7 @@ python -m agent.cli run \
 
 CLI 不新增写入权限，也不新增 shell 执行能力。source 仍保持只读，target 写入仍只能通过 `target_subdir`，报告有界且脱敏，真实模型调用仍必须同时满足 `dry_run=false`、`run_agent=true`、`confirm_real_run=true`。
 
-v7.1 明确不包含 streaming、Responses API、local server/gateway、council、多 Agent、自动截图、Keychain 或默认 `~/.config` 全局配置。v7.2 只新增上面描述的 static/mock Mac UI shell。
+历史v7.1/v7.2限制只描述旧阶段；当前production已经使用Intatis/Codex native Responses与真实Mac Migration UI。仍未完成的是自动截图、Qwen official dynamic-tool接线和正式签名/公证发行闭环。
 
 最小无外部依赖 fixture 位于 `examples/local_migration_fixture/`，可用于 smoke test 和演示。
 
@@ -137,7 +151,7 @@ Forgis 自身的 `docs/` 和 `guides/` 目录用于发布说明和参考材料�
 请把三类信息分开：
 
 - **GitHub Actions input / CLI 提供，不能写进 config：** `target_repo`。
-- **`FORGIS_CONFIG.yml`：** repo ref、输出分支、输出子目录、任务文件路径、OpenAI-compatible 模型连接字段、运行开关、skills、report、repair loop、migration plan，以及不含 secret 的 visual validation 开关。
+- **`FORGIS_CONFIG.yml`：** repo ref、输出分支/子目录、任务文件路径、native Responses route/model/adapter、运行开关、report、migration plan和不含secret的visual validation开关。
 - **`FORGIS_TASK.md`：** 产品与迁移指令，例如 Android / Kotlin / Jetpack Compose、目标技术栈、UI 风格、信息架构、迁移范围、隐私规则，以及“只写入 `target_subdir`”这类业务限制。
 
 不要把这些字段或写法放进 `FORGIS_CONFIG.yml`：
@@ -146,9 +160,9 @@ Forgis 自身的 `docs/` 和 `guides/` 目录用于发布说明和参考材料�
 - `target_stack`：Android / Kotlin / Jetpack Compose 应写进 `FORGIS_TASK.md`。
 - `source_branch`：应改为 `source_ref`。
 - `target_repo_url`、`source_repo_url`、`target_path`、`source_path`。
-- `agent_backend: aider`：Forgis 当前支持 `agent_backend: deepseek` 和 `agent_backend: openai-compatible`。
+- `agent_backend: aider`：production只接受`codex-app-server`；历史`deepseek` / `openai-compatible`仅窄解码并归一到同一Codex内核。
 - `build_command: []` 或 `test_command: []`：不配置 build/test 时直接省略字段。
-- `model: deepseek/deepseek-v4-pro`：应使用 DeepSeek API 接受的 `deepseek-v4-pro` 或 `deepseek-v4-flash`。
+- 只能提供Chat Completions或不支持Codex原生Responses tool shape的route；这类配置会fail closed。
 - `FORGIS_CONFIG.yml` 中不得写 Qwen API key、token、evidence root、截图文件路径或本地敏感路径。v6.0 只接受下文记录的不含 secret 的 `visual_validation` 控制块；reference/actual 截图目录必须是目标仓库相对路径且作为只读输入；Qwen key/base/model 只能通过显式 runtime env 提供，且不会写入报告。
 
 最小可跑通配置：
@@ -161,15 +175,16 @@ target_base_branch: main
 target_subdir: Kikaria-Android
 task_prompt_path: FORGIS_TASK.md
 
-agent_backend: deepseek
-model: deepseek-v4-pro
-api_base: https://api.deepseek.com
-api_format: openai-compatible
+agent_backend: codex-app-server
+model: forgis-migration-model
+api_base: https://responses.example.com/v1
+api_format: responses
+request_adapter: openai-compatible
 request_timeout_seconds: 120
 model_env:
-  DEEPSEEK_API_KEY: DEEPSEEK_API_KEY
+  FORGIS_MODEL_API_KEY: FORGIS_MODEL_API_KEY
 
-execution_mode: tool_loop
+execution_mode: codex
 dry_run: false
 run_agent: true
 confirm_real_run: true
@@ -188,15 +203,16 @@ target_base_branch: main
 target_subdir: Kikaria-Android
 task_prompt_path: FORGIS_TASK.md
 
-agent_backend: deepseek
-model: deepseek-v4-pro
-api_base: https://api.deepseek.com
-api_format: openai-compatible
+agent_backend: codex-app-server
+model: forgis-migration-model
+api_base: https://responses.example.com/v1
+api_format: responses
+request_adapter: openai-compatible
 request_timeout_seconds: 120
 model_env:
-  DEEPSEEK_API_KEY: DEEPSEEK_API_KEY
+  FORGIS_MODEL_API_KEY: FORGIS_MODEL_API_KEY
 
-execution_mode: tool_loop
+execution_mode: codex
 dry_run: false
 run_agent: true
 confirm_real_run: true
@@ -330,42 +346,24 @@ test_command:
 
 ### 模型 API 与 secret
 
-v7.0 第一阶段的模型 transport 是非 streaming OpenAI-compatible Chat Completions。DeepSeek 仍是默认兼容路径：
+production迁移只使用Intatis/Codex拥有的native Responses route：
 
 ```yaml
-agent_backend: deepseek
-model: deepseek-v4-pro
-api_base: https://api.deepseek.com
-```
-
-或：
-
-```yaml
-model: deepseek-v4-flash
-```
-
-其它 OpenAI-compatible 文本 provider 可以使用显式 backend alias，并配置 `api_base` 或 `base_url`：
-
-```yaml
-agent_backend: openai-compatible
-model: deepseek-chat
-api_base: https://api.deepseek.com/v1
-api_format: openai-compatible
+agent_backend: codex-app-server
+model: forgis-migration-model
+api_base: https://responses.example.com/v1
+api_format: responses
+request_adapter: openai-compatible
 request_timeout_seconds: 120
 model_env:
   api_key: FORGIS_MODEL_API_KEY
 ```
 
-真实运行总是需要声明 secret 环境变量映射：
+`request_adapter`只标识exact reviewed Responses request shape，不翻译Chat Completions。历史`deepseek`与`openai-compatible` backend名称只用于窄解码并归一到同一Intatis/Codex内核；Chat Completions URL会在runtime启动前明确失败。
 
-```yaml
-model_env:
-  DEEPSEEK_API_KEY: DEEPSEEK_API_KEY
-```
+历史配置/fixture文档仍可能出现字面兼容值`model: deepseek-v4-pro`、`model: deepseek-v4-flash`和`DEEPSEEK_API_KEY: DEEPSEEK_API_KEY`。它们只描述旧数据解码，不会选择Python、DeepSeek、Chat Completions或Mac UI runtime。
 
-这里写的是环境变量名，不要把真实 API key 写进 `FORGIS_CONFIG.yml`。env 缺失错误只会显示环境变量名，不显示值。模型 API key、Authorization header、provider raw response 和完整模型输出不得写入日志、报告、PR body 或测试 fixture。
-
-v7.0 第一阶段不实现 streaming SSE、Responses API、image/multimodal 模型调用、本地 server/gateway、council、多 Agent、自动截图、GUI、Keychain、`~/.config` 默认配置或 provider 私有协议。
+`FORGIS_CONFIG.yml`只能写env引用名，不能写credential值。CLI/GitHub在real-run边界解析单一`model_env`；ForgisMac可使用产品隔离的Keychain item，并回退到配置的env名。credential、Authorization header、provider raw response和完整模型输出不得进入argv、task、projection、operation log、报告、PR body或测试fixture。
 
 ### Qwen Visual Evidence Mode（v6.0 reference guidance）
 
@@ -1062,10 +1060,11 @@ target_branch: forgis/generated-output
 target_base_branch: main
 run_log_path: generated-output/FORGIS_LOG.md
 
-agent_backend: deepseek
-model: deepseek-v4-pro
-api_base: https://api.deepseek.com
-api_format: openai-compatible
+agent_backend: codex-app-server
+model: forgis-migration-model
+api_base: https://responses.example.com/v1
+api_format: responses
+request_adapter: openai-compatible
 
 dry_run: true
 run_agent: false
@@ -1073,11 +1072,11 @@ confirm_real_run: false
 strict_mode: false
 
 model_env:
-  DEEPSEEK_API_KEY: DEEPSEEK_API_KEY
+  FORGIS_MODEL_API_KEY: FORGIS_MODEL_API_KEY
 
 max_iterations: 80
 max_tool_result_chars: 20000
-execution_mode: tool_loop
+execution_mode: codex
 ```
 
 不需要 build/test feedback 时，不要写 `build_command` 或 `test_command`。如果确实配置 `validation_commands`，新配置只推荐 argv mapping，这样 Forgis 可以复用现有命令 allowlist：

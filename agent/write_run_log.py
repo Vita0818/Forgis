@@ -80,7 +80,7 @@ def markdown_entry(args: argparse.Namespace, run_log_relative: str, changed_path
     run_agent = parse_bool(args.run_agent, "run_agent")
     run_agent_config = parse_bool(args.run_agent_config, "run_agent_config")
     confirm_real_run = parse_bool(args.confirm_real_run, "confirm_real_run")
-    deepseek_executed = parse_bool(args.deepseek_executed, "deepseek_executed")
+    runtime_executed = parse_bool(args.runtime_executed, "runtime_executed")
 
     warnings: list[str] = []
     if dry_run and run_agent_config:
@@ -116,8 +116,8 @@ def markdown_entry(args: argparse.Namespace, run_log_relative: str, changed_path
 | run_agent config value | `{str(run_agent_config).lower()}` |
 | Effective run_agent | `{str(run_agent).lower()}` |
 | confirm_real_run | `{str(confirm_real_run).lower()}` |
-| Model executed | `{str(deepseek_executed).lower()}` |
-| Model status | `{args.deepseek_status}` |
+| Codex runtime executed | `{str(runtime_executed).lower()}` |
+| Codex runtime status | `{args.runtime_status}` |
 | Tool call count | `{args.tool_call_count}` |
 | Read tool count | `{args.read_tool_count}` |
 | Write tool count | `{args.write_tool_count}` |
@@ -166,8 +166,8 @@ def main() -> None:
     parser.add_argument("--run-agent", required=True)
     parser.add_argument("--run-agent-config", required=True)
     parser.add_argument("--confirm-real-run", required=True)
-    parser.add_argument("--deepseek-executed", default="false")
-    parser.add_argument("--deepseek-status", default="not-run")
+    parser.add_argument("--runtime-executed", default="false")
+    parser.add_argument("--runtime-status", default="not-run")
     parser.add_argument("--tool-call-count", default="0")
     parser.add_argument("--read-tool-count", default="0")
     parser.add_argument("--write-tool-count", default="0")
@@ -178,7 +178,7 @@ def main() -> None:
     parser.add_argument("--run-id", default="")
     parser.add_argument("--run-url", default="")
     parser.add_argument("--validation-result", default="See workflow logs.")
-    parser.add_argument("--final-summary", default="Forgis resolved config and ran the enabled generic DeepSeek file-tool steps.")
+    parser.add_argument("--final-summary", default="Forgis resolved config and ran the Intatis Codex App Server kernel.")
     parser.add_argument("--warning", default="")
     parser.add_argument("--preview-output", default="")
 

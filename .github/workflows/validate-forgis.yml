@@ -11,12 +11,25 @@ permissions:
 
 jobs:
   validate:
-    name: Validate Forgis scripts
-    runs-on: ubuntu-latest
+    name: Validate Forgis Codex kernel
+    runs-on: xcode-27
+    defaults:
+      run:
+        working-directory: Forgis
 
     steps:
       - name: Checkout Forgis
         uses: actions/checkout@v4
+        with:
+          path: Forgis
+
+      - name: Checkout exact Intatis runtime host
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/Intatis
+          ref: e8ba63554daa57455193772c6ba0abe08f04c0a0
+          token: ${{ secrets.FORGIS_SOURCE_TOKEN }}
+          path: Intatis
 
       - name: Check required files
         run: |
@@ -36,6 +49,7 @@ jobs:
           test -f agent/validate_target_output.py
           test -f agent/visual_evidence.py
           test -f agent/qwen_vision.py
+          test -f Apps/ForgisRuntimeCLI/Sources/ForgisRuntimeCLI.swift
           test -f agent/build_target.sh
           test -f agent/create_pr.sh
           test -f .github/workflows/migrate.yml
@@ -44,6 +58,7 @@ jobs:
           test -f tests/test_v7_cli_config.py
           test -f tests/test_v7_local_cli.py
           test -f tests/test_v7_local_smoke.py
+          test -f tests/test_codex_runtime_cutover.py
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -55,13 +70,38 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Build Forgis Intatis runtime host
+        run: |
+          swift build \
+            --product forgis-runtime \
+            --configuration release \
+            --scratch-path "$RUNNER_TEMP/forgis-validation-swift-build"
+          test -x "$RUNNER_TEMP/forgis-validation-swift-build/release/forgis-runtime"
+          echo "FORGIS_RUNTIME_EXECUTABLE=$RUNNER_TEMP/forgis-validation-swift-build/release/forgis-runtime" >> "$GITHUB_ENV"
+
+      - name: Build and smoke exact Codex runtime offline
+        env:
+          INTATIS_RUNTIME_CACHE: ${{ runner.temp }}/intatis-runtime-cache
+          INTATIS_RUST_TOOLCHAIN_ROOT: ${{ runner.temp }}/intatis-rust-toolchain
+          INTATIS_CODEX_CARGO_TARGET_DIR: ${{ runner.temp }}/intatis-codex-cargo-target
+        run: |
+          test "$(uname -m)" = "arm64"
+          RUNTIME_ROOT="$RUNNER_TEMP/forgis-validation-codex-runtime"
+          zsh "$GITHUB_WORKSPACE/Intatis/scripts/build-codex-runtime.sh" \
+            arm64 "$RUNTIME_ROOT"
+          "$RUNNER_TEMP/forgis-validation-swift-build/release/forgis-runtime" \
+            doctor --codex-runtime "$RUNTIME_ROOT/codex"
+          "$RUNNER_TEMP/forgis-validation-swift-build/release/forgis-runtime" \
+            smoke --codex-runtime "$RUNTIME_ROOT/codex"
+          echo "FORGIS_CODEX_RUNTIME=$RUNTIME_ROOT/codex" >> "$GITHUB_ENV"
+
       - name: Check Python syntax
         run: |
           python -m py_compile agent/forge.py agent/forgis_config.py agent/resolve_config.py agent/guardrails.py agent/write_run_log.py agent/model_env.py agent/deepseek_agent.py agent/openai_compatible_client.py agent/cli.py agent/file_tools.py agent/tool_loop.py agent/visual_evidence.py agent/qwen_vision.py
 
       - name: Run Forgis tests
         run: |
-          python -m unittest tests/test_forgis_config.py tests/test_openai_compatible_client.py tests/test_v7_cli_config.py tests/test_v7_local_cli.py tests/test_v7_local_smoke.py
+          python -m unittest
 
       - name: Check shell script syntax
         run: |
@@ -76,8 +116,9 @@ jobs:
             'source_ref: main' \
             'target_subdir: target-output' \
             'task_prompt_path: FORGIS_TASK.md' \
-            'agent_backend: deepseek' \
-            'model: deepseek-v4-pro' \
+            'agent_backend: codex-app-server' \
+            'model: local-smoke-model' \
+            'api_base: https://example.invalid/v1' \
             'target_branch: forgis/output' \
             'target_base_branch: main' \
             'run_log_path: target-output/FORGIS_LOG.md' \
@@ -88,10 +129,10 @@ jobs:
           printf '%s\n' '# Task' '' 'Use mock files only.' > tmp/target/FORGIS_TASK.md
 
           python agent/forge.py \
-            --source "$GITHUB_WORKSPACE/tmp/source" \
-            --target "$GITHUB_WORKSPACE/tmp/target" \
+            --source "$GITHUB_WORKSPACE/Forgis/tmp/source" \
+            --target "$GITHUB_WORKSPACE/Forgis/tmp/target" \
             --target-repo "owner/target-repo" \
-            --summary-output "$GITHUB_WORKSPACE/tmp/run_summary.md"
+            --summary-output "$GITHUB_WORKSPACE/Forgis/tmp/run_summary.md"
 
       - name: Check diff whitespace
         run: |

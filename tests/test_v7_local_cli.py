@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import subprocess
 import sys
 import tempfile
@@ -128,8 +129,10 @@ class V7LocalCliTests(unittest.TestCase):
                 ],
                 env=env,
             )
-            self.assertIn('"executed": false', result.stdout)
-            self.assertIn('"status": "skipped-dry-run"', result.stdout)
+            payload = json.loads(result.stdout)
+            self.assertFalse(payload["executed"])
+            self.assertEqual(payload["status"], "skipped-dry_run")
+            self.assertEqual(payload["kernel"], "intatis-codex-app-server")
             self.assertTrue(summary.is_file())
             self.assertIn("Request timeout seconds: 9", summary.read_text(encoding="utf-8"))
             self.assertEqual(list((target / "target-output").iterdir()), [])
@@ -154,10 +157,10 @@ class V7LocalCliTests(unittest.TestCase):
                 (target / "target-output").mkdir(parents=True)
                 (target / "FORGIS_TASK.md").write_text("# Task\n", encoding="utf-8")
                 resolved = resolve_config(target_root=target, target_repo="local/target", config_path=str(example))
-                self.assertIn(resolved.agent_backend, {"deepseek", "openai-compatible"})
-                self.assertEqual(resolved.api_format, "openai-compatible")
+                self.assertEqual(resolved.agent_backend, "codex-app-server")
+                self.assertEqual(resolved.api_format, "responses")
 
-    def test_deepseek_backend_still_uses_local_config_path(self) -> None:
+    def test_legacy_backend_config_is_decode_only_for_nonproduction_client_tests(self) -> None:
         with tempfile.TemporaryDirectory() as dirname:
             root = Path(dirname)
             _source, target, config = write_local_fixture(root, backend="deepseek")

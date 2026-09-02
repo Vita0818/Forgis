@@ -14,13 +14,21 @@ permissions:
 jobs:
   run:
     name: Run Forgis
-    runs-on: ubuntu-latest
+    runs-on: xcode-27
 
     steps:
       - name: Checkout Forgis
         uses: actions/checkout@v4
         with:
           path: forgis
+
+      - name: Checkout exact Intatis runtime host
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/Intatis
+          ref: e8ba63554daa57455193772c6ba0abe08f04c0a0
+          token: ${{ secrets.FORGIS_SOURCE_TOKEN }}
+          path: Intatis
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -31,6 +39,16 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r forgis/requirements.txt
+
+      - name: Build Forgis Intatis runtime host
+        run: |
+          swift build \
+            --package-path "$GITHUB_WORKSPACE/forgis" \
+            --product forgis-runtime \
+            --configuration release \
+            --scratch-path "$RUNNER_TEMP/forgis-swift-build"
+          test -x "$RUNNER_TEMP/forgis-swift-build/release/forgis-runtime"
+          echo "FORGIS_RUNTIME_EXECUTABLE=$RUNNER_TEMP/forgis-swift-build/release/forgis-runtime" >> "$GITHUB_ENV"
 
       - name: Checkout target repository
         id: checkout_target
@@ -80,6 +98,22 @@ jobs:
           path: source-repo
           persist-credentials: false
 
+      - name: Build exact Intatis Codex runtime
+        id: build_codex_runtime
+        if: ${{ steps.resolve_base.outputs.dry_run == 'false' && steps.resolve_base.outputs.run_agent == 'true' && steps.resolve_base.outputs.confirm_real_run == 'true' }}
+        env:
+          INTATIS_RUNTIME_CACHE: ${{ runner.temp }}/intatis-runtime-cache
+          INTATIS_RUST_TOOLCHAIN_ROOT: ${{ runner.temp }}/intatis-rust-toolchain
+          INTATIS_CODEX_CARGO_TARGET_DIR: ${{ runner.temp }}/intatis-codex-cargo-target
+        run: |
+          test "$(uname -m)" = "arm64"
+          RUNTIME_ROOT="$RUNNER_TEMP/forgis-codex-runtime-arm64"
+          zsh "$GITHUB_WORKSPACE/Intatis/scripts/build-codex-runtime.sh" \
+            arm64 "$RUNTIME_ROOT"
+          zsh "$GITHUB_WORKSPACE/Intatis/scripts/validate-codex-runtime.sh" \
+            "$RUNTIME_ROOT" arm64 "" execute-local
+          echo "FORGIS_CODEX_RUNTIME=$RUNTIME_ROOT/codex" >> "$GITHUB_ENV"
+
       - name: Snapshot read-only target inputs
         id: snapshot_readonly
         if: ${{ steps.checkout_source.outcome == 'success' }}
@@ -116,8 +150,8 @@ jobs:
           bash -n forgis/agent/build_target.sh
           bash -n forgis/agent/create_pr.sh
 
-      - name: Run model tool loop
-        id: tool_loop
+      - name: Run Intatis Codex kernel
+        id: codex_runtime
         if: ${{ steps.run_controller.outcome == 'success' && steps.check_shell_scripts.outcome == 'success' }}
         env:
           FORGIS_MODEL_API_KEY: ${{ secrets.FORGIS_MODEL_API_KEY }}
@@ -127,42 +161,39 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-          QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
-          QWEN_API_BASE: ${{ vars.QWEN_API_BASE }}
-          QWEN_VISION_MODEL: ${{ vars.QWEN_VISION_MODEL }}
         run: |
-          if [[ "$RUN_AGENT" != "true" ]]; then
-            echo "RUN_AGENT is false. Skipping model execution."
-            python forgis/agent/tool_loop.py \
-              --source "$GITHUB_WORKSPACE/source-repo" \
-              --target "$GITHUB_WORKSPACE/target-repo" \
-              --target-repo "$TARGET_REPO" \
-              --status-output "$GITHUB_WORKSPACE/forgis-runtime/deepseek_status.env" \
-              --operation-log-output "$GITHUB_WORKSPACE/forgis-runtime/tool_operations.json" \
-              --summary-output "$GITHUB_WORKSPACE/forgis-runtime/tool_loop_summary.json" \
-              --report-output-dir "$GITHUB_WORKSPACE/forgis-runtime/reports"
-            exit 0
-          fi
-
-          python forgis/agent/tool_loop.py \
+          "$FORGIS_RUNTIME_EXECUTABLE" run \
             --source "$GITHUB_WORKSPACE/source-repo" \
             --target "$GITHUB_WORKSPACE/target-repo" \
+            --target-subdir "$TARGET_SUBDIR" \
+            --task-prompt "$TASK_PROMPT_PATH" \
             --target-repo "$TARGET_REPO" \
-            --status-output "$GITHUB_WORKSPACE/forgis-runtime/deepseek_status.env" \
-            --operation-log-output "$GITHUB_WORKSPACE/forgis-runtime/tool_operations.json" \
-            --summary-output "$GITHUB_WORKSPACE/forgis-runtime/tool_loop_summary.json" \
-            --report-output-dir "$GITHUB_WORKSPACE/forgis-runtime/reports"
+            --api-base "$API_BASE" \
+            --model "$MODEL" \
+            --model-env-json "$MODEL_ENV_JSON" \
+            --runtime-root "$GITHUB_WORKSPACE/forgis-runtime" \
+            --codex-runtime "${FORGIS_CODEX_RUNTIME:-}" \
+            --dry-run "$DRY_RUN" \
+            --run-agent "$RUN_AGENT" \
+            --confirm-real-run "$CONFIRM_REAL_RUN" \
+            --request-adapter "$REQUEST_ADAPTER" \
+            --status-output "$GITHUB_WORKSPACE/forgis-runtime/codex_status.env" \
+            --operation-log-output "$GITHUB_WORKSPACE/forgis-runtime/codex_tool_operations.json" \
+            --summary-output "$GITHUB_WORKSPACE/forgis-runtime/codex_runtime_summary.json" \
+            --report-output-dir "$GITHUB_WORKSPACE/forgis-runtime/reports" \
+            --visual-validation-enabled "$FORGIS_VISUAL_VALIDATION_ENABLED" \
+            --non-interactive
 
       - name: Verify source repository stayed read-only
         id: check_source_clean
-        if: ${{ steps.checkout_source.outcome == 'success' && steps.run_controller.outcome == 'success' && steps.tool_loop.outcome == 'success' }}
+        if: ${{ steps.checkout_source.outcome == 'success' && steps.run_controller.outcome == 'success' && steps.codex_runtime.outcome == 'success' }}
         run: |
           python forgis/agent/guardrails.py check-source-clean \
             --source "$GITHUB_WORKSPACE/source-repo"
 
-      - name: Validate DeepSeek target changes
+      - name: Validate Codex target changes
         id: validate_target_output
-        if: ${{ steps.run_controller.outcome == 'success' && steps.snapshot_target_output.outcome == 'success' && steps.tool_loop.outcome == 'success' && steps.check_source_clean.outcome == 'success' }}
+        if: ${{ steps.run_controller.outcome == 'success' && steps.snapshot_target_output.outcome == 'success' && steps.codex_runtime.outcome == 'success' && steps.check_source_clean.outcome == 'success' }}
         run: |
           if [[ "$RUN_AGENT" != "true" ]]; then
             echo "RUN_AGENT is false. Skipping target output validation."
@@ -186,7 +217,7 @@ jobs:
 
       - name: Run configured validation commands
         id: validation_commands
-        if: ${{ steps.run_controller.outcome == 'success' && steps.tool_loop.outcome == 'success' && steps.check_source_clean.outcome == 'success' && steps.validate_target_output.outcome == 'success' }}
+        if: ${{ steps.run_controller.outcome == 'success' && steps.codex_runtime.outcome == 'success' && steps.check_source_clean.outcome == 'success' && steps.validate_target_output.outcome == 'success' }}
         env:
           TARGET_REPO_DIR: ${{ github.workspace }}/target-repo
         run: |
@@ -210,20 +241,20 @@ jobs:
 
       - name: Append long-term Forgis log
         id: append_log
-        if: ${{ steps.run_controller.outcome == 'success' && steps.tool_loop.outcome == 'success' && steps.check_source_clean.outcome == 'success' && steps.validate_target_output.outcome == 'success' && steps.validation_commands.outcome == 'success' }}
+        if: ${{ steps.run_controller.outcome == 'success' && steps.codex_runtime.outcome == 'success' && steps.check_source_clean.outcome == 'success' && steps.validate_target_output.outcome == 'success' && steps.validation_commands.outcome == 'success' }}
         env:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          DEEPSEEK_EXECUTED="false"
-          DEEPSEEK_STATUS="not-run"
+          RUNTIME_EXECUTED="false"
+          RUNTIME_STATUS="not-run"
           TOOL_CALL_COUNT="0"
           READ_TOOL_COUNT="0"
           WRITE_TOOL_COUNT="0"
           FINAL_SUMMARY="Model was not run."
-          if [[ -f "$GITHUB_WORKSPACE/forgis-runtime/deepseek_status.env" ]]; then
-            source "$GITHUB_WORKSPACE/forgis-runtime/deepseek_status.env"
-            DEEPSEEK_EXECUTED="${deepseek_executed:-false}"
-            DEEPSEEK_STATUS="${deepseek_status:-not-run}"
+          if [[ -f "$GITHUB_WORKSPACE/forgis-runtime/codex_status.env" ]]; then
+            source "$GITHUB_WORKSPACE/forgis-runtime/codex_status.env"
+            RUNTIME_EXECUTED="${runtime_executed:-false}"
+            RUNTIME_STATUS="${runtime_status:-not-run}"
             TOOL_CALL_COUNT="${tool_call_count:-0}"
             READ_TOOL_COUNT="${read_tool_count:-0}"
             WRITE_TOOL_COUNT="${write_tool_count:-0}"
@@ -247,8 +278,8 @@ jobs:
             --run-agent "$RUN_AGENT" \
             --run-agent-config "$RUN_AGENT_CONFIG" \
             --confirm-real-run "$CONFIRM_REAL_RUN" \
-            --deepseek-executed "$DEEPSEEK_EXECUTED" \
-            --deepseek-status "$DEEPSEEK_STATUS" \
+            --runtime-executed "$RUNTIME_EXECUTED" \
+            --runtime-status "$RUNTIME_STATUS" \
             --tool-call-count "$TOOL_CALL_COUNT" \
             --read-tool-count "$READ_TOOL_COUNT" \
             --write-tool-count "$WRITE_TOOL_COUNT" \
@@ -264,7 +295,7 @@ jobs:
 
       - name: Verify read-only target inputs
         id: check_readonly
-        if: ${{ steps.snapshot_readonly.outcome == 'success' && steps.run_controller.outcome == 'success' && steps.tool_loop.outcome == 'success' && steps.append_log.outcome == 'success' }}
+        if: ${{ steps.snapshot_readonly.outcome == 'success' && steps.run_controller.outcome == 'success' && steps.codex_runtime.outcome == 'success' && steps.append_log.outcome == 'success' }}
         run: |
           READONLY_ARGS=()
           if [[ "$STRICT_MODE" != "true" ]]; then
@@ -279,7 +310,7 @@ jobs:
 
       - name: Verify target writable scope
         id: check_target_scope
-        if: ${{ steps.run_controller.outcome == 'success' && steps.tool_loop.outcome == 'success' && steps.append_log.outcome == 'success' }}
+        if: ${{ steps.run_controller.outcome == 'success' && steps.codex_runtime.outcome == 'success' && steps.append_log.outcome == 'success' }}
         run: |
           TARGET_SCOPE_ARGS=()
           if [[ "$STRICT_MODE" != "true" ]]; then
@@ -296,7 +327,7 @@ jobs:
 
       - name: Verify dry run did not write target
         id: check_dry_run_clean
-        if: ${{ steps.run_controller.outcome == 'success' && steps.tool_loop.outcome == 'success' && steps.append_log.outcome == 'success' }}
+        if: ${{ steps.run_controller.outcome == 'success' && steps.codex_runtime.outcome == 'success' && steps.append_log.outcome == 'success' }}
         run: |
           if [[ "$DRY_RUN" == "true" ]]; then
             DRY_RUN_ARGS=()
@@ -314,7 +345,7 @@ jobs:
 
       - name: Verify model secrets were not written
         id: check_secret_leaks
-        if: ${{ steps.run_controller.outcome == 'success' && steps.tool_loop.outcome == 'success' && steps.append_log.outcome == 'success' }}
+        if: ${{ steps.run_controller.outcome == 'success' && steps.codex_runtime.outcome == 'success' && steps.append_log.outcome == 'success' }}
         env:
           FORGIS_MODEL_API_KEY: ${{ secrets.FORGIS_MODEL_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}

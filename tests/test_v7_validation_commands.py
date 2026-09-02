@@ -121,7 +121,7 @@ class V71ValidationCommandsTests(unittest.TestCase):
             self.assertIn("legacy shell string mode", result.stdout)
             self.assertIn("Configured validation_commands completed successfully.", result.stdout)
 
-    def test_deepseek_openai_compatible_and_qwen_config_still_parse(self) -> None:
+    def test_legacy_backend_names_normalize_to_codex_and_qwen_config_still_parses(self) -> None:
         for backend in ("deepseek", "openai-compatible"):
             with self.subTest(backend=backend), tempfile.TemporaryDirectory() as dirname:
                 target = Path(dirname)
@@ -148,8 +148,8 @@ class V71ValidationCommandsTests(unittest.TestCase):
                     ),
                 )
                 resolved = resolve_config(target_root=target, target_repo="local/target")
-                self.assertEqual(resolved.agent_backend, backend)
-                self.assertEqual(resolved.api_format, "openai-compatible")
+                self.assertEqual(resolved.agent_backend, "codex-app-server")
+                self.assertEqual(resolved.api_format, "responses")
                 self.assertEqual(resolved.visual_validation.provider, "qwen")
                 self.assertEqual(resolved.validation_commands, ({"argv": ("python3", "--version")},))
 

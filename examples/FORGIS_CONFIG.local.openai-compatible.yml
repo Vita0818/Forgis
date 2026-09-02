@@ -1,5 +1,5 @@
-# Forgis v7.1 local OpenAI-compatible example.
-# Non-streaming Chat Completions only. Do not put API keys in this file.
+# Forgis local native Responses example for the Intatis Codex kernel.
+# Do not put API keys in this file.
 # Run with:
 #   python -m agent.cli init --source /path/to/source --target /path/to/target \
 #     --target-repo local/my-migration --output /path/to/FORGIS_CONFIG.local.yml
@@ -14,15 +14,16 @@ target_base_branch: main
 target_subdir: target-output
 task_prompt_path: FORGIS_TASK.md
 
-agent_backend: openai-compatible
-model: deepseek-chat
-api_base: https://api.deepseek.com/v1
-api_format: openai-compatible
+agent_backend: codex-app-server
+model: forgis-migration-model
+api_base: https://example.invalid/v1
+api_format: responses
+request_adapter: openai-compatible
 request_timeout_seconds: 120
 model_env:
   api_key: FORGIS_MODEL_API_KEY
 
-execution_mode: tool_loop
+execution_mode: codex
 dry_run: false
 run_agent: true
 confirm_real_run: true
@@ -35,4 +36,4 @@ migration_plan_output_dir: reports
 migration_plan_resume_enabled: true
 
 # Source is read-only. Writes remain limited to target_subdir.
-# v7.1 does not support streaming, a local server, council, GUI, or automatic screenshots.
+# Replace the example.invalid route before a real run. The kernel never falls back to Chat Completions.

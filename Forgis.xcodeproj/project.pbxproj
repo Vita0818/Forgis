@@ -13,11 +13,15 @@
 		4A1000010000000000000004 /* ForgisModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A2000010000000000000004 /* ForgisModels.swift */; };
 		4A1000010000000000000005 /* ForgisComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A2000010000000000000005 /* ForgisComponents.swift */; };
 		4A1000010000000000000006 /* ForgisViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A2000010000000000000006 /* ForgisViews.swift */; };
-		4A1000010000000000000007 /* ForgisChatModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A2000010000000000000008 /* ForgisChatModels.swift */; };
-		4A1000010000000000000008 /* ForgisChatService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A2000010000000000000009 /* ForgisChatService.swift */; };
-		4A1000010000000000000009 /* ForgisChatViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A200001000000000000000A /* ForgisChatViews.swift */; };
-		4A100001000000000000000A /* ForgisChatStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A200001000000000000000B /* ForgisChatStorage.swift */; };
-		4A100001000000000000000B /* ForgisChatSmoke.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A200001000000000000000C /* ForgisChatSmoke.swift */; };
+		4A1000010000000000000007 /* ForgisRuntimeSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A2000010000000000000008 /* ForgisRuntimeSession.swift */; };
+		4A1000010000000000000008 /* ForgisRuntimeStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A2000010000000000000009 /* ForgisRuntimeStorage.swift */; };
+		4A1000010000000000000009 /* ForgisRuntimeViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A200001000000000000000A /* ForgisRuntimeViews.swift */; };
+		4A100001000000000000000C /* ForgisCodexRuntimeBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A200001000000000000000D /* ForgisCodexRuntimeBootstrap.swift */; };
+		4A100001000000000000000D /* IntatisCore in Frameworks */ = {isa = PBXBuildFile; productRef = 4AC000010000000000000001 /* IntatisCore */; };
+		4A100001000000000000000E /* IntatisCodexRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = 4AC000010000000000000002 /* IntatisCodexRuntime */; };
+		4A100001000000000000000F /* ForgisCodexRuntimeSmoke.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A200001000000000000000E /* ForgisCodexRuntimeSmoke.swift */; };
+		4A1000010000000000000010 /* IntatisProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = 4AC000010000000000000003 /* IntatisProtocol */; };
+		4A1000010000000000000011 /* IntatisProviders in Frameworks */ = {isa = PBXBuildFile; productRef = 4AC000010000000000000004 /* IntatisProviders */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -28,11 +32,11 @@
 		4A2000010000000000000005 /* ForgisComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForgisComponents.swift; sourceTree = "<group>"; };
 		4A2000010000000000000006 /* ForgisViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForgisViews.swift; sourceTree = "<group>"; };
 		4A2000010000000000000007 /* ForgisMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ForgisMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		4A2000010000000000000008 /* ForgisChatModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForgisChatModels.swift; sourceTree = "<group>"; };
-		4A2000010000000000000009 /* ForgisChatService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForgisChatService.swift; sourceTree = "<group>"; };
-		4A200001000000000000000A /* ForgisChatViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForgisChatViews.swift; sourceTree = "<group>"; };
-		4A200001000000000000000B /* ForgisChatStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForgisChatStorage.swift; sourceTree = "<group>"; };
-		4A200001000000000000000C /* ForgisChatSmoke.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForgisChatSmoke.swift; sourceTree = "<group>"; };
+		4A2000010000000000000008 /* ForgisRuntimeSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForgisRuntimeSession.swift; sourceTree = "<group>"; };
+		4A2000010000000000000009 /* ForgisRuntimeStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForgisRuntimeStorage.swift; sourceTree = "<group>"; };
+		4A200001000000000000000A /* ForgisRuntimeViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForgisRuntimeViews.swift; sourceTree = "<group>"; };
+		4A200001000000000000000D /* ForgisCodexRuntimeBootstrap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForgisCodexRuntimeBootstrap.swift; sourceTree = "<group>"; };
+		4A200001000000000000000E /* ForgisCodexRuntimeSmoke.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForgisCodexRuntimeSmoke.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -40,6 +44,10 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				4A100001000000000000000D /* IntatisCore in Frameworks */,
+				4A100001000000000000000E /* IntatisCodexRuntime in Frameworks */,
+				4A1000010000000000000010 /* IntatisProtocol in Frameworks */,
+				4A1000010000000000000011 /* IntatisProviders in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -79,11 +87,11 @@
 				4A2000010000000000000004 /* ForgisModels.swift */,
 				4A2000010000000000000005 /* ForgisComponents.swift */,
 				4A2000010000000000000006 /* ForgisViews.swift */,
-				4A2000010000000000000008 /* ForgisChatModels.swift */,
-				4A200001000000000000000B /* ForgisChatStorage.swift */,
-				4A2000010000000000000009 /* ForgisChatService.swift */,
-				4A200001000000000000000C /* ForgisChatSmoke.swift */,
-				4A200001000000000000000A /* ForgisChatViews.swift */,
+				4A2000010000000000000008 /* ForgisRuntimeSession.swift */,
+				4A2000010000000000000009 /* ForgisRuntimeStorage.swift */,
+				4A200001000000000000000A /* ForgisRuntimeViews.swift */,
+				4A200001000000000000000D /* ForgisCodexRuntimeBootstrap.swift */,
+				4A200001000000000000000E /* ForgisCodexRuntimeSmoke.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -106,12 +114,19 @@
 				4A7000010000000000000001 /* Sources */,
 				4A3000010000000000000001 /* Frameworks */,
 				4A8000010000000000000001 /* Resources */,
+				4AD000010000000000000001 /* Embed Exact Codex Runtime */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
 			name = ForgisMac;
+			packageProductDependencies = (
+				4AC000010000000000000001 /* IntatisCore */,
+				4AC000010000000000000002 /* IntatisCodexRuntime */,
+				4AC000010000000000000003 /* IntatisProtocol */,
+				4AC000010000000000000004 /* IntatisProviders */,
+			);
 			productName = ForgisMac;
 			productReference = 4A2000010000000000000007 /* ForgisMac.app */;
 			productType = "com.apple.product-type.application";
@@ -140,6 +155,9 @@
 				Base,
 			);
 			mainGroup = 4A4000010000000000000001;
+			packageReferences = (
+				4AB000010000000000000001 /* XCLocalSwiftPackageReference "../Intatis" */,
+			);
 			productRefGroup = 4A4000010000000000000006 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -159,6 +177,28 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		4AD000010000000000000001 /* Embed Exact Codex Runtime */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Embed Exact Codex Runtime";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/zsh;
+			shellScript = "set -euo pipefail\nruntime_kit=\"${FORGIS_RUNTIME_KIT_ROOT:-$SRCROOT/../Intatis/.intatis/runtime-kit/0.66}\"\nfor architecture in ${ARCHS}; do\n  case \"$architecture\" in\n    arm64|x86_64) ;;\n    *) echo \"error: unsupported Codex runtime architecture: $architecture\" >&2; exit 1 ;;\n  esac\n  source_root=\"$runtime_kit/CodexRuntime/$architecture\"\n  test -d \"$source_root\"\n  /bin/zsh \"$SRCROOT/../Intatis/scripts/validate-codex-runtime.sh\" \"$source_root\" \"$architecture\" \"\" static\n  destination=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/CodexRuntime/$architecture\"\n  /bin/mkdir -p \"$destination\"\n  /usr/bin/ditto \"$source_root\" \"$destination\"\ndone\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		4A7000010000000000000001 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -170,11 +210,11 @@
 				4A1000010000000000000004 /* ForgisModels.swift in Sources */,
 				4A1000010000000000000005 /* ForgisComponents.swift in Sources */,
 				4A1000010000000000000006 /* ForgisViews.swift in Sources */,
-				4A1000010000000000000007 /* ForgisChatModels.swift in Sources */,
-				4A100001000000000000000A /* ForgisChatStorage.swift in Sources */,
-				4A1000010000000000000008 /* ForgisChatService.swift in Sources */,
-				4A100001000000000000000B /* ForgisChatSmoke.swift in Sources */,
-				4A1000010000000000000009 /* ForgisChatViews.swift in Sources */,
+				4A1000010000000000000007 /* ForgisRuntimeSession.swift in Sources */,
+				4A1000010000000000000008 /* ForgisRuntimeStorage.swift in Sources */,
+				4A1000010000000000000009 /* ForgisRuntimeViews.swift in Sources */,
+				4A100001000000000000000C /* ForgisCodexRuntimeBootstrap.swift in Sources */,
+				4A100001000000000000000F /* ForgisCodexRuntimeSmoke.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -231,7 +271,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -285,7 +325,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = macosx;
@@ -306,14 +346,14 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Forgis;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
-				INFOPLIST_KEY_LSMinimumSystemVersion = 13.0;
+				INFOPLIST_KEY_LSMinimumSystemVersion = 26.0;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Forgis";
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.Vita0818.ForgisMac;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -336,14 +376,14 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Forgis;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
-				INFOPLIST_KEY_LSMinimumSystemVersion = 13.0;
+				INFOPLIST_KEY_LSMinimumSystemVersion = 26.0;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Forgis";
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.Vita0818.ForgisMac;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -376,6 +416,36 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		4AB000010000000000000001 /* XCLocalSwiftPackageReference "../Intatis" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../Intatis;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		4AC000010000000000000001 /* IntatisCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4AB000010000000000000001 /* XCLocalSwiftPackageReference "../Intatis" */;
+			productName = IntatisCore;
+		};
+		4AC000010000000000000002 /* IntatisCodexRuntime */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4AB000010000000000000001 /* XCLocalSwiftPackageReference "../Intatis" */;
+			productName = IntatisCodexRuntime;
+		};
+		4AC000010000000000000003 /* IntatisProtocol */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4AB000010000000000000001 /* XCLocalSwiftPackageReference "../Intatis" */;
+			productName = IntatisProtocol;
+		};
+		4AC000010000000000000004 /* IntatisProviders */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4AB000010000000000000001 /* XCLocalSwiftPackageReference "../Intatis" */;
+			productName = IntatisProviders;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 4A6000010000000000000001 /* Project object */;
 }
